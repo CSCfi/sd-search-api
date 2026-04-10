@@ -1,0 +1,5 @@
+services:
+  # Allow connecting to the database outside the docker network.
+  postgres:
+    ports:
+      - "5434:5432"

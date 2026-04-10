@@ -1,0 +1,32 @@
+[project]
+name = "sd-search-api"
+version = "0.1.0"
+description = "Sensitive data search API."
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "fsspec>=2026.2.0",
+    "lxml>=6.0.2",
+    "pydantic>=2.12.5",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.19.1",
+    "pytest>=9.0.2",
+    "ruff>=0.15.6",
+    "tox>=4.49.1",
+    "types-lxml>=2026.2.16",
+]
+
+[project.optional-dependencies]
+
+tox = [
+    # mypy
+    "mypy>=1.19.1",
+    # pytest
+    "pytest==9.0.2",
+    "pytest-cov==7.0.0",
+    # ruff
+    "ruff>=0.15.6",
+]

@@ -361,7 +361,7 @@ def _get_string_attribute_value(elem: ElementTree, tag: str) -> str | None:
     return values[0]
 
 
-def _get_age_at_extraction_range(elem: ElementTree) -> tuple[int, int | None] | None:
+def _get_age_at_extraction_range(elem: ElementTree) -> tuple[int, int] | None:
     def _get_year(period: str) -> int | None:
         if period == "PT0S":
             return None
@@ -385,9 +385,9 @@ def _get_age_at_extraction_range(elem: ElementTree) -> tuple[int, int | None] | 
         return None
 
     start_year = _get_year(start_value[0])
-    length_year = _get_year(length_value[0])
+    length_year = _get_year(length_value[0]) or 0
 
     if not start_year:
         return None
 
-    return start_year, length_year
+    return start_year, start_year + length_year

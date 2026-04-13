@@ -47,7 +47,7 @@ def test_process_directories():
             specimen_type=BigPictureCodeAttributeValue(
                 code="4", scheme="Scheme4", meaning="Test4", scheme_version=""
             ),
-            age_at_extraction_range=(40, 1),
+            age_at_extraction_range=(40, 41),
         )
     ]
     assert fields.block_fields == [
@@ -84,7 +84,7 @@ def test_process_directories():
             specimen_type=BigPictureCodeAttributeValue(
                 code="4", scheme="Scheme4", meaning="Test4", scheme_version=""
             ),
-            age_at_extraction_range=(40, 1),
+            age_at_extraction_range=(40, 41),
         )
     ]
     assert fields.block_fields == [
@@ -159,10 +159,10 @@ def test_process_age_of_extraction_range():
     """
     elem = etree.fromstring(xml)
 
-    start, length = _get_age_at_extraction_range(elem)
+    start, end = _get_age_at_extraction_range(elem)
 
     assert start == 40
-    assert length == 1
+    assert end == 41
 
     # PT0S interval length
     xml = """
@@ -184,7 +184,7 @@ def test_process_age_of_extraction_range():
      """
     elem = etree.fromstring(xml)
 
-    start, length = _get_age_at_extraction_range(elem)
+    start, end = _get_age_at_extraction_range(elem)
 
     assert start == 40
-    assert length is None
+    assert end == 40

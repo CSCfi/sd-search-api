@@ -49,7 +49,7 @@ class BigPictureSampleSpecimenFields(BaseModel):
     anatomical_site: BigPictureCodeAttributeValue | None
     fixation_type: BigPictureCodeAttributeValue | None
     specimen_type: BigPictureCodeAttributeValue | None
-    age_at_extraction_range: tuple[int, int | None] | None
+    age_at_extraction_range: tuple[int, int] | None
 
 
 class BigPictureSampleBlockFields(BaseModel):

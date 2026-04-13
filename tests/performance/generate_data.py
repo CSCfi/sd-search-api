@@ -4,7 +4,9 @@ from typing import Sequence
 
 import psycopg2
 
-# uv run tests/performance/generate_data.py
+from search_api.database.respository.bigpicture import _load_bigpicture_fields
+
+# uv run python -m tests.performance.generate_data
 
 # Data for 100,000 images generated and loaded successfully in 14.66 seconds.
 # Data for 1,000,000 images generated and loaded successfully in 136.73 seconds.
@@ -104,7 +106,7 @@ def generate_and_load_data():
     generated_cnt = 0
 
     with psycopg2.connect(
-        host="localhost", dbname="sd_search", user="postgres", password="test"
+            host="localhost", dbname="sd_search", user="postgres", password="test"
     ) as conn:
         conn.autocommit = True
 
@@ -129,56 +131,43 @@ def generate_and_load_data():
 
                 dataset_id = f"dataset{((i - 1) % DATASET_CNT) + 1}"
 
-                description = random_description()
+                dataset_description = random_description()
 
-                species = random_codes(CODES["species"], SPECIES_MAX_CNT)
-                anatomical_site = random_codes(
+                species_codes = random_codes(CODES["species"], SPECIES_MAX_CNT)
+                anatomical_site_codes = random_codes(
                     CODES["anatomical_site"], ANATOMICAL_MAX_CNT
                 )
-                sex = random_codes(CODES["sex"], SEX_MAX_CNT)
-                fixation = random_codes(CODES["fixation_type"], FIXATION_MAX_CNT)
-                block_prep = random_codes(
+                sex_values = random_codes(CODES["sex"], SEX_MAX_CNT)
+                fixation_type_codes = random_codes(
+                    CODES["fixation_type"], FIXATION_MAX_CNT
+                )
+                block_preparation_codes = random_codes(
                     CODES["block_preparation"], BLOCK_PREP_MAX_CNT
                 )
-                specimen = random_codes(CODES["specimen_type"], SPECIMEN_MAX_CNT)
+                specimen_type_codes = random_codes(
+                    CODES["specimen_type"], SPECIMEN_MAX_CNT
+                )
 
                 age_at_extraction_cnt = random.randint(1, 5)
-                age_at_extraction = set()
+                age_at_extraction_values = set()
                 for _ in range(age_at_extraction_cnt):
                     start_age = random.randint(10, 80)
                     end_age = random.randint(start_age, 100)
                     for age in range(start_age, end_age + 1):
-                        age_at_extraction.add(age)
+                        age_at_extraction_values.add(age)
 
-                cur.execute(
-                    """
-                    INSERT INTO bp_sample (
-                        image_id,
-                        dataset_id,
-                        dataset_description,
-                        species,
-                        anatomical_site,
-                        sex,
-                        fixation_type,
-                        block_preparation,
-                        specimen_type,
-                        age_at_extraction
-
-                    )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
-                    """,
-                    (
-                        image_id,
-                        dataset_id,
-                        description,
-                        species,
-                        anatomical_site,
-                        sex,
-                        fixation,
-                        block_prep,
-                        specimen,
-                        list(age_at_extraction),
-                    ),
+                _load_bigpicture_fields(
+                    cur,
+                    image_id,
+                    dataset_id,
+                    dataset_description,
+                    species_codes,
+                    anatomical_site_codes,
+                    sex_values,
+                    fixation_type_codes,
+                    specimen_type_codes,
+                    block_preparation_codes,
+                    age_at_extraction_values,
                 )
 
         elapsed = time.time() - start_time

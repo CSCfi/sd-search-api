@@ -1,3 +1,5 @@
+"""Generate data for Bigpicture performance testing."""
+
 import random
 import time
 from typing import Sequence
@@ -6,7 +8,7 @@ import psycopg2
 
 from search_api.database.respository.bigpicture import _load_bigpicture_fields
 
-# uv run python -m tests.performance.generate_data
+# uv run python -m tests.performance.bigpicture.generate_data
 
 # Data for 100,000 images generated and loaded successfully in 14.66 seconds.
 # Data for 1,000,000 images generated and loaded successfully in 136.73 seconds.
@@ -106,7 +108,7 @@ def generate_and_load_data():
     generated_cnt = 0
 
     with psycopg2.connect(
-            host="localhost", dbname="sd_search", user="postgres", password="test"
+        host="localhost", dbname="sd_search", user="postgres", password="test"
     ) as conn:
         conn.autocommit = True
 

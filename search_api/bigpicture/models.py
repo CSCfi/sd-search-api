@@ -1,4 +1,4 @@
-"""BigPicture Pydantic models."""
+"""Bigpicture Pydantic models."""
 
 import re
 from typing import Literal
@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, field_validator
 
 
-class BigPictureCodeAttributeValue(BaseModel):
+class BigpictureCodeAttributeValue(BaseModel):
     # Example:
     # <CODE_ATTRIBUTE>
     #   <TAG>...</TAG>
@@ -31,8 +31,8 @@ _validate_sex_map = {
 }
 
 
-class BigPictureSampleBiologicalBeingFields(BaseModel):
-    species: BigPictureCodeAttributeValue | None
+class BigpictureSampleBiologicalBeingFields(BaseModel):
+    species: BigpictureCodeAttributeValue | None
     sex: Literal["Male", "Female", "Not-known", "Other"] | None
 
     @field_validator("sex", mode="before")
@@ -45,27 +45,27 @@ class BigPictureSampleBiologicalBeingFields(BaseModel):
         return _validate_sex_map.get(key)
 
 
-class BigPictureSampleSpecimenFields(BaseModel):
-    anatomical_site: BigPictureCodeAttributeValue | None
-    fixation_type: BigPictureCodeAttributeValue | None
-    specimen_type: BigPictureCodeAttributeValue | None
+class BigpictureSampleSpecimenFields(BaseModel):
+    anatomical_site: BigpictureCodeAttributeValue | None
+    fixation_type: BigpictureCodeAttributeValue | None
+    specimen_type: BigpictureCodeAttributeValue | None
     age_at_extraction_range: tuple[int, int] | None
 
 
-class BigPictureSampleBlockFields(BaseModel):
-    block_preparation: BigPictureCodeAttributeValue | None
+class BigpictureSampleBlockFields(BaseModel):
+    block_preparation: BigpictureCodeAttributeValue | None
 
 
-class BigPictureStainingFields(BaseModel):
+class BigpictureStainingFields(BaseModel):
     pass
 
 
-class BigPictureFields(BaseModel):
+class BigpictureFields(BaseModel):
     image_id: str
     dataset_id: str
     dataset_title: str | None
     dataset_description: str | None
-    biological_being_fields: list[BigPictureSampleBiologicalBeingFields]
-    specimen_fields: list[BigPictureSampleSpecimenFields]
-    block_fields: list[BigPictureSampleBlockFields]
-    staining_fields: list[BigPictureStainingFields]
+    biological_being_fields: list[BigpictureSampleBiologicalBeingFields]
+    specimen_fields: list[BigpictureSampleSpecimenFields]
+    block_fields: list[BigpictureSampleBlockFields]
+    staining_fields: list[BigpictureStainingFields]

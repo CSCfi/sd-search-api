@@ -1,7 +1,9 @@
-from search_api.bigpicture.models import BigPictureFields, BigPictureCodeAttributeValue
+"""Bigpicture database repository."""
+
+from search_api.bigpicture.models import BigpictureFields, BigpictureCodeAttributeValue
 
 
-def load_bigpicture_fields(cur, fields: BigPictureFields) -> None:
+def load_bigpicture_fields(cur, fields: BigpictureFields) -> None:
     """
     Load Bigpicture fields for one image.
 
@@ -10,7 +12,7 @@ def load_bigpicture_fields(cur, fields: BigPictureFields) -> None:
     """
 
     def _get_codes(
-        items: list[BigPictureCodeAttributeValue | None] | None,
+        items: list[BigpictureCodeAttributeValue | None] | None,
     ) -> list[str] | None:
         if not items:
             return None

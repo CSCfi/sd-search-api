@@ -3,10 +3,10 @@ from pathlib import Path
 from lxml import etree
 
 from search_api.bigpicture.models import (
-    BigPictureSampleBiologicalBeingFields,
-    BigPictureCodeAttributeValue,
-    BigPictureSampleSpecimenFields,
-    BigPictureSampleBlockFields,
+    BigpictureSampleBiologicalBeingFields,
+    BigpictureCodeAttributeValue,
+    BigpictureSampleSpecimenFields,
+    BigpictureSampleBlockFields,
 )
 from search_api.bigpicture.process import (
     process_directories,
@@ -29,30 +29,30 @@ def test_process_directories():
     assert fields.dataset_description == "test_description"
 
     assert fields.biological_being_fields == [
-        BigPictureSampleBiologicalBeingFields(
-            species=BigPictureCodeAttributeValue(
+        BigpictureSampleBiologicalBeingFields(
+            species=BigpictureCodeAttributeValue(
                 code="1", scheme="Scheme1", meaning="Test1", scheme_version=""
             ),
             sex="Male",
         )
     ]
     assert fields.specimen_fields == [
-        BigPictureSampleSpecimenFields(
-            anatomical_site=BigPictureCodeAttributeValue(
+        BigpictureSampleSpecimenFields(
+            anatomical_site=BigpictureCodeAttributeValue(
                 code="2", scheme="Scheme2", meaning="Test2", scheme_version=""
             ),
-            fixation_type=BigPictureCodeAttributeValue(
+            fixation_type=BigpictureCodeAttributeValue(
                 code="3", scheme="Scheme3", meaning="Test3", scheme_version=""
             ),
-            specimen_type=BigPictureCodeAttributeValue(
+            specimen_type=BigpictureCodeAttributeValue(
                 code="4", scheme="Scheme4", meaning="Test4", scheme_version=""
             ),
             age_at_extraction_range=(40, 41),
         )
     ]
     assert fields.block_fields == [
-        BigPictureSampleBlockFields(
-            block_preparation=BigPictureCodeAttributeValue(
+        BigpictureSampleBlockFields(
+            block_preparation=BigpictureCodeAttributeValue(
                 code="5", scheme="Scheme5", meaning="Test5", scheme_version=""
             ),
         )
@@ -66,30 +66,30 @@ def test_process_directories():
     assert fields.dataset_description == "test_description"
 
     assert fields.biological_being_fields == [
-        BigPictureSampleBiologicalBeingFields(
-            species=BigPictureCodeAttributeValue(
+        BigpictureSampleBiologicalBeingFields(
+            species=BigpictureCodeAttributeValue(
                 code="1", scheme="Scheme1", meaning="Test1", scheme_version=""
             ),
             sex="Male",
         )
     ]
     assert fields.specimen_fields == [
-        BigPictureSampleSpecimenFields(
-            anatomical_site=BigPictureCodeAttributeValue(
+        BigpictureSampleSpecimenFields(
+            anatomical_site=BigpictureCodeAttributeValue(
                 code="2", scheme="Scheme2", meaning="Test2", scheme_version=""
             ),
-            fixation_type=BigPictureCodeAttributeValue(
+            fixation_type=BigpictureCodeAttributeValue(
                 code="3", scheme="Scheme3", meaning="Test3", scheme_version=""
             ),
-            specimen_type=BigPictureCodeAttributeValue(
+            specimen_type=BigpictureCodeAttributeValue(
                 code="4", scheme="Scheme4", meaning="Test4", scheme_version=""
             ),
             age_at_extraction_range=(40, 41),
         )
     ]
     assert fields.block_fields == [
-        BigPictureSampleBlockFields(
-            block_preparation=BigPictureCodeAttributeValue(
+        BigpictureSampleBlockFields(
+            block_preparation=BigpictureCodeAttributeValue(
                 code="5", scheme="Scheme5", meaning="Test5", scheme_version=""
             ),
         )

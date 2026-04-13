@@ -3,7 +3,7 @@
 ## Description
 
 The SD Search API enables search across different datasets. At first,
-it will support BigPicture image search.
+it will support Bigpicture image search.
 
 ## Development
 

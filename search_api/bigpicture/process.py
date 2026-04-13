@@ -1,3 +1,5 @@
+"""Bigpicture data loading."""
+
 import re
 from pathlib import Path
 from typing import Iterator
@@ -6,12 +8,12 @@ from lxml.etree import _ElementTree as ElementTree  # noqa
 import fsspec  # type: ignore
 
 from search_api.bigpicture.models import (
-    BigPictureFields,
-    BigPictureCodeAttributeValue,
-    BigPictureSampleBiologicalBeingFields,
-    BigPictureSampleSpecimenFields,
-    BigPictureSampleBlockFields,
-    BigPictureStainingFields,
+    BigpictureFields,
+    BigpictureCodeAttributeValue,
+    BigpictureSampleBiologicalBeingFields,
+    BigpictureSampleSpecimenFields,
+    BigpictureSampleBlockFields,
+    BigpictureStainingFields,
 )
 from search_api.services.dir import list_directories
 from search_api.services.xml import parse_xml, validate_xml, get_xml_value
@@ -36,7 +38,7 @@ def process_directories(
     root: str = "/",
     fs: fsspec.AbstractFileSystem | None = None,
     use_aliases: bool = False,
-) -> Iterator[BigPictureFields]:
+) -> Iterator[BigpictureFields]:
     """
     Process directories under a root path.
 
@@ -142,36 +144,36 @@ def process_directories(
 
             # Map image ids to search fields.
             image_id_to_sample_biological_being_fields: dict[
-                str, list[BigPictureSampleBiologicalBeingFields]
+                str, list[BigpictureSampleBiologicalBeingFields]
             ] = {}
             image_id_to_sample_specimen_fields: dict[
-                str, list[BigPictureSampleSpecimenFields]
+                str, list[BigpictureSampleSpecimenFields]
             ] = {}
             image_id_to_sample_block_fields: dict[
-                str, list[BigPictureSampleBlockFields]
+                str, list[BigpictureSampleBlockFields]
             ] = {}
-            image_id_to_staining_fields: dict[str, list[BigPictureStainingFields]] = {}
+            image_id_to_staining_fields: dict[str, list[BigpictureStainingFields]] = {}
 
             def add_search_fields(
                 _image_id: str,
-                _fields: BigPictureSampleBiologicalBeingFields
-                | BigPictureSampleSpecimenFields
-                | BigPictureSampleBlockFields
-                | BigPictureStainingFields,
+                _fields: BigpictureSampleBiologicalBeingFields
+                | BigpictureSampleSpecimenFields
+                | BigpictureSampleBlockFields
+                | BigpictureStainingFields,
             ) -> None:
-                if isinstance(_fields, BigPictureSampleBiologicalBeingFields):
+                if isinstance(_fields, BigpictureSampleBiologicalBeingFields):
                     image_id_to_sample_biological_being_fields.setdefault(
                         image_id, []
                     ).append(_fields)
-                elif isinstance(_fields, BigPictureSampleSpecimenFields):
+                elif isinstance(_fields, BigpictureSampleSpecimenFields):
                     image_id_to_sample_specimen_fields.setdefault(image_id, []).append(
                         _fields
                     )
-                elif isinstance(_fields, BigPictureSampleBlockFields):
+                elif isinstance(_fields, BigpictureSampleBlockFields):
                     image_id_to_sample_block_fields.setdefault(image_id, []).append(
                         _fields
                     )
-                elif isinstance(_fields, BigPictureStainingFields):
+                elif isinstance(_fields, BigpictureStainingFields):
                     image_id_to_staining_fields.setdefault(image_id, []).append(_fields)
                 else:
                     raise ValueError("Unsupported search fields type")
@@ -260,7 +262,7 @@ def process_directories(
                     ):
                         add_search_fields(
                             image_id,
-                            BigPictureSampleBiologicalBeingFields(
+                            BigpictureSampleBiologicalBeingFields(
                                 species=_get_code_attribute_value(
                                     xml, "animal_species"
                                 ),
@@ -275,7 +277,7 @@ def process_directories(
                     ):
                         add_search_fields(
                             image_id,
-                            BigPictureSampleSpecimenFields(
+                            BigpictureSampleSpecimenFields(
                                 anatomical_site=_get_code_attribute_value(
                                     xml, "anatomical_site"
                                 ),
@@ -296,7 +298,7 @@ def process_directories(
                     for image_id in get_image_ids_for_block_id(xml.get(id_attribute)):
                         add_search_fields(
                             image_id,
-                            BigPictureSampleBlockFields(
+                            BigpictureSampleBlockFields(
                                 block_preparation=_get_code_attribute_value(
                                     xml, "block_preparation"
                                 )
@@ -318,7 +320,7 @@ def process_directories(
                 #
 
                 for image_id in image_ids:
-                    yield BigPictureFields(
+                    yield BigpictureFields(
                         image_id=image_id,
                         dataset_id=dataset_id,
                         dataset_title=dataset_title,
@@ -339,13 +341,13 @@ def process_directories(
 
 def _get_code_attribute_value(
     elem: ElementTree, tag: str
-) -> BigPictureCodeAttributeValue | None:
+) -> BigpictureCodeAttributeValue | None:
     values = elem.xpath(f"//ATTRIBUTES/CODE_ATTRIBUTE[TAG='{tag}']/VALUE")
     if not values:
         return None
     value = values[0]
 
-    return BigPictureCodeAttributeValue(
+    return BigpictureCodeAttributeValue(
         code=value.findtext("CODE"),
         scheme=value.findtext("SCHEME"),
         meaning=value.findtext("MEANING"),

@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from typing import Iterator
 from lxml.etree import _ElementTree as ElementTree  # noqa
@@ -263,7 +264,7 @@ def process_directories(
                                 species=_get_code_attribute_value(
                                     xml, "animal_species"
                                 ),
-                                # TODO(improve): support 'sex'
+                                sex=_get_string_attribute_value(xml, "sex"),  # type: ignore
                             ),
                         )
 
@@ -283,6 +284,9 @@ def process_directories(
                                 ),
                                 specimen_type=_get_code_attribute_value(
                                     xml, "specimen_type"
+                                ),
+                                age_at_extraction_range=_get_age_at_extraction_range(
+                                    xml
                                 ),
                             ),
                         )
@@ -347,3 +351,43 @@ def _get_code_attribute_value(
         meaning=value.findtext("MEANING"),
         scheme_version=value.findtext("SCHEME_VERSION"),
     )
+
+
+def _get_string_attribute_value(elem: ElementTree, tag: str) -> str | None:
+    values = elem.xpath(f"//ATTRIBUTES/STRING_ATTRIBUTE[TAG='{tag}']/VALUE/text()")
+    if not values:
+        return None
+
+    return values[0]
+
+
+def _get_age_at_extraction_range(elem: ElementTree) -> tuple[int, int | None] | None:
+    def _get_year(period: str) -> int | None:
+        if period == "PT0S":
+            return None
+        match = re.match(r"P(?P<years>\d+)Y", period)
+        return int(match.group("years")) if match else None
+
+    nodes = elem.xpath(
+        "//ATTRIBUTES/SET_ATTRIBUTE[TAG/text()='age_at_extraction']/VALUE"
+    )
+    if not nodes:
+        return None
+
+    node = nodes[0]
+    start_value = node.xpath(
+        "STRING_ATTRIBUTE[TAG/text()='interval_start']/VALUE/text()"
+    )
+    length_value = node.xpath(
+        "STRING_ATTRIBUTE[TAG/text()='interval_length']/VALUE/text()"
+    )
+    if not start_value or not length_value:
+        return None
+
+    start_year = _get_year(start_value[0])
+    length_year = _get_year(length_value[0])
+
+    if not start_year:
+        return None
+
+    return start_year, length_year

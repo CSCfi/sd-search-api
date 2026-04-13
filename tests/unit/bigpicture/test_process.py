@@ -8,7 +8,12 @@ from search_api.bigpicture.models import (
     BigPictureSampleSpecimenFields,
     BigPictureSampleBlockFields,
 )
-from search_api.bigpicture.process import process_directories, _get_code_attribute_value
+from search_api.bigpicture.process import (
+    process_directories,
+    _get_code_attribute_value,
+    _get_string_attribute_value,
+    _get_age_at_extraction_range,
+)
 
 TEST_DIR = Path(__file__).resolve().parent.parent.parent / "test_files" / "bigpicture"
 
@@ -27,7 +32,8 @@ def test_process_directories():
         BigPictureSampleBiologicalBeingFields(
             species=BigPictureCodeAttributeValue(
                 code="1", scheme="Scheme1", meaning="Test1", scheme_version=""
-            )
+            ),
+            sex="Male",
         )
     ]
     assert fields.specimen_fields == [
@@ -41,6 +47,7 @@ def test_process_directories():
             specimen_type=BigPictureCodeAttributeValue(
                 code="4", scheme="Scheme4", meaning="Test4", scheme_version=""
             ),
+            age_at_extraction_range=(40, 1),
         )
     ]
     assert fields.block_fields == [
@@ -62,7 +69,8 @@ def test_process_directories():
         BigPictureSampleBiologicalBeingFields(
             species=BigPictureCodeAttributeValue(
                 code="1", scheme="Scheme1", meaning="Test1", scheme_version=""
-            )
+            ),
+            sex="Male",
         )
     ]
     assert fields.specimen_fields == [
@@ -76,6 +84,7 @@ def test_process_directories():
             specimen_type=BigPictureCodeAttributeValue(
                 code="4", scheme="Scheme4", meaning="Test4", scheme_version=""
             ),
+            age_at_extraction_range=(40, 1),
         )
     ]
     assert fields.block_fields == [
@@ -112,3 +121,70 @@ def test_process_code_attribute():
 
     assert attribute.code == "1"
     assert attribute.meaning == "Cat"
+
+
+def test_process_string_attribute():
+    xml = """
+    <ATTRIBUTES>
+        <STRING_ATTRIBUTE>
+            <TAG>sex</TAG>
+            <VALUE>Male</VALUE>
+        </STRING_ATTRIBUTE>
+    </ATTRIBUTES>
+    """
+    elem = etree.fromstring(xml)
+
+    value = _get_string_attribute_value(elem, "sex")
+
+    assert value == "Male"
+
+
+def test_process_age_of_extraction_range():
+    xml = """
+    <ATTRIBUTES>
+        <SET_ATTRIBUTE>
+            <TAG>age_at_extraction</TAG>
+            <VALUE>
+                <STRING_ATTRIBUTE>
+                <TAG>interval_start</TAG>
+                <VALUE>P40Y</VALUE>
+                </STRING_ATTRIBUTE>
+                <STRING_ATTRIBUTE>
+                <TAG>interval_length</TAG>
+                <VALUE>P1Y</VALUE>
+                </STRING_ATTRIBUTE>
+            </VALUE>
+        </SET_ATTRIBUTE>
+    </ATTRIBUTES>
+    """
+    elem = etree.fromstring(xml)
+
+    start, length = _get_age_at_extraction_range(elem)
+
+    assert start == 40
+    assert length == 1
+
+    # PT0S interval length
+    xml = """
+     <ATTRIBUTES>
+         <SET_ATTRIBUTE>
+             <TAG>age_at_extraction</TAG>
+             <VALUE>
+                 <STRING_ATTRIBUTE>
+                 <TAG>interval_start</TAG>
+                 <VALUE>P40Y</VALUE>
+                 </STRING_ATTRIBUTE>
+                 <STRING_ATTRIBUTE>
+                 <TAG>interval_length</TAG>
+                 <VALUE>PT0S</VALUE>
+                 </STRING_ATTRIBUTE>
+             </VALUE>
+         </SET_ATTRIBUTE>
+     </ATTRIBUTES>
+     """
+    elem = etree.fromstring(xml)
+
+    start, length = _get_age_at_extraction_range(elem)
+
+    assert start == 40
+    assert length is None

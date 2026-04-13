@@ -1,21 +1,25 @@
 import random
+import time
 from typing import Sequence
 
 import psycopg2
 
-# -----------------------------
-# CONFIGURATION
-# -----------------------------
+# uv run tests/performance/generate_data.py
 
-IMAGE_CNT = 100000
+# Data for 100,000 images generated and loaded successfully in 14.66 seconds.
+# Data for 1,000,000 images generated and loaded successfully in 136.73 seconds.
+
+# Maximum time to generate data in seconds.
+MAX_TIME = 600
+
+# Number of images to generate.
+IMAGE_CNT = 1000000
+
+# Number of datasets to generate.
 DATASET_CNT = 5000
 
-# Rows in bp_sample_extraction table.
-EXTRACTION_ROW_CNT = 15000
-
-# Number of distinct values in TEXT[] columns (GIN indexed).
-# Multiple occurrences of the same values should be
-# de‑duplicated during data loading.
+# Number of distinct values in category and code array columns (GIN indexed).
+# Multiple occurrences of the same values should be de‑duplicated during data loading.
 SPECIES_DISTINCT_VALUE_CNT = 10
 ANATOMICAL_DISTINCT_VALUE_CNT = 100
 SEX_DISTINCT_VALUE_CNT = 2
@@ -23,7 +27,7 @@ FIXATION_DISTINCT_VALUE_CNT = 25
 BLOCK_DISTINCT_VALUE_CNT = 25
 SPECIMEN_DISTINCT_VALUE_CNT = 25
 
-# Maximum number of values in TEXT[] columns (GIN indexed).
+# Maximum number of values category and code array columns (GIN indexed).
 SPECIES_MAX_CNT = 3
 ANATOMICAL_MAX_CNT = 3
 SEX_MAX_CNT = 2
@@ -61,16 +65,24 @@ DESCRIPTIONS = [
     "The samples exhibit variability in contrast, brightness, and noise levels.",
     "Ground truth labels were curated through expert review processes.",
     "The dataset enables end-to-end evaluation of computer vision pipelines.",
-    "Data distribution reflects realistic experimental variability encountered in practice."
+    "Data distribution reflects realistic experimental variability encountered in practice.",
 ]
 
 CODES = {
     "species": [f"species{i}" for i in range(1, SPECIES_DISTINCT_VALUE_CNT + 1)],
-    "anatomical_site": [f"anatomical_site{i}" for i in range(1, ANATOMICAL_DISTINCT_VALUE_CNT + 1)],
+    "anatomical_site": [
+        f"anatomical_site{i}" for i in range(1, ANATOMICAL_DISTINCT_VALUE_CNT + 1)
+    ],
     "sex": [f"sex{i}" for i in range(1, SEX_DISTINCT_VALUE_CNT + 1)],
-    "fixation_type": [f"fixation_type{i}" for i in range(1, FIXATION_DISTINCT_VALUE_CNT + 1)],
-    "block_preparation": [f"block_preparation{i}" for i in range(1, BLOCK_DISTINCT_VALUE_CNT + 1)],
-    "specimen_type": [f"specimen_type{i}" for i in range(1, SPECIMEN_DISTINCT_VALUE_CNT + 1)]
+    "fixation_type": [
+        f"fixation_type{i}" for i in range(1, FIXATION_DISTINCT_VALUE_CNT + 1)
+    ],
+    "block_preparation": [
+        f"block_preparation{i}" for i in range(1, BLOCK_DISTINCT_VALUE_CNT + 1)
+    ],
+    "specimen_type": [
+        f"specimen_type{i}" for i in range(1, SPECIMEN_DISTINCT_VALUE_CNT + 1)
+    ],
 }
 
 
@@ -88,28 +100,31 @@ def random_description() -> str:
 
 
 def generate_and_load_data():
+    start_time = time.time()
+    generated_cnt = 0
+
     with psycopg2.connect(
-            host="localhost",
-            dbname="sd_search",
-            user="postgres",
-            password="test"
+        host="localhost", dbname="sd_search", user="postgres", password="test"
     ) as conn:
         conn.autocommit = True
 
         with conn.cursor() as cur:
-
             # Truncate tables.
             #
 
             cur.execute("""
                 TRUNCATE TABLE bp_sample;
-                TRUNCATE TABLE bp_sample_extraction;
             """)
 
             # Insert into bp_sample table.
             #
 
             for i in range(1, IMAGE_CNT + 1):
+                if time.time() - start_time > MAX_TIME:
+                    print("Time limited exceeded.")
+                    break
+                generated_cnt += 1
+
                 image_id = f"image{i}"
 
                 dataset_id = f"dataset{((i - 1) % DATASET_CNT) + 1}"
@@ -117,13 +132,26 @@ def generate_and_load_data():
                 description = random_description()
 
                 species = random_codes(CODES["species"], SPECIES_MAX_CNT)
-                anatomical_site = random_codes(CODES["anatomical_site"], ANATOMICAL_MAX_CNT)
+                anatomical_site = random_codes(
+                    CODES["anatomical_site"], ANATOMICAL_MAX_CNT
+                )
                 sex = random_codes(CODES["sex"], SEX_MAX_CNT)
                 fixation = random_codes(CODES["fixation_type"], FIXATION_MAX_CNT)
-                block_prep = random_codes(CODES["block_preparation"], BLOCK_PREP_MAX_CNT)
+                block_prep = random_codes(
+                    CODES["block_preparation"], BLOCK_PREP_MAX_CNT
+                )
                 specimen = random_codes(CODES["specimen_type"], SPECIMEN_MAX_CNT)
 
-                cur.execute("""
+                age_at_extraction_cnt = random.randint(1, 5)
+                age_at_extraction = set()
+                for _ in range(age_at_extraction_cnt):
+                    start_age = random.randint(10, 80)
+                    end_age = random.randint(start_age, 100)
+                    for age in range(start_age, end_age + 1):
+                        age_at_extraction.add(age)
+
+                cur.execute(
+                    """
                     INSERT INTO bp_sample (
                         image_id,
                         dataset_id,
@@ -133,42 +161,30 @@ def generate_and_load_data():
                         sex,
                         fixation_type,
                         block_preparation,
-                        specimen_type
-                    )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s);
-                    """,
-                            (
-                                image_id,
-                                dataset_id,
-                                description,
-                                species,
-                                anatomical_site,
-                                sex,
-                                fixation,
-                                block_prep,
-                                specimen
-                            )
-                            )
-
-            # Insert into bp_sample_extraction table.
-            #
-
-            for _ in range(EXTRACTION_ROW_CNT):
-                image_num = random.randint(1, IMAGE_CNT)
-                image_id = f"image{image_num}"
-
-                # age list: random 1..5 values between 1 and 100
-                age_count = random.randint(1, 5)
-                ages = [random.randint(1, 100) for _ in range(age_count)]
-
-                cur.execute("""
-                    INSERT INTO bp_sample_extraction (
-                        image_id,
+                        specimen_type,
                         age_at_extraction
-                    ) VALUES (%s, %s);
-                """, (image_id, ages))
 
-        print("Test data generated and loaded successfully.")
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                    """,
+                    (
+                        image_id,
+                        dataset_id,
+                        description,
+                        species,
+                        anatomical_site,
+                        sex,
+                        fixation,
+                        block_prep,
+                        specimen,
+                        list(age_at_extraction),
+                    ),
+                )
+
+        elapsed = time.time() - start_time
+        print(
+            f"Data for {i} images generated and loaded successfully in {elapsed:.2f} seconds."
+        )
 
 
 def main():

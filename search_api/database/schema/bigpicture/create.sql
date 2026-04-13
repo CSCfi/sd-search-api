@@ -7,11 +7,7 @@ CREATE TABLE bp_sample (
     sex TEXT[],                              -- array of string codes
     fixation_type TEXT[],                    -- array of string codes
     block_preparation TEXT[],                -- array of string codes
-    specimen_type TEXT[]                     -- array of string codes
-);
-
-CREATE TABLE bp_sample_extraction (
-    image_id TEXT,
+    specimen_type TEXT[],                    -- array of string codes
     age_at_extraction INT[]                  -- array of ints
 );
 
@@ -26,7 +22,7 @@ CREATE INDEX idx_bp_sample_sex ON bp_sample USING GIN (sex);
 CREATE INDEX idx_bp_sample_fixation_type ON bp_sample USING GIN (fixation_type);
 CREATE INDEX idx_bp_sample_block_preparation ON bp_sample USING GIN (block_preparation);
 CREATE INDEX idx_bp_sample_specimen_type ON bp_sample USING GIN (specimen_type);
-CREATE INDEX idx_bp_sample_age_at_extraction ON bp_sample_extraction USING GIN (age_at_extraction);
+CREATE INDEX idx_bp_sample_age_at_extraction ON bp_sample USING GIN (age_at_extraction);
 
 ----------------------------------------------------
 -- Search examples
@@ -35,32 +31,39 @@ CREATE INDEX idx_bp_sample_age_at_extraction ON bp_sample_extraction USING GIN (
 -- GIN indexed array string (code) column search examples
 
 -- contains code
-SELECT * FROM bp_sample WHERE species @> ARRAY['code'];
+-- < 2 seconds for 1 million images
+SELECT * FROM bp_sample WHERE species @> ARRAY['species1'];
 
 -- GIN indexed text column search examples
 
 -- exact match (one word)
-SELECT * FROM bp_sample WHERE to_tsvector('english', dataset_description) @@ to_tsquery('english','melanoma');
+-- < 1 second for 1 million images
+SELECT * FROM bp_sample WHERE to_tsvector('english', dataset_description) @@ to_tsquery('english','microscopy');
 
 -- exact match (two words anywhere)
-SELECT * FROM bp_sample WHERE to_tsvector('english', dataset_description) @@ to_tsquery('english','liver & tumor');
+-- < 1 second for 1 million images
+SELECT * FROM bp_sample WHERE to_tsvector('english', dataset_description) @@ to_tsquery('english','microscopy & classification');
 
 -- exact match (two words next to each other)
-SELECT * FROM bp_sample WHERE to_tsvector('english', dataset_description) @@ to_tsquery('english','breast <-> cancer'); -- proximity search
+-- < 1 second for 1 million images
+SELECT * FROM bp_sample WHERE to_tsvector('english', dataset_description) @@ to_tsquery('english','microscopy <-> images');
 
 -- ranked full‑text search
+-- < 1 second for 1 million images
 SELECT *,
-       ts_rank(to_tsvector('english', dataset_description),
-               websearch_to_tsquery('english', 'melanoma glaucoma')) AS rank
+           ts_rank(to_tsvector('english', dataset_description),
+               websearch_to_tsquery('english', 'microscopy')) AS rank
 FROM bp_sample
 WHERE to_tsvector('english', dataset_description)
-      @@ websearch_to_tsquery('english', 'melanoma glaucoma')
+      @@ websearch_to_tsquery('english', 'microscopy')
 ORDER BY rank DESC
 
 -- GIN indexed array int column (age) search examples
 
 -- overlaps with range
-SELECT * FROM bp_sample_extraction WHERE age_at_extraction && ARRAY[10,20];
+-- ~2 seconds for 1 million images
+SELECT * FROM bp_sample WHERE age_at_extraction && ARRAY[10,20];
 
 -- contains value
-SELECT * FROM bp_sample_extraction WHERE age_at_extraction @> ARRAY[12];
+-- < 2 seconds for 1 million images
+SELECT * FROM bp_sample WHERE age_at_extraction @> ARRAY[12];

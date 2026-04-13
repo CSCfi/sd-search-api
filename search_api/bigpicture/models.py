@@ -1,6 +1,9 @@
 """BigPicture Pydantic models."""
 
-from pydantic import BaseModel
+import re
+from typing import Literal
+
+from pydantic import BaseModel, field_validator
 
 
 class BigPictureCodeAttributeValue(BaseModel):
@@ -20,16 +23,33 @@ class BigPictureCodeAttributeValue(BaseModel):
     scheme_version: str | None = None
 
 
+_validate_sex_map = {
+    "male": "Male",
+    "female": "Female",
+    "notknown": "Not-known",
+    "other": "Other",
+}
+
+
 class BigPictureSampleBiologicalBeingFields(BaseModel):
     species: BigPictureCodeAttributeValue | None
-    # TODO(improve): support sex
+    sex: Literal["Male", "Female", "Not-known", "Other"] | None
+
+    @field_validator("sex", mode="before")
+    @classmethod
+    def validate_sex(cls, v) -> str | None:
+        if not isinstance(v, str):
+            return None
+
+        key = re.sub(r"[^a-zA-Z]+", "", v).lower()
+        return _validate_sex_map.get(key)
 
 
 class BigPictureSampleSpecimenFields(BaseModel):
     anatomical_site: BigPictureCodeAttributeValue | None
-    # TODO(improve): support age_at_extraction
     fixation_type: BigPictureCodeAttributeValue | None
     specimen_type: BigPictureCodeAttributeValue | None
+    age_at_extraction_range: tuple[int, int | None] | None
 
 
 class BigPictureSampleBlockFields(BaseModel):

@@ -42,6 +42,10 @@
                     <SCHEME_VERSION/>
                 </VALUE>
             </CODE_ATTRIBUTE>
+            <STRING_ATTRIBUTE>
+                <TAG>sex</TAG>
+                <VALUE>Male</VALUE>
+            </STRING_ATTRIBUTE>
         </ATTRIBUTES>
     </CASE>
     <SPECIMEN alias="1" accession="specimen_1">
@@ -52,6 +56,19 @@
                 <TAG>test</TAG>
                 <VALUE>test</VALUE>
             </STRING_ATTRIBUTE>
+            <SET_ATTRIBUTE>
+                <TAG>age_at_extraction</TAG>
+                <VALUE>
+                    <STRING_ATTRIBUTE>
+                    <TAG>interval_start</TAG>
+                    <VALUE>P40Y</VALUE>
+                    </STRING_ATTRIBUTE>
+                    <STRING_ATTRIBUTE>
+                    <TAG>interval_length</TAG>
+                    <VALUE>P1Y</VALUE>
+                    </STRING_ATTRIBUTE>
+                </VALUE>
+            </SET_ATTRIBUTE>
         </ATTRIBUTES>
     </SPECIMEN>
     <BLOCK alias="1" accession="block_1">

@@ -95,7 +95,7 @@ def _load_bigpicture_fields(
 
     cur.execute(
         """
-        INSERT INTO bp_sample (
+        INSERT INTO bp_image (
             image_id,
             dataset_id,
             dataset_description,

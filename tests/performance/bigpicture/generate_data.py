@@ -12,12 +12,13 @@ from search_api.database.respository.bigpicture import _load_bigpicture_fields
 
 # Data for 100,000 images generated and loaded successfully in 14.66 seconds.
 # Data for 1,000,000 images generated and loaded successfully in 136.73 seconds.
+# Data for 10,000,000 images generated and loaded successfully in 1364.68 seconds.
 
 # Maximum time to generate data in seconds.
-MAX_TIME = 600
+MAX_TIME = 60 * 60 * 2
 
 # Number of images to generate.
-IMAGE_CNT = 1000000
+IMAGE_CNT = 10000000
 
 # Number of datasets to generate.
 DATASET_CNT = 5000
@@ -117,10 +118,10 @@ def generate_and_load_data():
             #
 
             cur.execute("""
-                TRUNCATE TABLE bp_sample;
+                TRUNCATE TABLE bp_image;
             """)
 
-            # Insert into bp_sample table.
+            # Insert into bp_image table.
             #
 
             for i in range(1, IMAGE_CNT + 1):

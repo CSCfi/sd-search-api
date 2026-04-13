@@ -2,7 +2,6 @@
 
 import random
 import time
-from typing import Sequence
 
 import psycopg2
 
@@ -18,27 +17,80 @@ from search_api.database.respository.bigpicture import _load_bigpicture_fields
 MAX_TIME = 60 * 60 * 2
 
 # Number of images to generate.
-IMAGE_CNT = 10000000
+IMAGE_CNT = 1000
 
 # Number of datasets to generate.
 DATASET_CNT = 5000
 
-# Number of distinct values in category and code array columns (GIN indexed).
-# Multiple occurrences of the same values should be de‑duplicated during data loading.
-SPECIES_DISTINCT_VALUE_CNT = 10
-ANATOMICAL_DISTINCT_VALUE_CNT = 100
-SEX_DISTINCT_VALUE_CNT = 2
-FIXATION_DISTINCT_VALUE_CNT = 25
-BLOCK_DISTINCT_VALUE_CNT = 25
-SPECIMEN_DISTINCT_VALUE_CNT = 25
-
-# Maximum number of values category and code array columns (GIN indexed).
-SPECIES_MAX_CNT = 3
-ANATOMICAL_MAX_CNT = 3
+# Maximum number of codes and values.
 SEX_MAX_CNT = 2
-FIXATION_MAX_CNT = 3
-BLOCK_PREP_MAX_CNT = 3
-SPECIMEN_MAX_CNT = 3
+CODE_MAX_CNT = 3
+AGE_AT_EXTRACTION_MAX_CNT = 2
+
+# TODO(improve): If there are too many non-selective values then index may not be used
+
+SELECTIVITY = [
+    0.00001,  # outstanding
+    0.0001,  # excellent
+    0.001,  # high
+    0.01,  # 1
+    0.05,  # 5
+    0.10,  # 10
+    0.83889,  # poor
+]
+
+
+def _generate_sex_values() -> list[str]:
+    """Generate deduplicated sex values sampled uniformly (poor selectivity)."""
+    values = ["Male", "Female", "Not-known", "Other"]
+    return list(set(random.choices(values, k=random.randint(0, SEX_MAX_CNT))))
+
+
+def _generate_code_values() -> list[str]:
+    """Generate deduplicated code values with different selectivity levels."""
+
+    values = [
+        "outstanding",
+        "excellent",
+        "high",
+        "1",
+        "5",
+        "10",
+        "poor",
+    ]
+
+    return list(
+        set(
+            random.choices(
+                values, weights=SELECTIVITY, k=random.randint(0, CODE_MAX_CNT)
+            )
+        )
+    )
+
+
+def _generate_age_at_extraction_ranges() -> list[tuple[int, int]]:
+    """Generate deduplicated age ranges with different selectivity levels."""
+
+    ranges = [
+        (1, 2),  # outstanding
+        (3, 4),  # excellent
+        (5, 6),  # high
+        (7, 8),  # 1%
+        (9, 10),  # 5%
+        (11, 12),  # 10%
+        (13, 100),  # poor
+    ]
+
+    return list(
+        set(
+            random.choices(
+                ranges,
+                weights=SELECTIVITY,
+                k=random.randint(0, AGE_AT_EXTRACTION_MAX_CNT),
+            )
+        )
+    )
+
 
 DESCRIPTIONS = [
     "This dataset contains a variety of biological microscopy images used for testing classification models.",
@@ -73,32 +125,8 @@ DESCRIPTIONS = [
     "Data distribution reflects realistic experimental variability encountered in practice.",
 ]
 
-CODES = {
-    "species": [f"species{i}" for i in range(1, SPECIES_DISTINCT_VALUE_CNT + 1)],
-    "anatomical_site": [
-        f"anatomical_site{i}" for i in range(1, ANATOMICAL_DISTINCT_VALUE_CNT + 1)
-    ],
-    "sex": [f"sex{i}" for i in range(1, SEX_DISTINCT_VALUE_CNT + 1)],
-    "fixation_type": [
-        f"fixation_type{i}" for i in range(1, FIXATION_DISTINCT_VALUE_CNT + 1)
-    ],
-    "block_preparation": [
-        f"block_preparation{i}" for i in range(1, BLOCK_DISTINCT_VALUE_CNT + 1)
-    ],
-    "specimen_type": [
-        f"specimen_type{i}" for i in range(1, SPECIMEN_DISTINCT_VALUE_CNT + 1)
-    ],
-}
 
-
-def random_codes(values: Sequence[str], max_items: int) -> list[str]:
-    """Return a list of random codes with 0..max_items elements."""
-
-    size = random.randint(0, min(max_items, len(values)))
-    return random.sample(values, size)
-
-
-def random_description() -> str:
+def _generate_description() -> str:
     """Return a random description."""
 
     return random.choice(DESCRIPTIONS)
@@ -109,7 +137,7 @@ def generate_and_load_data():
     generated_cnt = 0
 
     with psycopg2.connect(
-        host="localhost", dbname="sd_search", user="postgres", password="test"
+            host="localhost", dbname="sd_search", user="postgres", password="test"
     ) as conn:
         conn.autocommit = True
 
@@ -119,9 +147,10 @@ def generate_and_load_data():
 
             cur.execute("""
                 TRUNCATE TABLE bp_image;
+                TRUNCATE TABLE bp_image_extraction;
             """)
 
-            # Insert into bp_image table.
+            # Load data.
             #
 
             for i in range(1, IMAGE_CNT + 1):
@@ -134,30 +163,16 @@ def generate_and_load_data():
 
                 dataset_id = f"dataset{((i - 1) % DATASET_CNT) + 1}"
 
-                dataset_description = random_description()
+                dataset_description = _generate_description()
 
-                species_codes = random_codes(CODES["species"], SPECIES_MAX_CNT)
-                anatomical_site_codes = random_codes(
-                    CODES["anatomical_site"], ANATOMICAL_MAX_CNT
-                )
-                sex_values = random_codes(CODES["sex"], SEX_MAX_CNT)
-                fixation_type_codes = random_codes(
-                    CODES["fixation_type"], FIXATION_MAX_CNT
-                )
-                block_preparation_codes = random_codes(
-                    CODES["block_preparation"], BLOCK_PREP_MAX_CNT
-                )
-                specimen_type_codes = random_codes(
-                    CODES["specimen_type"], SPECIMEN_MAX_CNT
-                )
+                sex_values = _generate_sex_values()
 
-                age_at_extraction_cnt = random.randint(1, 5)
-                age_at_extraction_values = set()
-                for _ in range(age_at_extraction_cnt):
-                    start_age = random.randint(10, 80)
-                    end_age = random.randint(start_age, 100)
-                    for age in range(start_age, end_age + 1):
-                        age_at_extraction_values.add(age)
+                species_codes = _generate_code_values()
+                anatomical_site_codes = _generate_code_values()
+                fixation_type_codes = _generate_code_values()
+                block_preparation_codes = _generate_code_values()
+                specimen_type_codes = _generate_code_values()
+                age_at_extraction_ranges = _generate_age_at_extraction_ranges()
 
                 _load_bigpicture_fields(
                     cur,
@@ -170,12 +185,12 @@ def generate_and_load_data():
                     fixation_type_codes,
                     specimen_type_codes,
                     block_preparation_codes,
-                    age_at_extraction_values,
+                    age_at_extraction_ranges,
                 )
 
         elapsed = time.time() - start_time
         print(
-            f"Data for {i} images generated and loaded successfully in {elapsed:.2f} seconds."
+            f"Data for {generated_cnt} images generated and loaded successfully in {elapsed:.2f} seconds."
         )
 
 

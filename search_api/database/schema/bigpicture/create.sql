@@ -7,22 +7,37 @@ CREATE TABLE bp_image (
     sex TEXT[],                              -- array of string codes
     fixation_type TEXT[],                    -- array of string codes
     block_preparation TEXT[],                -- array of string codes
-    specimen_type TEXT[],                    -- array of string codes
-    age_at_extraction INT[]                  -- array of ints
+    specimen_type TEXT[]                     -- array of string codes
+);
+
+CREATE TABLE bp_image_extraction (
+    image_id TEXT,
+    age_at_extraction int4range              -- int range
 );
 
 ----------------------------------------------------
 -- Indexes
 ----------------------------------------------------
 
-CREATE INDEX idx_bp_sample_dataset_description ON bp_image USING GIN (to_tsvector('english', dataset_description));
-CREATE INDEX idx_bp_sample_species ON bp_image USING GIN (species);
-CREATE INDEX idx_bp_sample_anatomical_site ON bp_image USING GIN (anatomical_site);
-CREATE INDEX idx_bp_sample_sex ON bp_image USING GIN (sex);
-CREATE INDEX idx_bp_sample_fixation_type ON bp_image USING GIN (fixation_type);
-CREATE INDEX idx_bp_sample_block_preparation ON bp_image USING GIN (block_preparation);
-CREATE INDEX idx_bp_sample_specimen_type ON bp_image USING GIN (specimen_type);
-CREATE INDEX idx_bp_sample_age_at_extraction ON bp_image USING GIN (age_at_extraction);
+CREATE INDEX idx_bp_image_dataset_description ON bp_image USING GIN (to_tsvector('english', dataset_description));
+CREATE INDEX idx_bp_image_species ON bp_image USING GIN (species);
+CREATE INDEX idx_bp_image_anatomical_site ON bp_image USING GIN (anatomical_site);
+CREATE INDEX idx_bp_image_sex ON bp_image USING GIN (sex);
+CREATE INDEX idx_bp_image_fixation_type ON bp_image USING GIN (fixation_type);
+CREATE INDEX idx_bp_image_block_preparation ON bp_image USING GIN (block_preparation);
+CREATE INDEX idx_bp_image_specimen_type ON bp_image USING GIN (specimen_type);
+CREATE INDEX idx_bp_image_age_at_extraction ON bp_image_extraction USING GIST (age_at_extraction);
+
+----------------------------------------------------
+-- Check execution plans
+----------------------------------------------------
+
+EXPLAIN ANALYZE
+SELECT ...
+
+-- No index used:
+-- Seq Scan on bp_image
+
 
 ----------------------------------------------------
 -- Search examples
@@ -33,7 +48,8 @@ CREATE INDEX idx_bp_sample_age_at_extraction ON bp_image USING GIN (age_at_extra
 -- contains code
 -- < 2 seconds for 1 million images
 -- ~ 12 seconds for 10 million images
-SELECT * FROM bp_image WHERE species @> ARRAY['species1'];
+SELECT * FROM bp_image
+WHERE species @> ARRAY['high'];
 
 -- GIN indexed text column search examples
 
@@ -63,14 +79,17 @@ WHERE to_tsvector('english', dataset_description)
       @@ websearch_to_tsquery('english', 'microscopy')
 ORDER BY rank DESC
 
--- GIN indexed array int column (age) search examples
+-- GIST indexed array int column (age) search examples
 
 -- overlaps with range
 -- ~2 seconds for 1 million images
 -- ~21 seconds for 10 million images
-SELECT * FROM bp_image WHERE age_at_extraction && ARRAY[10,20];
+SELECT * FROM bp_image_extraction
+WHERE age_at_extraction && int4range(5, 6)
 
 -- contains value
--- < 2 seconds for 1 million images
--- ~11 seconds for 10 million images
-SELECT * FROM bp_image WHERE age_at_extraction @> ARRAY[12];
+-- < 2 seconds for 1 million images (full table scan with GIN index)
+-- ~11 seconds for 10 million images (full table scan with GIN index)
+SELECT *
+FROM bp_image_extraction
+WHERE age_at_extraction @> 50;

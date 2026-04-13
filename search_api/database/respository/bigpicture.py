@@ -1,5 +1,7 @@
 """Bigpicture database repository."""
 
+from psycopg2.extras import NumericRange  # type: ignore[import-untyped]
+
 from search_api.bigpicture.models import BigpictureFields, BigpictureCodeAttributeValue
 
 
@@ -37,13 +39,13 @@ def load_bigpicture_fields(cur, fields: BigpictureFields) -> None:
     sex_values = [str(a.sex) for a in fields.biological_being_fields]
 
     # Get age at extraction values.
-    age_at_extraction_values = set()
+    age_at_extraction_values = []
     for s in fields.specimen_fields:
         value = s.age_at_extraction_range
         if not value:
             continue
         start, end = value
-        age_at_extraction_values.update(list(range(start, end + 1)))
+        age_at_extraction_values.append((start, end))
 
     _load_bigpicture_fields(
         cur,
@@ -56,7 +58,7 @@ def load_bigpicture_fields(cur, fields: BigpictureFields) -> None:
         fixation_type_codes,
         specimen_type_codes,
         block_preparation_codes,
-        list(age_at_extraction_values),
+        age_at_extraction_values,
     )
 
 
@@ -71,7 +73,7 @@ def _load_bigpicture_fields(
     fixation_type_codes: list[str] | None,
     specimen_type_codes: list[str] | None,
     block_preparation_codes: list[str] | None,
-    age_at_extraction_values: list[int] | None,
+    age_at_extraction_ranges: list[tuple[int, int]] | None,
 ) -> None:
     """
     Load Bigpicture fields for one image.
@@ -86,7 +88,7 @@ def _load_bigpicture_fields(
     :param fixation_type_codes: List of fixation type codes.
     :param specimen_type_codes: List of specimen type codes.
     :param block_preparation_codes: List of block preparation codes.
-    :param age_at_extraction_values: List of ages at extraction (expanded range values).
+    :param age_at_extraction_ranges: List of ages at extraction ranges.
     """
 
     # GIN indexed values do not have to be sorted, but
@@ -104,23 +106,37 @@ def _load_bigpicture_fields(
             sex,
             fixation_type,
             specimen_type,
-            block_preparation,
-            age_at_extraction
+            block_preparation
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s);
         """,
         (
             image_id,
             dataset_id,
-            dataset_description,  # GIN indexes TEXT field
+            dataset_description,  # text into GIN indexes TEXT field
             species_codes,  # codes into GIN indexed TEXT[] field
             anatomical_site_codes,  # codes into GIN indexed TEXT[] field
             sex_values,  # values into GIN indexed TEXT[] field
             fixation_type_codes,  # codes into GIN indexed TEXT[] field
             specimen_type_codes,  # codes into GIN indexed TEXT[] field
             block_preparation_codes,  # codes into GIN indexed TEXT[] field
-            sorted(age_at_extraction_values)
-            if age_at_extraction_values
-            else None,  # ages into GIN indexed INT[] field
         ),
     )
+
+    if age_at_extraction_ranges:
+        for age_at_extraction_range in age_at_extraction_ranges:
+            cur.execute(
+                """
+                INSERT INTO bp_image_extraction (
+                    image_id,
+                    age_at_extraction
+                )
+                VALUES (%s, %s);
+                """,
+                (
+                    image_id,
+                    NumericRange(age_at_extraction_range[0], age_at_extraction_range[1])
+                    if age_at_extraction_range
+                    else None,  # int range into GIST indexed int4range field
+                ),
+            )

@@ -9,15 +9,11 @@ from search_api.database.respository.bigpicture import _load_bigpicture_fields
 
 # uv run python -m tests.performance.bigpicture.generate_data
 
-# Data for 100,000 images generated and loaded successfully in 14.66 seconds.
-# Data for 1,000,000 images generated and loaded successfully in 136.73 seconds.
-# Data for 10,000,000 images generated and loaded successfully in 1364.68 seconds.
-
 # Maximum time to generate data in seconds.
 MAX_TIME = 60 * 60 * 2
 
 # Number of images to generate.
-IMAGE_CNT = 1000
+IMAGE_CNT = 10000000
 
 # Number of datasets to generate.
 DATASET_CNT = 5000

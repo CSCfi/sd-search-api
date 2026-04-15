@@ -2,10 +2,13 @@
 
 import random
 import time
+import logging
 
-import psycopg2
+from search_api.bigpicture.models import BigpictureFields, BigpictureCodeAttributeValue
+from search_api.bigpicture.service import load_fields, sync_fields, sync_count
+from search_api.database.repository import get_connection
 
-from search_api.database.respository.bigpicture import _load_bigpicture_fields
+logging.basicConfig(level=logging.INFO)
 
 # uv run python -m tests.performance.bigpicture.generate_data
 
@@ -13,36 +16,35 @@ from search_api.database.respository.bigpicture import _load_bigpicture_fields
 MAX_TIME = 60 * 60 * 2
 
 # Number of images to generate.
-IMAGE_CNT = 10000000
+IMAGE_CNT = 1000
 
 # Number of datasets to generate.
-DATASET_CNT = 5000
+DATASET_CNT = 50
 
 # Maximum number of codes and values.
 SEX_MAX_CNT = 2
 CODE_MAX_CNT = 3
 AGE_AT_EXTRACTION_MAX_CNT = 2
 
-# TODO(improve): If there are too many non-selective values then index may not be used
-
 SELECTIVITY = [
-    0.00001,  # outstanding
-    0.0001,  # excellent
-    0.001,  # high
-    0.01,  # 1
-    0.05,  # 5
-    0.10,  # 10
-    0.83889,  # poor
+    0.00001,  # outstanding (0.001%)
+    0.0001,  # excellent (0.01%)
+    0.001,  # high (0.1%)
+    0.01,  # 1%
+    0.05,  # 5%
+    0.10,  # 10%
+    0.83889,  # poor (83.9%)
 ]
 
 
-def _generate_sex_values() -> list[str]:
-    """Generate deduplicated sex values sampled uniformly (poor selectivity)."""
+def _generate_sex_values() -> set[str]:
+    """Generate deduplicated sex values with poor selectivity level (25%)."""
+
     values = ["Male", "Female", "Not-known", "Other"]
-    return list(set(random.choices(values, k=random.randint(0, SEX_MAX_CNT))))
+    return set(random.choices(values, k=random.randint(0, SEX_MAX_CNT)))
 
 
-def _generate_code_values() -> list[str]:
+def _generate_code_values() -> set[BigpictureCodeAttributeValue]:
     """Generate deduplicated code values with different selectivity levels."""
 
     values = [
@@ -55,16 +57,15 @@ def _generate_code_values() -> list[str]:
         "poor",
     ]
 
-    return list(
-        set(
-            random.choices(
-                values, weights=SELECTIVITY, k=random.randint(0, CODE_MAX_CNT)
-            )
-        )
-    )
+    generated_values = set()
+    for code in random.choices(
+        values, weights=SELECTIVITY, k=random.randint(0, CODE_MAX_CNT)
+    ):
+        generated_values.add(BigpictureCodeAttributeValue(code=code, meaning=code))
+    return generated_values
 
 
-def _generate_age_at_extraction_ranges() -> list[tuple[int, int]]:
+def _generate_age_at_extraction_ranges() -> set[tuple[int, int]]:
     """Generate deduplicated age ranges with different selectivity levels."""
 
     ranges = [
@@ -77,13 +78,11 @@ def _generate_age_at_extraction_ranges() -> list[tuple[int, int]]:
         (13, 100),  # poor
     ]
 
-    return list(
-        set(
-            random.choices(
-                ranges,
-                weights=SELECTIVITY,
-                k=random.randint(0, AGE_AT_EXTRACTION_MAX_CNT),
-            )
+    return set(
+        random.choices(
+            ranges,
+            weights=SELECTIVITY,
+            k=random.randint(0, AGE_AT_EXTRACTION_MAX_CNT),
         )
     )
 
@@ -132,22 +131,24 @@ def generate_and_load_data():
     start_time = time.time()
     generated_cnt = 0
 
-    with psycopg2.connect(
-            host="localhost", dbname="sd_search", user="postgres", password="test"
-    ) as conn:
-        conn.autocommit = True
-
+    with get_connection() as conn:
         with conn.cursor() as cur:
             # Truncate tables.
             #
+
+            logging.info("Truncate tables")
 
             cur.execute("""
                 TRUNCATE TABLE bp_image;
                 TRUNCATE TABLE bp_image_extraction;
             """)
 
+            assert sync_count(cur) == 0
+
             # Load data.
             #
+
+            logging.info(f"Load {IMAGE_CNT} images")
 
             for i in range(1, IMAGE_CNT + 1):
                 if time.time() - start_time > MAX_TIME:
@@ -170,23 +171,37 @@ def generate_and_load_data():
                 specimen_type_codes = _generate_code_values()
                 age_at_extraction_ranges = _generate_age_at_extraction_ranges()
 
-                _load_bigpicture_fields(
-                    cur,
-                    image_id,
-                    dataset_id,
-                    dataset_description,
-                    species_codes,
-                    anatomical_site_codes,
-                    sex_values,
-                    fixation_type_codes,
-                    specimen_type_codes,
-                    block_preparation_codes,
-                    age_at_extraction_ranges,
+                fields = BigpictureFields(
+                    image_id=image_id,
+                    dataset_id=dataset_id,
+                    dataset_description=dataset_description,
+                    sex=sex_values,
+                    species=species_codes,
+                    anatomical_site=anatomical_site_codes,
+                    fixation_type=fixation_type_codes,
+                    block_preparation=block_preparation_codes,
+                    specimen_type=specimen_type_codes,
+                    age_at_extraction=age_at_extraction_ranges,
                 )
+
+                # Load fields to the database for each image.
+
+                logging.info(f"Load {image_id} fields to the database")
+                load_fields(cur, fields)
+
+            assert sync_count(cur) == generated_cnt
+
+            # Sync fields to OpenSearch for all images.
+
+            logging.info("Sync image fields to OpenSearch")
+
+            sync_fields(cur)
+
+            assert sync_count(cur) == 0
 
         elapsed = time.time() - start_time
         print(
-            f"Data for {generated_cnt} images generated and loaded successfully in {elapsed:.2f} seconds."
+            f"Data for {generated_cnt} images generated, loaded and synced successfully in {elapsed:.2f} seconds."
         )
 
 

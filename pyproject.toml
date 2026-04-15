@@ -7,6 +7,7 @@ requires-python = ">=3.14"
 dependencies = [
     "fsspec>=2026.2.0",
     "lxml>=6.0.2",
+    "opensearch-py>=3.1.0",
     "psycopg2-binary>=2.9.11",
     "pydantic>=2.12.5",
 ]
@@ -17,6 +18,7 @@ dev = [
     "pytest>=9.0.2",
     "ruff>=0.15.6",
     "tox>=4.49.1",
+    "tox-uv>=1.33.4",
     "types-lxml>=2026.2.16",
 ]
 

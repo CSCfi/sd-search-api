@@ -3,13 +3,10 @@ from pathlib import Path
 from lxml import etree
 
 from search_api.bigpicture.models import (
-    BigpictureSampleBiologicalBeingFields,
     BigpictureCodeAttributeValue,
-    BigpictureSampleSpecimenFields,
-    BigpictureSampleBlockFields,
 )
 from search_api.bigpicture.process import (
-    process_directories,
+    extract_fields,
     _get_code_attribute_value,
     _get_string_attribute_value,
     _get_age_at_extraction_range,
@@ -18,8 +15,8 @@ from search_api.bigpicture.process import (
 TEST_DIR = Path(__file__).resolve().parent.parent.parent / "test_files" / "bigpicture"
 
 
-def test_process_directories():
-    fields_iterator = process_directories(root=str(TEST_DIR))
+def test_extract_fields():
+    fields_iterator = extract_fields(root=str(TEST_DIR))
 
     fields = next(fields_iterator)
 
@@ -28,35 +25,33 @@ def test_process_directories():
     assert fields.dataset_id == "dataset_1"
     assert fields.dataset_description == "test_description"
 
-    assert fields.biological_being_fields == [
-        BigpictureSampleBiologicalBeingFields(
-            species=BigpictureCodeAttributeValue(
-                code="1", scheme="Scheme1", meaning="Test1", scheme_version=""
-            ),
-            sex="Male",
+    assert fields.species == {
+        BigpictureCodeAttributeValue(
+            code="1", scheme="Scheme1", meaning="Test1", scheme_version=""
         )
-    ]
-    assert fields.specimen_fields == [
-        BigpictureSampleSpecimenFields(
-            anatomical_site=BigpictureCodeAttributeValue(
-                code="2", scheme="Scheme2", meaning="Test2", scheme_version=""
-            ),
-            fixation_type=BigpictureCodeAttributeValue(
-                code="3", scheme="Scheme3", meaning="Test3", scheme_version=""
-            ),
-            specimen_type=BigpictureCodeAttributeValue(
-                code="4", scheme="Scheme4", meaning="Test4", scheme_version=""
-            ),
-            age_at_extraction_range=(40, 41),
+    }
+    assert fields.sex == {"Male"}
+    assert fields.anatomical_site == {
+        BigpictureCodeAttributeValue(
+            code="2", scheme="Scheme2", meaning="Test2", scheme_version=""
         )
-    ]
-    assert fields.block_fields == [
-        BigpictureSampleBlockFields(
-            block_preparation=BigpictureCodeAttributeValue(
-                code="5", scheme="Scheme5", meaning="Test5", scheme_version=""
-            ),
+    }
+    assert fields.fixation_type == {
+        BigpictureCodeAttributeValue(
+            code="3", scheme="Scheme3", meaning="Test3", scheme_version=""
         )
-    ]
+    }
+    assert fields.specimen_type == {
+        BigpictureCodeAttributeValue(
+            code="4", scheme="Scheme4", meaning="Test4", scheme_version=""
+        )
+    }
+    assert fields.age_at_extraction == {(40, 41)}
+    assert fields.block_preparation == {
+        BigpictureCodeAttributeValue(
+            code="5", scheme="Scheme5", meaning="Test5", scheme_version=""
+        )
+    }
 
     fields = next(fields_iterator)
 
@@ -65,35 +60,33 @@ def test_process_directories():
     assert fields.dataset_id == "dataset_1"
     assert fields.dataset_description == "test_description"
 
-    assert fields.biological_being_fields == [
-        BigpictureSampleBiologicalBeingFields(
-            species=BigpictureCodeAttributeValue(
-                code="1", scheme="Scheme1", meaning="Test1", scheme_version=""
-            ),
-            sex="Male",
+    assert fields.species == {
+        BigpictureCodeAttributeValue(
+            code="1", scheme="Scheme1", meaning="Test1", scheme_version=""
         )
-    ]
-    assert fields.specimen_fields == [
-        BigpictureSampleSpecimenFields(
-            anatomical_site=BigpictureCodeAttributeValue(
-                code="2", scheme="Scheme2", meaning="Test2", scheme_version=""
-            ),
-            fixation_type=BigpictureCodeAttributeValue(
-                code="3", scheme="Scheme3", meaning="Test3", scheme_version=""
-            ),
-            specimen_type=BigpictureCodeAttributeValue(
-                code="4", scheme="Scheme4", meaning="Test4", scheme_version=""
-            ),
-            age_at_extraction_range=(40, 41),
+    }
+    assert fields.sex == {"Male"}
+    assert fields.anatomical_site == {
+        BigpictureCodeAttributeValue(
+            code="2", scheme="Scheme2", meaning="Test2", scheme_version=""
         )
-    ]
-    assert fields.block_fields == [
-        BigpictureSampleBlockFields(
-            block_preparation=BigpictureCodeAttributeValue(
-                code="5", scheme="Scheme5", meaning="Test5", scheme_version=""
-            ),
+    }
+    assert fields.fixation_type == {
+        BigpictureCodeAttributeValue(
+            code="3", scheme="Scheme3", meaning="Test3", scheme_version=""
         )
-    ]
+    }
+    assert fields.specimen_type == {
+        BigpictureCodeAttributeValue(
+            code="4", scheme="Scheme4", meaning="Test4", scheme_version=""
+        )
+    }
+    assert fields.age_at_extraction == {(40, 41)}
+    assert fields.block_preparation == {
+        BigpictureCodeAttributeValue(
+            code="5", scheme="Scheme5", meaning="Test5", scheme_version=""
+        )
+    }
 
 
 def test_process_code_attribute():

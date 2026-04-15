@@ -1,4 +1,4 @@
-"""Bigpicture data loading."""
+"""Bigpicture data extraction and loading."""
 
 import re
 from pathlib import Path
@@ -10,10 +10,6 @@ import fsspec  # type: ignore
 from search_api.bigpicture.models import (
     BigpictureFields,
     BigpictureCodeAttributeValue,
-    BigpictureSampleBiologicalBeingFields,
-    BigpictureSampleSpecimenFields,
-    BigpictureSampleBlockFields,
-    BigpictureStainingFields,
 )
 from search_api.services.dir import list_directories
 from search_api.services.xml import parse_xml, validate_xml, get_xml_value
@@ -34,13 +30,13 @@ STAINING_XML_SCHEMA_FILE = "BP.staining.xsd"
 # TODO(improve): do not process directories that have already been processed
 
 
-def process_directories(
+def extract_fields(
     root: str = "/",
     fs: fsspec.AbstractFileSystem | None = None,
     use_aliases: bool = False,
 ) -> Iterator[BigpictureFields]:
     """
-    Process directories under a root path.
+    Extract search fields from Bigpicture XML directories under the root path.
 
     :param root: Root directory or bucket path.
     :param fs: Optional fsspec filesystem. If None, a local filesystem is used.
@@ -142,42 +138,6 @@ def process_directories(
                     _image_ids.update(get_image_ids_for_specimen_id(_specimen_id))
                 return _image_ids
 
-            # Map image ids to search fields.
-            image_id_to_sample_biological_being_fields: dict[
-                str, list[BigpictureSampleBiologicalBeingFields]
-            ] = {}
-            image_id_to_sample_specimen_fields: dict[
-                str, list[BigpictureSampleSpecimenFields]
-            ] = {}
-            image_id_to_sample_block_fields: dict[
-                str, list[BigpictureSampleBlockFields]
-            ] = {}
-            image_id_to_staining_fields: dict[str, list[BigpictureStainingFields]] = {}
-
-            def add_search_fields(
-                _image_id: str,
-                _fields: BigpictureSampleBiologicalBeingFields
-                | BigpictureSampleSpecimenFields
-                | BigpictureSampleBlockFields
-                | BigpictureStainingFields,
-            ) -> None:
-                if isinstance(_fields, BigpictureSampleBiologicalBeingFields):
-                    image_id_to_sample_biological_being_fields.setdefault(
-                        image_id, []
-                    ).append(_fields)
-                elif isinstance(_fields, BigpictureSampleSpecimenFields):
-                    image_id_to_sample_specimen_fields.setdefault(image_id, []).append(
-                        _fields
-                    )
-                elif isinstance(_fields, BigpictureSampleBlockFields):
-                    image_id_to_sample_block_fields.setdefault(image_id, []).append(
-                        _fields
-                    )
-                elif isinstance(_fields, BigpictureStainingFields):
-                    image_id_to_staining_fields.setdefault(image_id, []).append(_fields)
-                else:
-                    raise ValueError("Unsupported search fields type")
-
             # Read dataset XML.
             #
 
@@ -192,9 +152,6 @@ def process_directories(
                     raise ValueError(
                         f"Failed to extract dataset id from {str(dataset_file_path)}"
                     )
-                dataset_title = get_xml_value(
-                    "/DATASET/TITLE | /DATASET_SET/DATASET/TITLE", dataset_xml
-                )
                 dataset_description = get_xml_value(
                     "/DATASET/DESCRIPTION | /DATASET_SET/DATASET/DESCRIPTION",
                     dataset_xml,
@@ -253,89 +210,77 @@ def process_directories(
                     ):
                         add_biological_being_to_case(biological_being_id, case_id)
 
-                # Create BigPictureSampleBiologicalBeingFields
-                for xml in sample_xml.xpath(
-                    "/BIOLOGICAL_BEING | /SAMPLE_SET/BIOLOGICAL_BEING"
+            # Finished reading XMLs.
+
+            # Create search fields for each image.
+            fields: dict[str, BigpictureFields] = {}
+            for image_id in image_ids:
+                fields[image_id] = BigpictureFields(
+                    dataset_id=dataset_id,
+                    image_id=image_id,
+                    dataset_description=dataset_description,
+                )
+
+            # Add biological being fields for each image.
+            for xml in sample_xml.xpath(
+                "/BIOLOGICAL_BEING | /SAMPLE_SET/BIOLOGICAL_BEING"
+            ):
+                for image_id in get_image_ids_for_biological_being_id(
+                    xml.get(id_attribute)
                 ):
-                    for image_id in get_image_ids_for_biological_being_id(
-                        xml.get(id_attribute)
-                    ):
-                        add_search_fields(
-                            image_id,
-                            BigpictureSampleBiologicalBeingFields(
-                                species=_get_code_attribute_value(
-                                    xml, "animal_species"
-                                ),
-                                sex=_get_string_attribute_value(xml, "sex"),  # type: ignore
-                            ),
-                        )
+                    code_value = _get_code_attribute_value(xml, "animal_species")
+                    if code_value:
+                        fields[image_id].species.add(code_value)
+                    string_value = _get_string_attribute_value(xml, "sex")
+                    if string_value:
+                        fields[image_id].sex.add(string_value)  # type: ignore
 
-                # Create BigPictureSampleSpecimenFields
-                for xml in sample_xml.xpath("/SPECIMEN | /SAMPLE_SET/SPECIMEN"):
-                    for image_id in get_image_ids_for_specimen_id(
-                        xml.get(id_attribute)
-                    ):
-                        add_search_fields(
-                            image_id,
-                            BigpictureSampleSpecimenFields(
-                                anatomical_site=_get_code_attribute_value(
-                                    xml, "anatomical_site"
-                                ),
-                                fixation_type=_get_code_attribute_value(
-                                    xml, "fixation_type"
-                                ),
-                                specimen_type=_get_code_attribute_value(
-                                    xml, "specimen_type"
-                                ),
-                                age_at_extraction_range=_get_age_at_extraction_range(
-                                    xml
-                                ),
-                            ),
-                        )
+            # Add specimen fields for each image.
+            for xml in sample_xml.xpath("/SPECIMEN | /SAMPLE_SET/SPECIMEN"):
+                for image_id in get_image_ids_for_specimen_id(xml.get(id_attribute)):
+                    code_value = _get_code_attribute_value(xml, "anatomical_site")
+                    if code_value is not None:
+                        fields[image_id].anatomical_site.add(code_value)
 
-                # Create BigPictureSampleBlockFields
-                for xml in sample_xml.xpath("/BLOCK | /SAMPLE_SET/BLOCK"):
-                    for image_id in get_image_ids_for_block_id(xml.get(id_attribute)):
-                        add_search_fields(
-                            image_id,
-                            BigpictureSampleBlockFields(
-                                block_preparation=_get_code_attribute_value(
-                                    xml, "block_preparation"
-                                )
-                            ),
-                        )
+                    code_value = _get_code_attribute_value(xml, "fixation_type")
+                    if code_value is not None:
+                        fields[image_id].fixation_type.add(code_value)
 
-                # Read staining XML.
-                #
+                    code_value = _get_code_attribute_value(xml, "specimen_type")
+                    if code_value is not None:
+                        fields[image_id].specimen_type.add(code_value)
 
-                with fs.open(staining_file_path, "rb") as f:
-                    staining_xml = parse_xml(f.read())
-                validate_xml(staining_xml, XML_SCHEMA_DIR, STAINING_XML_SCHEMA_FILE)
+                    range_value = _get_age_at_extraction_range(xml)
+                    if range_value is not None:
+                        fields[image_id].age_at_extraction.add(range_value)
 
-                for xml in staining_xml.xpath("/STAINING | /STAINING_SET/STAINING"):
-                    # TODO(improve): parse staining XML
-                    pass
+            # Add block fields for each image.
+            for xml in sample_xml.xpath("/BLOCK | /SAMPLE_SET/BLOCK"):
+                for image_id in get_image_ids_for_block_id(xml.get(id_attribute)):
+                    code_value = _get_code_attribute_value(xml, "block_preparation")
+                    if code_value is not None:
+                        fields[image_id].block_preparation.add(code_value)
 
-                #
-                #
+            # Read staining XML.
+            #
 
-                for image_id in image_ids:
-                    yield BigpictureFields(
-                        image_id=image_id,
-                        dataset_id=dataset_id,
-                        dataset_title=dataset_title,
-                        dataset_description=dataset_description,
-                        biological_being_fields=image_id_to_sample_biological_being_fields.get(
-                            image_id, []
-                        ),
-                        specimen_fields=image_id_to_sample_specimen_fields.get(
-                            image_id, []
-                        ),
-                        block_fields=image_id_to_sample_block_fields.get(image_id, []),
-                        staining_fields=[],  # TODO(improve): add staining fields
-                    )
+            with fs.open(staining_file_path, "rb") as f:
+                staining_xml = parse_xml(f.read())
+            validate_xml(staining_xml, XML_SCHEMA_DIR, STAINING_XML_SCHEMA_FILE)
+
+            # Add staining fields for each image.
+            for xml in staining_xml.xpath("/STAINING | /STAINING_SET/STAINING"):
+                # TODO(improve): parse staining XML
+                pass
+
+            #
+            #
+
+            for image_id in image_ids:
+                yield fields[image_id]
 
         except Exception as e:
+            # TODO(improve): add error handling
             raise e
 
 

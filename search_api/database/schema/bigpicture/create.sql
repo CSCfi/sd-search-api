@@ -1,6 +1,6 @@
 CREATE TABLE bp_image (
-    image_id TEXT,
-    dataset_id TEXT,
+    image_id TEXT PRIMARY KEY,
+    dataset_id TEXT NOT NULL,
     dataset_description TEXT,                -- text
     dataset_description_tsv tsvector
     GENERATED ALWAYS AS (
@@ -11,7 +11,9 @@ CREATE TABLE bp_image (
     sex TEXT[],                              -- array of string codes
     fixation_type TEXT[],                    -- array of string codes
     block_preparation TEXT[],                -- array of string codes
-    specimen_type TEXT[]                     -- array of string codes
+    specimen_type TEXT[],                    -- array of string codes
+    search_sync BOOLEAN NOT NULL DEFAULT false,
+    search_sync_date timestamptz
 );
 
 CREATE TABLE bp_image_extraction (
@@ -30,18 +32,9 @@ CREATE INDEX idx_bp_image_sex ON bp_image USING GIN (sex);
 CREATE INDEX idx_bp_image_fixation_type ON bp_image USING GIN (fixation_type);
 CREATE INDEX idx_bp_image_block_preparation ON bp_image USING GIN (block_preparation);
 CREATE INDEX idx_bp_image_specimen_type ON bp_image USING GIN (specimen_type);
+CREATE INDEX idx_bp_image_search_sync ON bp_image (search_sync);
+CREATE INDEX idx_bp_image_extraction_image_id ON bp_image_extraction (image_id);
 CREATE INDEX idx_bp_image_age_at_extraction ON bp_image_extraction USING GIST (age_at_extraction);
-
-----------------------------------------------------
--- Check execution plans
-----------------------------------------------------
-
-EXPLAIN ANALYZE
-SELECT ...
-
--- No index used:
--- Seq Scan on bp_image
-
 
 ----------------------------------------------------
 -- Performance test (10,000,000 images)
@@ -49,7 +42,6 @@ SELECT ...
 
 -- IMPORTANT: indexes must exist
 -- IMPORTANT: selectivity must be high OR LIMIT must be used
--- IMPORTANT: limit must be used before free text ranking
 `
 -- Test data generated with generate_data.py 14 April 2026.
 -- Data for 10,000,000 images generated and loaded successfully in 911.36 seconds.

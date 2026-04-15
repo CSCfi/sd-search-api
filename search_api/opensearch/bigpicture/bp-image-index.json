@@ -1,0 +1,47 @@
+{
+  "settings": {
+    "analysis": {
+      "analyzer": {
+        "english_text": {
+          "type": "standard",
+          "stopwords": "_english_"
+        }
+      }
+    }
+  },
+  "mappings": {
+    "properties": {
+      "image_id": {
+        "type": "keyword"
+      },
+      "dataset_id": {
+        "type": "keyword"
+      },
+      "dataset_description": {
+        "type": "text",
+        "analyzer": "english_text"
+      },
+      "species": {
+        "type": "keyword"
+      },
+      "anatomical_site": {
+        "type": "keyword"
+      },
+      "sex": {
+        "type": "keyword"
+      },
+      "fixation_type": {
+        "type": "keyword"
+      },
+      "block_preparation": {
+        "type": "keyword"
+      },
+      "specimen_type": {
+        "type": "keyword"
+      },
+      "age_at_extraction": {
+        "type": "integer_range"
+      }
+    }
+  }
+}

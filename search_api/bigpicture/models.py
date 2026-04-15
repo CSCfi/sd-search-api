@@ -1,71 +1,58 @@
-"""Bigpicture Pydantic models."""
+"""Bigpicture models."""
 
-import re
 from typing import Literal
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict
 
 
 class BigpictureCodeAttributeValue(BaseModel):
-    # Example:
-    # <CODE_ATTRIBUTE>
-    #   <TAG>...</TAG>
-    #   <VALUE>
-    #     <CODE>9606</CODE>
-    #     <SCHEME>NCBI_TAXONOMY</SCHEME>
-    #     <MEANING>Homo sapiens</MEANING>
-    #     <SCHEME_VERSION>2023</SCHEME_VERSION>
-    #    </VALUE>
-    #  </CODE_ATTRIBUTE>
+    """Bigpicture code attribute value."""
+
+    model_config = ConfigDict(frozen=True)
+
     code: str
     scheme: str | None = None
     meaning: str
     scheme_version: str | None = None
 
 
-_validate_sex_map = {
-    "male": "Male",
-    "female": "Female",
-    "notknown": "Not-known",
-    "other": "Other",
-}
-
-
 class BigpictureSampleBiologicalBeingFields(BaseModel):
-    species: BigpictureCodeAttributeValue | None
-    sex: Literal["Male", "Female", "Not-known", "Other"] | None
+    """Bigpicture biological being search fields."""
 
-    @field_validator("sex", mode="before")
-    @classmethod
-    def validate_sex(cls, v) -> str | None:
-        if not isinstance(v, str):
-            return None
-
-        key = re.sub(r"[^a-zA-Z]+", "", v).lower()
-        return _validate_sex_map.get(key)
+    species: set[BigpictureCodeAttributeValue] = set()
+    sex: set[Literal["Male", "Female", "Not-known", "Other"]] = set()
 
 
 class BigpictureSampleSpecimenFields(BaseModel):
-    anatomical_site: BigpictureCodeAttributeValue | None
-    fixation_type: BigpictureCodeAttributeValue | None
-    specimen_type: BigpictureCodeAttributeValue | None
-    age_at_extraction_range: tuple[int, int] | None
+    """Bigpicture specimen search fields."""
+
+    anatomical_site: set[BigpictureCodeAttributeValue] = set()
+    fixation_type: set[BigpictureCodeAttributeValue] = set()
+    specimen_type: set[BigpictureCodeAttributeValue] = set()
+    age_at_extraction: set[tuple[int, int]] = set()
 
 
 class BigpictureSampleBlockFields(BaseModel):
-    block_preparation: BigpictureCodeAttributeValue | None
+    """Bigpicture block search fields."""
+
+    block_preparation: set[BigpictureCodeAttributeValue] = set()
 
 
 class BigpictureStainingFields(BaseModel):
+    """Bigpicture staining search fields."""
+
     pass
 
 
-class BigpictureFields(BaseModel):
+class BigpictureFields(
+    BigpictureSampleBiologicalBeingFields,
+    BigpictureSampleSpecimenFields,
+    BigpictureSampleBlockFields,
+    BigpictureStainingFields,
+    BaseModel,
+):
+    """Bigpicture IDs and search fields."""
+
     image_id: str
     dataset_id: str
-    dataset_title: str | None
-    dataset_description: str | None
-    biological_being_fields: list[BigpictureSampleBiologicalBeingFields]
-    specimen_fields: list[BigpictureSampleSpecimenFields]
-    block_fields: list[BigpictureSampleBlockFields]
-    staining_fields: list[BigpictureStainingFields]
+    dataset_description: str | None = None

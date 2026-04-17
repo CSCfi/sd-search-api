@@ -1,15 +1,19 @@
 """Bigpicture services."""
 
 import logging
+from typing import Any
 
 from psycopg2.extras import NumericRange  # type: ignore
 from psycopg2.extensions import cursor  # type: ignore
 
 from search_api.bigpicture.models import BigpictureFields, BigpictureCodeAttributeValue
 from search_api.database.repository import get_cursor
-from search_api.services.search import bp_index_document
+from search_api.services.search import bp_index_document, bp_index_documents
 
 logging.basicConfig(level=logging.INFO)
+
+# OpenSearch index batch size.
+BATCH_SIZE = 1000
 
 
 def load_fields(cur: cursor, fields: BigpictureFields) -> None:
@@ -21,7 +25,7 @@ def load_fields(cur: cursor, fields: BigpictureFields) -> None:
     """
 
     def _get_codes(
-        items: set[BigpictureCodeAttributeValue] | None,
+            items: set[BigpictureCodeAttributeValue] | None,
     ) -> list[str] | None:
         if not items:
             return None
@@ -61,17 +65,17 @@ def load_fields(cur: cursor, fields: BigpictureFields) -> None:
 
 
 def _load_fields(
-    cur: cursor,
-    image_id: str,
-    dataset_id: str,
-    dataset_description: str | None,
-    species_codes: list[str] | None,
-    anatomical_site_codes: list[str] | None,
-    sex_values: list[str] | None,
-    fixation_type_codes: list[str] | None,
-    specimen_type_codes: list[str] | None,
-    block_preparation_codes: list[str] | None,
-    age_at_extraction_ranges: list[tuple[int, int]] | None,
+        cur: cursor,
+        image_id: str,
+        dataset_id: str,
+        dataset_description: str | None,
+        species_codes: list[str] | None,
+        anatomical_site_codes: list[str] | None,
+        sex_values: list[str] | None,
+        fixation_type_codes: list[str] | None,
+        specimen_type_codes: list[str] | None,
+        block_preparation_codes: list[str] | None,
+        age_at_extraction_ranges: list[tuple[int, int]] | None,
 ) -> None:
     """
     Load Bigpicture fields for one image into the database.
@@ -151,6 +155,7 @@ def _load_fields(
             )
 
 
+# TODO:
 #  ON CONFLICT (image_id) DO UPDATE
 #                 SET
 #                     age_at_extraction = EXCLUDED.age_at_extraction;
@@ -165,7 +170,10 @@ def sync_fields(cur: cursor) -> None:
 
     # Find imaged to sync to OpenSearch.
 
-    logging.info("Find images to sync to OpenSearch.")
+    logging.info("Finding images to sync to OpenSearch.")
+
+    ids_batch: list[str] = []
+    docs_batch: list[dict[str, Any]] = []
 
     with get_cursor() as update_cur:
         cur.execute("""
@@ -219,28 +227,32 @@ def sync_fields(cur: cursor) -> None:
                     "lte": age_at_extraction.upper,
                 }
 
-            # Index the document in OpenSearch.
+            # Add to the OpenSearch batch.
+            ids_batch.append(image_id)
+            docs_batch.append(doc)
 
-            logging.info(f"Index image {doc['image_id']} to OpenSearch.")
+            if len(docs_batch) >= BATCH_SIZE:
+                # Flush the OpenSearch batch.
+                logging.info(f"Indexing {len(docs_batch)} images in OpenSearch.")
+                bp_index_documents(ids_batch, docs_batch)
 
-            bp_index_document(doc)
+                logging.info( f"Updating indexing status for {len(docs_batch)} images.")
 
-            # Update OpenSearch state in database.
+                # Update OpenSearch state in database.
+                update_cur.executemany(
+                    """
+                    UPDATE bp_image
+                    SET
+                        search_sync = true,
+                        search_sync_date = now()
+                    WHERE image_id = %s
+                    """,
+                    [(i,) for i in ids_batch],
+                )
 
-            logging.info(
-                f"Update image {doc['image_id']} OpenSearch state in database."
-            )
-
-            update_cur.execute(
-                """
-                UPDATE bp_image
-                SET
-                    search_sync = true,
-                    search_sync_date = now()
-                WHERE image_id = %s
-                """,
-                (image_id,),
-            )
+                # Clear the OpenSearch batch.
+                ids_batch.clear()
+                docs_batch.clear()
 
 
 def sync_count(cur: cursor) -> int:

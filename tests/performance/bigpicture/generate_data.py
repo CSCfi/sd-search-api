@@ -16,10 +16,10 @@ logging.basicConfig(level=logging.INFO)
 MAX_TIME = 60 * 60 * 2
 
 # Number of images to generate.
-IMAGE_CNT = 1000
+IMAGE_CNT = 10000000
 
 # Number of datasets to generate.
-DATASET_CNT = 50
+DATASET_CNT = 5000
 
 # Maximum number of codes and values.
 SEX_MAX_CNT = 2
@@ -59,7 +59,7 @@ def _generate_code_values() -> set[BigpictureCodeAttributeValue]:
 
     generated_values = set()
     for code in random.choices(
-        values, weights=SELECTIVITY, k=random.randint(0, CODE_MAX_CNT)
+            values, weights=SELECTIVITY, k=random.randint(0, CODE_MAX_CNT)
     ):
         generated_values.add(BigpictureCodeAttributeValue(code=code, meaning=code))
     return generated_values
@@ -128,6 +128,8 @@ def _generate_description() -> str:
 
 
 def generate_and_load_data():
+    """Generate and load data into the database."""
+
     start_time = time.time()
     generated_cnt = 0
 
@@ -186,27 +188,41 @@ def generate_and_load_data():
 
                 # Load fields to the database for each image.
 
-                logging.info(f"Load {image_id} fields to the database")
+                logging.info(f"Loading {image_id} images to the database")
                 load_fields(cur, fields)
+
+            elapsed = time.time() - start_time
+            print(
+                f"Data for {generated_cnt} images generated and loaded into database in {elapsed:.2f} seconds."
+            )
 
             assert sync_count(cur) == generated_cnt
 
-            # Sync fields to OpenSearch for all images.
 
-            logging.info("Sync image fields to OpenSearch")
+def sync_data():
+    """Sync data from the database to OpenSearch."""
+
+    logging.info("Syncing images to to OpenSearch")
+
+    start_time = time.time()
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            logging.info(f"Number of images to sync is {sync_count(cur)}")
 
             sync_fields(cur)
 
-            assert sync_count(cur) == 0
-
         elapsed = time.time() - start_time
-        print(
-            f"Data for {generated_cnt} images generated, loaded and synced successfully in {elapsed:.2f} seconds."
-        )
+    print(
+        f"Images synced to OpenSearch in {elapsed:.2f} seconds."
+    )
+
+    assert sync_count(cur) == 0
 
 
 def main():
-    generate_and_load_data()
+    # generate_and_load_data()
+    sync_data()
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 """Generate data for Bigpicture performance testing."""
+
 import asyncio
 import random
 import time
@@ -59,7 +60,7 @@ def _generate_code_values() -> set[BigpictureCodeAttributeValue]:
 
     generated_values = set()
     for code in random.choices(
-            values, weights=SELECTIVITY, k=random.randint(0, CODE_MAX_CNT)
+        values, weights=SELECTIVITY, k=random.randint(0, CODE_MAX_CNT)
     ):
         generated_values.add(BigpictureCodeAttributeValue(code=code, meaning=code))
     return generated_values
@@ -211,9 +212,7 @@ async def sync_data():
             await sync_fields(cur)
 
             elapsed = time.time() - start_time
-            print(
-                f"Images synced to OpenSearch in {elapsed:.2f} seconds."
-            )
+            print(f"Images synced to OpenSearch in {elapsed:.2f} seconds.")
 
             assert await sync_count(cur) == 0
 

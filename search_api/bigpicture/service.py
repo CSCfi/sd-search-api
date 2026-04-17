@@ -25,7 +25,7 @@ async def load_fields(cur: AsyncCursor, fields: BigpictureFields) -> None:
     """
 
     def _get_codes(
-            items: set[BigpictureCodeAttributeValue] | None,
+        items: set[BigpictureCodeAttributeValue] | None,
     ) -> list[str] | None:
         if not items:
             return None
@@ -65,17 +65,17 @@ async def load_fields(cur: AsyncCursor, fields: BigpictureFields) -> None:
 
 
 async def _load_fields(
-        cur: AsyncCursor,
-        image_id: str,
-        dataset_id: str,
-        dataset_description: str | None,
-        species_codes: list[str] | None,
-        anatomical_site_codes: list[str] | None,
-        sex_values: list[str] | None,
-        fixation_type_codes: list[str] | None,
-        specimen_type_codes: list[str] | None,
-        block_preparation_codes: list[str] | None,
-        age_at_extraction_ranges: list[tuple[int, int]] | None,
+    cur: AsyncCursor,
+    image_id: str,
+    dataset_id: str,
+    dataset_description: str | None,
+    species_codes: list[str] | None,
+    anatomical_site_codes: list[str] | None,
+    sex_values: list[str] | None,
+    fixation_type_codes: list[str] | None,
+    specimen_type_codes: list[str] | None,
+    block_preparation_codes: list[str] | None,
+    age_at_extraction_ranges: list[tuple[int, int]] | None,
 ) -> None:
     """
     Load Bigpicture fields for one image into the database.
@@ -153,7 +153,11 @@ async def _load_fields(
                 """,
                 (
                     image_id,
-                    Range(age_at_extraction_range[0], age_at_extraction_range[1], bounds="[]")
+                    Range(
+                        age_at_extraction_range[0],
+                        age_at_extraction_range[1],
+                        bounds="[]",
+                    )
                     if age_at_extraction_range
                     else None,  # int range into GIST indexed int4range field
                 ),
@@ -198,7 +202,7 @@ async def sync_fields(cur: AsyncCursor) -> None:
             await bp_index_documents(ids_batch, docs_batch)
 
             # Update OpenSearch state in database.
-            logging.info(f"Updating sync status.")
+            logging.info("Updating sync status.")
             await update_cur.executemany(
                 """
                 UPDATE bp_image
@@ -276,4 +280,5 @@ async def sync_count(cur: AsyncCursor) -> int:
         FROM bp_image
         WHERE bp_image.search_sync = false
     """)
-    return (await cur.fetchone())[0]
+
+    return (await cur.fetchone())[0]  # type: ignore

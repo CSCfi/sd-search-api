@@ -33,10 +33,10 @@ atexit.register(_close_bp_search)
 
 
 async def index_document(
-        search: AsyncOpenSearch,
-        index: str,
-        id: str,
-        doc: dict[str, Any],
+    search: AsyncOpenSearch,
+    index: str,
+    id: str,
+    doc: dict[str, Any],
 ) -> None:
     """
     Index a document in OpenSearch.
@@ -65,10 +65,10 @@ async def bp_index_document(doc: dict[str, Any]) -> None:
 
 
 async def index_documents(
-        search: AsyncOpenSearch,
-        index: str,
-        ids: list[str],
-        docs: list[dict[str, Any]],
+    search: AsyncOpenSearch,
+    index: str,
+    ids: list[str],
+    docs: list[dict[str, Any]],
 ) -> None:
     """
     Bulk index documents in OpenSearch.
@@ -92,11 +92,7 @@ async def index_documents(
     )
 
     success, failed = await helpers.async_bulk(
-        search,
-        actions,
-        refresh=False,
-        chunk_size=1000,
-        raise_on_error=False
+        search, actions, refresh=False, chunk_size=1000, raise_on_error=False
     )
 
     if failed:
@@ -104,8 +100,8 @@ async def index_documents(
 
 
 async def bp_index_documents(
-        ids: list[str],
-        docs: list[dict[str, Any]],
+    ids: list[str],
+    docs: list[dict[str, Any]],
 ) -> None:
     """
     Bulk index BigPicture documents in OpenSearch.

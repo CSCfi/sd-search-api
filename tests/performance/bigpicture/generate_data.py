@@ -1,5 +1,5 @@
 """Generate data for Bigpicture performance testing."""
-
+import asyncio
 import random
 import time
 import logging
@@ -127,25 +127,24 @@ def _generate_description() -> str:
     return random.choice(DESCRIPTIONS)
 
 
-def generate_and_load_data():
+async def generate_and_load_data():
     """Generate and load data into the database."""
 
     start_time = time.time()
     generated_cnt = 0
 
-    with get_connection() as conn:
-        with conn.cursor() as cur:
+    async with get_connection() as conn:
+        async with conn.cursor() as cur:
             # Truncate tables.
             #
 
             logging.info("Truncate tables")
 
-            cur.execute("""
-                TRUNCATE TABLE bp_image;
-                TRUNCATE TABLE bp_image_extraction;
+            await cur.execute("""
+                TRUNCATE TABLE bp_image, bp_image_extraction;
             """)
 
-            assert sync_count(cur) == 0
+            assert await sync_count(cur) == 0
 
             # Load data.
             #
@@ -188,41 +187,43 @@ def generate_and_load_data():
 
                 # Load fields to the database for each image.
 
-                logging.info(f"Loading {image_id} images to the database")
-                load_fields(cur, fields)
+                logging.info(f"Loading image '{image_id}' to the database")
+                await load_fields(cur, fields)
 
             elapsed = time.time() - start_time
             print(
                 f"Data for {generated_cnt} images generated and loaded into database in {elapsed:.2f} seconds."
             )
 
-            assert sync_count(cur) == generated_cnt
+            assert await sync_count(cur) == generated_cnt
 
 
-def sync_data():
+async def sync_data():
     """Sync data from the database to OpenSearch."""
 
     logging.info("Syncing images to to OpenSearch")
 
     start_time = time.time()
 
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            logging.info(f"Number of images to sync is {sync_count(cur)}")
+    async with get_connection() as conn:
+        async with conn.cursor() as cur:
+            logging.info(f"Number of images to sync is {await sync_count(cur)}")
+            await sync_fields(cur)
 
-            sync_fields(cur)
+            elapsed = time.time() - start_time
+            print(
+                f"Images synced to OpenSearch in {elapsed:.2f} seconds."
+            )
 
-        elapsed = time.time() - start_time
-    print(
-        f"Images synced to OpenSearch in {elapsed:.2f} seconds."
-    )
-
-    assert sync_count(cur) == 0
+            assert await sync_count(cur) == 0
 
 
 def main():
-    # generate_and_load_data()
-    sync_data()
+    async def run():
+        await generate_and_load_data()
+        await sync_data()
+
+    asyncio.run(run())
 
 
 if __name__ == "__main__":

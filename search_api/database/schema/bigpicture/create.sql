@@ -17,7 +17,7 @@ CREATE TABLE bp_image (
 );
 
 CREATE TABLE bp_image_extraction (
-    image_id TEXT,
+    image_id TEXT NOT NULL,
     age_at_extraction int4range              -- int range
 );
 

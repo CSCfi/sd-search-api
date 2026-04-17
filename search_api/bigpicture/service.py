@@ -3,12 +3,12 @@
 import logging
 from typing import Any
 
-from psycopg2.extras import NumericRange  # type: ignore
-from psycopg2.extensions import cursor  # type: ignore
+from psycopg import AsyncCursor
+from psycopg.types.range import Range
 
 from search_api.bigpicture.models import BigpictureFields, BigpictureCodeAttributeValue
 from search_api.database.repository import get_cursor
-from search_api.services.search import bp_index_document, bp_index_documents
+from search_api.services.search import bp_index_documents
 
 logging.basicConfig(level=logging.INFO)
 
@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO)
 BATCH_SIZE = 1000
 
 
-def load_fields(cur: cursor, fields: BigpictureFields) -> None:
+async def load_fields(cur: AsyncCursor, fields: BigpictureFields) -> None:
     """
     Load Bigpicture fields for one image into the database.
 
@@ -49,7 +49,7 @@ def load_fields(cur: cursor, fields: BigpictureFields) -> None:
         start, end = value
         age_at_extraction_values.append((start, end))
 
-    _load_fields(
+    await _load_fields(
         cur,
         fields.image_id,
         fields.dataset_id,
@@ -64,8 +64,8 @@ def load_fields(cur: cursor, fields: BigpictureFields) -> None:
     )
 
 
-def _load_fields(
-        cur: cursor,
+async def _load_fields(
+        cur: AsyncCursor,
         image_id: str,
         dataset_id: str,
         dataset_description: str | None,
@@ -93,11 +93,8 @@ def _load_fields(
     :param age_at_extraction_ranges: List of ages at extraction ranges.
     """
 
-    # GIN indexed values do not have to be sorted, but
-    # this may be convenient when manually looking at
-    # the values in the database.
-
-    cur.execute(
+    # Replace existing row the image.
+    await cur.execute(
         """
         INSERT INTO bp_image (
             image_id,
@@ -111,6 +108,16 @@ def _load_fields(
             block_preparation
         )
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (image_id) DO UPDATE
+        SET
+            dataset_id = EXCLUDED.dataset_id,
+            dataset_description = EXCLUDED.dataset_description,
+            species = EXCLUDED.species,
+            anatomical_site = EXCLUDED.anatomical_site,
+            sex = EXCLUDED.sex,
+            fixation_type = EXCLUDED.fixation_type,
+            specimen_type = EXCLUDED.specimen_type,
+            block_preparation = EXCLUDED.block_preparation
         """,
         (
             image_id,
@@ -125,20 +132,18 @@ def _load_fields(
         ),
     )
 
-    #  ON CONFLICT (image_id) DO UPDATE
-    #             SET
-    #             dataset_id = EXCLUDED.dataset_id,
-    #             dataset_description = EXCLUDED.dataset_description,
-    #             species = EXCLUDED.species,
-    #             anatomical_site = EXCLUDED.anatomical_site,
-    #             sex = EXCLUDED.sex,
-    #             fixation_type = EXCLUDED.fixation_type,
-    #             specimen_type = EXCLUDED.specimen_type,
-    #             block_preparation = EXCLUDED.block_preparation
-
     if age_at_extraction_ranges:
         for age_at_extraction_range in age_at_extraction_ranges:
-            cur.execute(
+            # Delete existing rows for the image.
+            await cur.execute(
+                """
+                DELETE FROM bp_image_extraction
+                WHERE image_id = %s
+                """,
+                (image_id,),
+            )
+
+            await cur.execute(
                 """
                 INSERT INTO bp_image_extraction (
                     image_id,
@@ -148,20 +153,14 @@ def _load_fields(
                 """,
                 (
                     image_id,
-                    NumericRange(age_at_extraction_range[0], age_at_extraction_range[1])
+                    Range(age_at_extraction_range[0], age_at_extraction_range[1], bounds="[]")
                     if age_at_extraction_range
                     else None,  # int range into GIST indexed int4range field
                 ),
             )
 
 
-# TODO:
-#  ON CONFLICT (image_id) DO UPDATE
-#                 SET
-#                     age_at_extraction = EXCLUDED.age_at_extraction;
-
-
-def sync_fields(cur: cursor) -> None:
+async def sync_fields(cur: AsyncCursor) -> None:
     """
     Sync database fields to OpenSearch.
 
@@ -175,8 +174,8 @@ def sync_fields(cur: cursor) -> None:
     ids_batch: list[str] = []
     docs_batch: list[dict[str, Any]] = []
 
-    with get_cursor() as update_cur:
-        cur.execute("""
+    async with get_cursor() as update_cur:
+        await cur.execute("""
             SELECT
                 bp_image.image_id,
                 bp_image.dataset_id,
@@ -193,7 +192,29 @@ def sync_fields(cur: cursor) -> None:
             WHERE bp_image.search_sync = false
         """)
 
-        for row in cur:
+        async def flush_batch():
+            # Flush the OpenSearch batch.
+            logging.info(f"Syncing {len(docs_batch)} images to OpenSearch.")
+            await bp_index_documents(ids_batch, docs_batch)
+
+            # Update OpenSearch state in database.
+            logging.info(f"Updating sync status.")
+            await update_cur.executemany(
+                """
+                UPDATE bp_image
+                SET
+                    search_sync = true,
+                    search_sync_date = now()
+                WHERE image_id = %s
+                """,
+                [(i,) for i in ids_batch],
+            )
+
+            # Clear the OpenSearch batch.
+            ids_batch.clear()
+            docs_batch.clear()
+
+        async for row in cur:
             (
                 image_id,
                 dataset_id,
@@ -232,30 +253,15 @@ def sync_fields(cur: cursor) -> None:
             docs_batch.append(doc)
 
             if len(docs_batch) >= BATCH_SIZE:
-                # Flush the OpenSearch batch.
-                logging.info(f"Indexing {len(docs_batch)} images in OpenSearch.")
-                bp_index_documents(ids_batch, docs_batch)
+                # Flush batch.
+                await flush_batch()
 
-                logging.info( f"Updating indexing status for {len(docs_batch)} images.")
-
-                # Update OpenSearch state in database.
-                update_cur.executemany(
-                    """
-                    UPDATE bp_image
-                    SET
-                        search_sync = true,
-                        search_sync_date = now()
-                    WHERE image_id = %s
-                    """,
-                    [(i,) for i in ids_batch],
-                )
-
-                # Clear the OpenSearch batch.
-                ids_batch.clear()
-                docs_batch.clear()
+        if ids_batch:
+            # Flush final batch.
+            await flush_batch()
 
 
-def sync_count(cur: cursor) -> int:
+async def sync_count(cur: AsyncCursor) -> int:
     """
     Return number of images to sync to OpenSearch.
 
@@ -265,9 +271,9 @@ def sync_count(cur: cursor) -> int:
 
     # Find imaged to sync to OpenSearch.
 
-    cur.execute("""
+    await cur.execute("""
         SELECT COUNT(1)
         FROM bp_image
         WHERE bp_image.search_sync = false
     """)
-    return cur.fetchone()[0]
+    return (await cur.fetchone())[0]

@@ -1,14 +1,16 @@
 # OpenSearch service.
+import asyncio
+import atexit
 import logging
 
-from opensearchpy import OpenSearch, helpers
+from opensearchpy import AsyncOpenSearch, helpers
 from typing import Any
 
 logging.basicConfig(level=logging.INFO)
 
 
-def _search(host: str, port: int, user: str, password: str) -> OpenSearch:
-    return OpenSearch(
+def _search(host: str, port: int, user: str, password: str) -> AsyncOpenSearch:
+    return AsyncOpenSearch(
         hosts=[{"host": host, "port": port}],
         http_auth=(user, password),
         use_ssl=False,
@@ -20,8 +22,18 @@ def _search(host: str, port: int, user: str, password: str) -> OpenSearch:
 bp_search = _search("localhost", 9200, "admin", "admin")
 
 
-def index_document(
-        search: OpenSearch,
+def _close_bp_search():
+    try:
+        asyncio.run(bp_search.close())
+    except Exception:
+        pass
+
+
+atexit.register(_close_bp_search)
+
+
+async def index_document(
+        search: AsyncOpenSearch,
         index: str,
         id: str,
         doc: dict[str, Any],
@@ -35,7 +47,7 @@ def index_document(
     :param doc: The OpenSearch document to index.
     """
 
-    search.index(
+    await search.index(
         index=index,
         id=id,
         body=doc,
@@ -43,17 +55,17 @@ def index_document(
     )
 
 
-def bp_index_document(doc: dict[str, Any]) -> None:
+async def bp_index_document(doc: dict[str, Any]) -> None:
     """
     Index BigPicture document in OpenSearch.
 
     :param doc: the OpenSearch document to index.
     """
-    index_document(bp_search, "bp-image-index", doc["image_id"], doc)
+    await index_document(bp_search, "bp-image-index", doc["image_id"], doc)
 
 
-def index_documents(
-        search: OpenSearch,
+async def index_documents(
+        search: AsyncOpenSearch,
         index: str,
         ids: list[str],
         docs: list[dict[str, Any]],
@@ -79,7 +91,7 @@ def index_documents(
         for _id, doc in zip(ids, docs)
     )
 
-    success, failed = helpers.bulk(
+    success, failed = await helpers.async_bulk(
         search,
         actions,
         refresh=False,
@@ -91,7 +103,7 @@ def index_documents(
         logging.error(f"{failed} documents failed to index")
 
 
-def bp_index_documents(
+async def bp_index_documents(
         ids: list[str],
         docs: list[dict[str, Any]],
 ) -> None:
@@ -101,4 +113,4 @@ def bp_index_documents(
     :param ids: Document ids.
     :param docs: The OpenSearch documents to index.
     """
-    index_documents(bp_search, "bp-image-index", ids, docs)
+    await index_documents(bp_search, "bp-image-index", ids, docs)

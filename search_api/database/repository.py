@@ -1,13 +1,12 @@
-from contextlib import contextmanager
-from typing import Generator
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
 
-import psycopg2  # type: ignore
-from psycopg2.extensions import connection  # type: ignore
-from psycopg2.extensions import cursor  # type: ignore
+from psycopg import AsyncConnection, AsyncCursor
+from psycopg.rows import tuple_row
 
 
-@contextmanager
-def get_connection() -> Generator[connection]:
+@asynccontextmanager
+async def get_connection() -> AsyncGenerator[AsyncConnection, None]:
     """
     Get a new database connection.
 
@@ -15,27 +14,27 @@ def get_connection() -> Generator[connection]:
     """
     # TODO(improve): read connection details from an environmental variable
 
-    conn = psycopg2.connect(
+    conn = await AsyncConnection.connect(
         host="localhost",
         dbname="sd_search",
         user="postgres",
         password="test",
+        autocommit=True,
     )
-    conn.autocommit = True
     try:
         yield conn
     finally:
-        conn.close()
+        await conn.close()
 
 
-@contextmanager
-def get_cursor() -> Generator[cursor]:
+@asynccontextmanager
+async def get_cursor() -> AsyncGenerator[AsyncCursor, None]:
     """
     Get a new database cursor.
 
     :return: a new database cursor.
     """
 
-    with get_connection() as con:
-        with con.cursor() as cur:
+    async with get_connection() as con:
+        async with con.cursor(row_factory=tuple_row) as cur:
             yield cur

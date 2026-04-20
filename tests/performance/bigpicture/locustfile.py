@@ -6,42 +6,41 @@ from locust import HttpUser, task, between
 INDEX = "bp-image-index"
 
 QUERIES = [
-    {"name": "Top 100 datasets match dataset_description", "body": {
-        "size": 0,  # Return only dataset aggregation and not individual image documents.
-        "query": {
-            "match": {
-                "dataset_description": "natural variation"
-            }
-        },
-        # Aggregate documents by dataset id.
-        "aggs": {
-            "datasets": {
-                "terms": {
-                    "field": "dataset_id",
-                    "size": 100  # Top 100 datasets with most images.
-                },
-                # Compute aggregation metrics for grouped dataset ids.
-                "aggs": {
-                    # Return one representative document per dataset. Number
-                    # of matched images is returned in 'doc_count' field
-                    # for each 'key' (dataset id) field.
-                    "dataset_metadata": {
-                        "top_hits": {
-                            "size": 1,
-                            "_source": {
-                                "includes": [
-                                    "dataset_short_name",
-                                    "dataset_title",
-                                    "dataset_description",
-                                    "dataset_image_cnt"
-                                ]
+    {
+        "name": "Top 100 datasets match dataset_description",
+        "body": {
+            "size": 0,  # Return only dataset aggregation and not individual image documents.
+            "query": {"match": {"dataset_description": "natural variation"}},
+            # Aggregate documents by dataset id.
+            "aggs": {
+                "datasets": {
+                    "terms": {
+                        "field": "dataset_id",
+                        "size": 100,  # Top 100 datasets with most images.
+                    },
+                    # Compute aggregation metrics for grouped dataset ids.
+                    "aggs": {
+                        # Return one representative document per dataset. Number
+                        # of matched images is returned in 'doc_count' field
+                        # for each 'key' (dataset id) field.
+                        "dataset_metadata": {
+                            "top_hits": {
+                                "size": 1,
+                                "_source": {
+                                    "includes": [
+                                        "dataset_short_name",
+                                        "dataset_title",
+                                        "dataset_description",
+                                        "dataset_image_cnt",
+                                    ]
+                                },
                             }
                         }
-                    }
+                    },
                 }
-            }
-        }
-    }},
+            },
+        },
+    },
     {"name": "images match all", "body": {"query": {"match_all": {}}}},
     # Text search
     {

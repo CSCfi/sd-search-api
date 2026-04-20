@@ -152,6 +152,14 @@ def extract_fields(
                     raise ValueError(
                         f"Failed to extract dataset id from {str(dataset_file_path)}"
                     )
+                dataset_short_name = get_xml_value(
+                    "/DATASET/DESCRIPTION | /DATASET_SET/DATASET/SHORT_NAME",
+                    dataset_xml,
+                )
+                dataset_title = get_xml_value(
+                    "/DATASET/DESCRIPTION | /DATASET_SET/DATASET/TITLE",
+                    dataset_xml,
+                )
                 dataset_description = get_xml_value(
                     "/DATASET/DESCRIPTION | /DATASET_SET/DATASET/DESCRIPTION",
                     dataset_xml,
@@ -214,10 +222,14 @@ def extract_fields(
 
             # Create search fields for each image.
             fields: dict[str, BigpictureFields] = {}
+            dataset_image_cnt = len(image_ids)
             for image_id in image_ids:
                 fields[image_id] = BigpictureFields(
                     dataset_id=dataset_id,
                     image_id=image_id,
+                    dataset_image_cnt=dataset_image_cnt,
+                    dataset_short_name=dataset_short_name,
+                    dataset_title=dataset_title,
                     dataset_description=dataset_description,
                 )
 

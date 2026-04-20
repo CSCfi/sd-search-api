@@ -55,4 +55,7 @@ class BigpictureFields(
 
     image_id: str
     dataset_id: str
+    dataset_image_cnt: int
+    dataset_short_name: str | None = None
+    dataset_title: str | None = None
     dataset_description: str | None = None

@@ -2,6 +2,7 @@
 
 import asyncio
 import random
+import string
 import time
 import logging
 
@@ -17,7 +18,7 @@ logging.basicConfig(level=logging.INFO)
 MAX_TIME = 60 * 60 * 2
 
 # Number of images to generate.
-IMAGE_CNT = 10000000
+IMAGE_CNT = 10000
 
 # Number of datasets to generate.
 DATASET_CNT = 5000
@@ -88,6 +89,31 @@ def _generate_age_at_extraction_ranges() -> set[tuple[int, int]]:
     )
 
 
+def _generate_short_name() -> str:
+    """Return a random short name."""
+    base = ["Atlas", "Helix", "Astra", "Orion", "Nexus", "Vivo", "Index", "Basis"]
+    suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=4))
+    return f"{random.choice(base)}-{suffix}"
+
+
+def _generate_title() -> str:
+    """Return a random title."""
+    words = [
+        "Histology",
+        "Imaging",
+        "Pathology",
+        "Microscopy",
+        "Tissue",
+        "Anatomical",
+        "Cellular",
+        "Atlas",
+        "Reference",
+        "Collection",
+        "Dataset",
+    ]
+    return " ".join(random.sample(words, k=random.choice([3, 4, 5])))
+
+
 DESCRIPTIONS = [
     "This dataset contains a variety of biological microscopy images used for testing classification models.",
     "The samples represent diverse anatomical regions and were collected under controlled laboratory conditions.",
@@ -152,6 +178,14 @@ async def generate_and_load_data():
 
             logging.info(f"Load {IMAGE_CNT} images")
 
+            # Get dataset image count.
+            base = IMAGE_CNT // DATASET_CNT
+            remainder = IMAGE_CNT % DATASET_CNT
+            dataset_image_cnt = {
+                f"dataset{k}": base + (1 if k <= remainder else 0)
+                for k in range(1, DATASET_CNT + 1)
+            }
+
             for i in range(1, IMAGE_CNT + 1):
                 if time.time() - start_time > MAX_TIME:
                     print("Time limited exceeded.")
@@ -162,6 +196,8 @@ async def generate_and_load_data():
 
                 dataset_id = f"dataset{((i - 1) % DATASET_CNT) + 1}"
 
+                dataset_short_name = _generate_short_name()
+                dataset_title = _generate_title()
                 dataset_description = _generate_description()
 
                 sex_values = _generate_sex_values()
@@ -176,6 +212,9 @@ async def generate_and_load_data():
                 fields = BigpictureFields(
                     image_id=image_id,
                     dataset_id=dataset_id,
+                    dataset_image_cnt=dataset_image_cnt[dataset_id],
+                    dataset_short_name=dataset_short_name,
+                    dataset_title=dataset_title,
                     dataset_description=dataset_description,
                     sex=sex_values,
                     species=species_codes,

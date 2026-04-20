@@ -17,6 +17,17 @@
       "dataset_id": {
         "type": "keyword"
       },
+      "dataset_image_cnt": {
+        "type": "long"
+      },
+      "dataset_short_name": {
+        "type": "text",
+        "analyzer": "english_text"
+      },
+      "dataset_title": {
+        "type": "text",
+        "analyzer": "english_text"
+      },
       "dataset_description": {
         "type": "text",
         "analyzer": "english_text"

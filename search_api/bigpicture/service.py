@@ -53,6 +53,9 @@ async def load_fields(cur: AsyncCursor, fields: BigpictureFields) -> None:
         cur,
         fields.image_id,
         fields.dataset_id,
+        fields.dataset_image_cnt,
+        fields.dataset_short_name,
+        fields.dataset_title,
         fields.dataset_description,
         species_codes,
         anatomical_site_codes,
@@ -68,6 +71,9 @@ async def _load_fields(
     cur: AsyncCursor,
     image_id: str,
     dataset_id: str,
+    dataset_image_cnt: int,
+    dataset_short_name: str | None,
+    dataset_title: str | None,
     dataset_description: str | None,
     species_codes: list[str] | None,
     anatomical_site_codes: list[str] | None,
@@ -83,6 +89,9 @@ async def _load_fields(
     :param cur: The database cursor.
     :param image_id: Unique identifier of the image.
     :param dataset_id: Unique Identifier of the dataset the image belongs to.
+    :param dataset_image_cnt Number of images in the dataset.
+    :param dataset_short_name Short name of the dataset.
+    :param dataset_title: Title of the dataset.
     :param dataset_description: Description of the dataset.
     :param species_codes: List of species codes.
     :param anatomical_site_codes: List of anatomical site codes.
@@ -93,12 +102,15 @@ async def _load_fields(
     :param age_at_extraction_ranges: List of ages at extraction ranges.
     """
 
-    # Replace existing row the image.
+    # Replace existing image row.
     await cur.execute(
         """
         INSERT INTO bp_image (
             image_id,
             dataset_id,
+            dataset_image_cnt,
+            dataset_short_name,
+            dataset_title,
             dataset_description,
             species,
             anatomical_site,
@@ -107,10 +119,13 @@ async def _load_fields(
             specimen_type,
             block_preparation
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (image_id) DO UPDATE
         SET
             dataset_id = EXCLUDED.dataset_id,
+            dataset_image_cnt = EXCLUDED.dataset_image_cnt,
+            dataset_short_name = EXCLUDED.dataset_short_name,
+            dataset_title = EXCLUDED.dataset_title,
             dataset_description = EXCLUDED.dataset_description,
             species = EXCLUDED.species,
             anatomical_site = EXCLUDED.anatomical_site,
@@ -122,6 +137,9 @@ async def _load_fields(
         (
             image_id,
             dataset_id,
+            dataset_image_cnt,
+            dataset_short_name,  # text into GIN indexes TEXT field
+            dataset_title,  # text into GIN indexes TEXT field
             dataset_description,  # text into GIN indexes TEXT field
             species_codes,  # codes into GIN indexed TEXT[] field
             anatomical_site_codes,  # codes into GIN indexed TEXT[] field
@@ -183,6 +201,9 @@ async def sync_fields(cur: AsyncCursor) -> None:
             SELECT
                 bp_image.image_id,
                 bp_image.dataset_id,
+                bp_image.dataset_image_cnt,
+                bp_image.dataset_short_name,
+                bp_image.dataset_title,
                 bp_image.dataset_description,
                 bp_image.species,
                 bp_image.anatomical_site,
@@ -222,6 +243,9 @@ async def sync_fields(cur: AsyncCursor) -> None:
             (
                 image_id,
                 dataset_id,
+                dataset_image_cnt,
+                dataset_short_name,
+                dataset_title,
                 dataset_description,
                 species,
                 anatomical_site,
@@ -237,6 +261,9 @@ async def sync_fields(cur: AsyncCursor) -> None:
             doc = {
                 "image_id": image_id,
                 "dataset_id": dataset_id,
+                "dataset_image_cnt": dataset_image_cnt,
+                "dataset_short_name": dataset_short_name,
+                "dataset_title": dataset_title,
                 "dataset_description": dataset_description,
                 "species": species or [],
                 "anatomical_site": anatomical_site or [],

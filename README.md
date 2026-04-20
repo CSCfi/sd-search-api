@@ -246,6 +246,11 @@ curl -X POST "http://localhost:9200/bp-image-index/_search" -H "Content-Type: ap
 Data for OpenSearch performance tests has been generated and
 loaded with tests/performance/bigpicture/generate_data.py.
 
+| Number of images | Operation             | Time (seconds) |
+|------------------|-----------------------|----------------|
+| 1,000,000        | Loading to PostgreSQL | 349.10         |
+| 1,000,000        | Syncing to OpenSearch | 282.26         |
+
 The performance tests have been done using Locust and reports
 are available in tests/performance/bigpicture/opensearch directory.
 

@@ -6,70 +6,106 @@ from locust import HttpUser, task, between
 INDEX = "bp-image-index"
 
 QUERIES = [
-    {"name": "match all", "body": {"query": {"match_all": {}}}},
+    {"name": "Top 100 datasets match dataset_description", "body": {
+        "size": 0,  # Return only dataset aggregation and not individual image documents.
+        "query": {
+            "match": {
+                "dataset_description": "natural variation"
+            }
+        },
+        # Aggregate documents by dataset id.
+        "aggs": {
+            "datasets": {
+                "terms": {
+                    "field": "dataset_id",
+                    "size": 100  # Top 100 datasets with most images.
+                },
+                # Compute aggregation metrics for grouped dataset ids.
+                "aggs": {
+                    # Return one representative document per dataset. Number
+                    # of matched images is returned in 'doc_count' field
+                    # for each 'key' (dataset id) field.
+                    "dataset_metadata": {
+                        "top_hits": {
+                            "size": 1,
+                            "_source": {
+                                "includes": [
+                                    "dataset_short_name",
+                                    "dataset_title",
+                                    "dataset_description",
+                                    "dataset_image_cnt"
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }},
+    {"name": "images match all", "body": {"query": {"match_all": {}}}},
     # Text search
     {
-        "name": "match dataset_description",
+        "name": "images match dataset_description",
         "body": {
             "query": {"query": {"match": {"dataset_description": "natural variation"}}}
         },
     },
     # Code search
     {
-        "name": "species code 0.001% sensitivity",
+        "name": "images match species code 0.001% sensitivity",
         "body": {"query": {"term": {"species": "outstanding"}}},
     },
     {
-        "name": "species code 0.01% sensitivity",
+        "name": "images match species code 0.01% sensitivity",
         "body": {"query": {"term": {"species": "excellent"}}},
     },
     {
-        "name": "species code 0.1% sensitivity",
+        "name": "images match species code 0.1% sensitivity",
         "body": {"query": {"term": {"species": "high"}}},
     },
     {
-        "name": "species code 1% sensitivity",
+        "name": "images match species code 1% sensitivity",
         "body": {"query": {"term": {"species": "1"}}},
     },
     {
-        "name": "species code 5% sensitivity",
+        "name": "images match species code 5% sensitivity",
         "body": {"query": {"term": {"species": "4"}}},
     },
     {
-        "name": "species code 10% sensitivity",
+        "name": "images match species code 10% sensitivity",
         "body": {"query": {"term": {"species": "10"}}},
     },
     {
-        "name": "species code 83.9% sensitivity",
+        "name": "images match species code 83.9% sensitivity",
         "body": {"query": {"term": {"species": "poor"}}},
     },
     # Age at extraction
     {
-        "name": "age_at_extraction 0.001% sensitivity",
+        "name": "images match age_at_extraction 0.001% sensitivity",
         "body": {"query": {"range": {"age_at_extraction": {"gte": 1, "lte": 2}}}},
     },
     {
-        "name": "age_at_extraction 0.01% sensitivity",
+        "name": "images match age_at_extraction 0.01% sensitivity",
         "body": {"query": {"range": {"age_at_extraction": {"gte": 3, "lte": 4}}}},
     },
     {
-        "name": "age_at_extraction 0.1% sensitivity",
+        "name": "images match age_at_extraction 0.1% sensitivity",
         "body": {"query": {"range": {"age_at_extraction": {"gte": 5, "lte": 6}}}},
     },
     {
-        "name": "age_at_extraction 1% sensitivity",
+        "name": "images match age_at_extraction 1% sensitivity",
         "body": {"query": {"range": {"age_at_extraction": {"gte": 7, "lte": 8}}}},
     },
     {
-        "name": "age_at_extraction 5% sensitivity",
+        "name": "images match age_at_extraction 5% sensitivity",
         "body": {"query": {"range": {"age_at_extraction": {"gte": 9, "lte": 10}}}},
     },
     {
-        "name": "age_at_extraction 10% sensitivity",
+        "name": "images match age_at_extraction 10% sensitivity",
         "body": {"query": {"range": {"age_at_extraction": {"gte": 11, "lte": 12}}}},
     },
     {
-        "name": "age_at_extraction 83.9% sensitivity",
+        "name": "images match age_at_extraction 83.9% sensitivity",
         "body": {"query": {"range": {"age_at_extraction": {"gte": 13, "lte": 100}}}},
     },
 ]

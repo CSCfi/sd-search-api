@@ -1,12 +1,17 @@
 """Bigpicture services."""
 
 import logging
-from typing import Any
+from typing import Any, Collection
 
 from psycopg import AsyncCursor
 from psycopg.types.range import Range
+from psycopg.types.json import Json
 
-from search_api.bigpicture.models import BigpictureFields, BigpictureCodeAttributeValue
+from search_api.bigpicture.models import (
+    BigpictureFields,
+    BigpictureCodeAttributeValue,
+    BigpictureStainField,
+)
 from search_api.database.repository import get_cursor
 from search_api.services.search import bp_index_documents
 
@@ -64,6 +69,7 @@ async def load_fields(cur: AsyncCursor, fields: BigpictureFields) -> None:
         specimen_type_codes,
         block_preparation_codes,
         age_at_extraction_values,
+        fields.stains,
     )
 
 
@@ -82,6 +88,7 @@ async def _load_fields(
     specimen_type_codes: list[str] | None,
     block_preparation_codes: list[str] | None,
     age_at_extraction_ranges: list[tuple[int, int]] | None,
+    stains: Collection[BigpictureStainField] | None,
 ) -> None:
     """
     Load Bigpicture fields for one image into the database.
@@ -100,6 +107,7 @@ async def _load_fields(
     :param specimen_type_codes: List of specimen type codes.
     :param block_preparation_codes: List of block preparation codes.
     :param age_at_extraction_ranges: List of ages at extraction ranges.
+    :param stains: List of stains.
     """
 
     # Replace existing image row.
@@ -117,9 +125,10 @@ async def _load_fields(
             sex,
             fixation_type,
             specimen_type,
-            block_preparation
+            block_preparation,
+            stains
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (image_id) DO UPDATE
         SET
             dataset_id = EXCLUDED.dataset_id,
@@ -132,7 +141,8 @@ async def _load_fields(
             sex = EXCLUDED.sex,
             fixation_type = EXCLUDED.fixation_type,
             specimen_type = EXCLUDED.specimen_type,
-            block_preparation = EXCLUDED.block_preparation
+            block_preparation = EXCLUDED.block_preparation,
+            stains = EXCLUDED.stains
         """,
         (
             image_id,
@@ -147,6 +157,21 @@ async def _load_fields(
             fixation_type_codes,  # codes into GIN indexed TEXT[] field
             specimen_type_codes,  # codes into GIN indexed TEXT[] field
             block_preparation_codes,  # codes into GIN indexed TEXT[] field
+            Json(
+                [
+                    {
+                        **stain.model_dump(),
+                        "staining_procedure": (
+                            stain.staining_procedure.code
+                            if stain.staining_procedure is not None
+                            else None
+                        ),
+                    }
+                    for stain in stains
+                ]
+            )
+            if stains
+            else None,  # stains into GIN indexed JSONB field
         ),
     )
 
@@ -182,11 +207,102 @@ async def _load_fields(
             )
 
 
-async def sync_fields(cur: AsyncCursor) -> None:
+async def get_fields(cur: AsyncCursor, image_id: str) -> BigpictureFields | None:
+    """
+    Get Bigpicture fields for one image from the database. For ontology fields columns
+    uses the code value also for the meaning.
+
+    :param cur: The database cursor.
+    :param image_id: Unique identifier of the image.
+    :return: The Bigpicture fields for the image.
+    """
+
+    await cur.execute(
+        """
+        SELECT
+            image_id,
+            dataset_id,
+            dataset_image_cnt,
+            dataset_short_name,
+            dataset_title,
+            dataset_description,
+            species,
+            anatomical_site,
+            sex,
+            fixation_type,
+            specimen_type,
+            block_preparation,
+            stains
+        FROM bp_image
+        WHERE image_id = %s
+        """,
+        (image_id,),
+    )
+
+    row = await cur.fetchone()
+    if not row:
+        return None
+
+    (
+        image_id,
+        dataset_id,
+        dataset_image_cnt,
+        dataset_short_name,
+        dataset_title,
+        dataset_description,
+        species,
+        anatomical_site,
+        sex,
+        fixation_type,
+        specimen_type,
+        block_preparation,
+        stains,
+    ) = row
+
+    def _get_codes(codes: list[str]) -> set[BigpictureCodeAttributeValue]:
+        s = set()
+        if codes is None:
+            return s
+        for code in codes:
+            s.add(BigpictureCodeAttributeValue(code=code, meaning=code))
+        return s
+
+    stains = {
+        BigpictureStainField(
+            **{
+                **stain,
+                "staining_procedure": BigpictureCodeAttributeValue(
+                    code=stain["staining_procedure"],
+                    meaning=stain["staining_procedure"],
+                ),
+            }
+        )
+        for stain in (stains or [])
+    }
+
+    return BigpictureFields(
+        image_id=image_id,
+        dataset_id=dataset_id,
+        dataset_image_cnt=dataset_image_cnt,
+        dataset_short_name=dataset_short_name,
+        dataset_title=dataset_title,
+        dataset_description=dataset_description,
+        species=_get_codes(species),
+        anatomical_site=_get_codes(anatomical_site),
+        sex=set(sex or []),
+        fixation_type=_get_codes(fixation_type),
+        specimen_type=_get_codes(specimen_type),
+        block_preparation=_get_codes(block_preparation),
+        stains=stains,
+    )
+
+
+async def sync_fields(cur: AsyncCursor, image_id: str | None = None) -> None:
     """
     Sync database fields to OpenSearch.
 
     :param cur: The database cursor.
+    :param image_id: An optional image id.
     """
 
     # Find imaged to sync to OpenSearch.
@@ -197,7 +313,7 @@ async def sync_fields(cur: AsyncCursor) -> None:
     docs_batch: list[dict[str, Any]] = []
 
     async with get_cursor() as update_cur:
-        await cur.execute("""
+        query = """
             SELECT
                 bp_image.image_id,
                 bp_image.dataset_id,
@@ -211,11 +327,20 @@ async def sync_fields(cur: AsyncCursor) -> None:
                 bp_image.fixation_type,
                 bp_image.block_preparation,
                 bp_image.specimen_type,
+                bp_image.stains,
                 bp_image_extraction.age_at_extraction
             FROM bp_image
             LEFT JOIN bp_image_extraction USING (image_id)
             WHERE bp_image.search_sync = false
-        """)
+        """
+
+        params = []
+
+        if image_id is not None:
+            query += " AND bp_image.image_id = %s"
+            params.append(image_id)
+
+        await cur.execute(query, params)
 
         async def flush_batch():
             # Flush the OpenSearch batch.
@@ -253,6 +378,7 @@ async def sync_fields(cur: AsyncCursor) -> None:
                 fixation_type,
                 block_preparation,
                 specimen_type,
+                stains,
                 age_at_extraction,
             ) = row
 
@@ -278,6 +404,17 @@ async def sync_fields(cur: AsyncCursor) -> None:
                     "gte": age_at_extraction.lower,
                     "lte": age_at_extraction.upper,
                 }
+
+            if stains:
+                doc["stains"] = [
+                    {
+                        "staining_method": stain.get("staining_method"),
+                        "staining_procedure": stain.get("staining_procedure"),
+                        "staining_procedure_text": stain.get("staining_procedure_text"),
+                        "staining_target": stain.get("staining_target"),
+                    }
+                    for stain in stains
+                ]
 
             # Add to the OpenSearch batch.
             ids_batch.append(image_id)

@@ -17,96 +17,113 @@ TEST_DIR = Path(__file__).resolve().parent.parent.parent / "test_files" / "bigpi
 
 def test_extract_fields():
     fields_iterator = extract_fields(root=str(TEST_DIR))
+    for fields in fields_iterator:
+        if fields.image_id == "image_1":
+            assert fields is not None
+            assert fields.image_id == "image_1"
+            assert fields.dataset_id == "dataset_1"
+            assert fields.dataset_description == "test_description"
 
-    fields = next(fields_iterator)
+            assert fields.species == {
+                BigpictureCodeAttributeValue(
+                    code="1", scheme="Scheme1", meaning="Test1", scheme_version=""
+                )
+            }
+            assert fields.sex == {"Male"}
+            assert fields.anatomical_site == {
+                BigpictureCodeAttributeValue(
+                    code="2", scheme="Scheme2", meaning="Test2", scheme_version=""
+                )
+            }
+            assert fields.fixation_type == {
+                BigpictureCodeAttributeValue(
+                    code="3", scheme="Scheme3", meaning="Test3", scheme_version=""
+                )
+            }
+            assert fields.specimen_type == {
+                BigpictureCodeAttributeValue(
+                    code="4", scheme="Scheme4", meaning="Test4", scheme_version=""
+                )
+            }
+            assert fields.age_at_extraction == {(40, 41)}
+            assert fields.block_preparation == {
+                BigpictureCodeAttributeValue(
+                    code="5", scheme="Scheme5", meaning="Test5", scheme_version=""
+                )
+            }
 
-    assert fields is not None
-    assert fields.image_id == "image_1"
-    assert fields.dataset_id == "dataset_1"
-    assert fields.dataset_description == "test_description"
+            assert len(fields.stains) == 1
+            stain = next(iter(fields.stains))
 
-    assert fields.species == {
-        BigpictureCodeAttributeValue(
-            code="1", scheme="Scheme1", meaning="Test1", scheme_version=""
-        )
-    }
-    assert fields.sex == {"Male"}
-    assert fields.anatomical_site == {
-        BigpictureCodeAttributeValue(
-            code="2", scheme="Scheme2", meaning="Test2", scheme_version=""
-        )
-    }
-    assert fields.fixation_type == {
-        BigpictureCodeAttributeValue(
-            code="3", scheme="Scheme3", meaning="Test3", scheme_version=""
-        )
-    }
-    assert fields.specimen_type == {
-        BigpictureCodeAttributeValue(
-            code="4", scheme="Scheme4", meaning="Test4", scheme_version=""
-        )
-    }
-    assert fields.age_at_extraction == {(40, 41)}
-    assert fields.block_preparation == {
-        BigpictureCodeAttributeValue(
-            code="5", scheme="Scheme5", meaning="Test5", scheme_version=""
-        )
-    }
+            assert stain.staining_method == "chemical"
+            assert stain.staining_procedure.code == "6"
+            assert stain.staining_procedure.meaning == "Test6"
+            assert stain.staining_procedure_text == "test6"
+            assert stain.staining_target is None
+        else:
+            assert fields is not None
+            assert fields.image_id == "image_2"
+            assert fields.dataset_id == "dataset_1"
+            assert fields.dataset_description == "test_description"
 
-    fields = next(fields_iterator)
+            assert fields.species == {
+                BigpictureCodeAttributeValue(
+                    code="1", scheme="Scheme1", meaning="Test1", scheme_version=""
+                )
+            }
+            assert fields.sex == {"Male"}
+            assert fields.anatomical_site == {
+                BigpictureCodeAttributeValue(
+                    code="2", scheme="Scheme2", meaning="Test2", scheme_version=""
+                )
+            }
+            assert fields.fixation_type == {
+                BigpictureCodeAttributeValue(
+                    code="3", scheme="Scheme3", meaning="Test3", scheme_version=""
+                )
+            }
+            assert fields.specimen_type == {
+                BigpictureCodeAttributeValue(
+                    code="4", scheme="Scheme4", meaning="Test4", scheme_version=""
+                )
+            }
+            assert fields.age_at_extraction == {(40, 41)}
+            assert fields.block_preparation == {
+                BigpictureCodeAttributeValue(
+                    code="5", scheme="Scheme5", meaning="Test5", scheme_version=""
+                )
+            }
 
-    assert fields is not None
-    assert fields.image_id == "image_2"
-    assert fields.dataset_id == "dataset_1"
-    assert fields.dataset_description == "test_description"
+            assert len(fields.stains) == 1
+            stain = next(iter(fields.stains))
 
-    assert fields.species == {
-        BigpictureCodeAttributeValue(
-            code="1", scheme="Scheme1", meaning="Test1", scheme_version=""
-        )
-    }
-    assert fields.sex == {"Male"}
-    assert fields.anatomical_site == {
-        BigpictureCodeAttributeValue(
-            code="2", scheme="Scheme2", meaning="Test2", scheme_version=""
-        )
-    }
-    assert fields.fixation_type == {
-        BigpictureCodeAttributeValue(
-            code="3", scheme="Scheme3", meaning="Test3", scheme_version=""
-        )
-    }
-    assert fields.specimen_type == {
-        BigpictureCodeAttributeValue(
-            code="4", scheme="Scheme4", meaning="Test4", scheme_version=""
-        )
-    }
-    assert fields.age_at_extraction == {(40, 41)}
-    assert fields.block_preparation == {
-        BigpictureCodeAttributeValue(
-            code="5", scheme="Scheme5", meaning="Test5", scheme_version=""
-        )
-    }
+            assert stain.staining_method == "immunogenic"
+            assert stain.staining_procedure.code == "7"
+            assert stain.staining_procedure.meaning == "Test7"
+            assert stain.staining_procedure_text == "test7"
+            assert stain.staining_target == "pan Cytokeratin"
 
 
 def test_process_code_attribute():
     xml = """
-    <ATTRIBUTES>
-        <CODE_ATTRIBUTE>
-            <TAG>animal_species</TAG>
-            <VALUE>
-                <CODE>1</CODE>
-                <MEANING>Cat</MEANING>
-            </VALUE>
-        </CODE_ATTRIBUTE>
-        <CODE_ATTRIBUTE>
-            <TAG>other</TAG>
-            <VALUE>
-                <CODE>2</CODE>
-                <MEANING>Other</MEANING>
-            </VALUE>
-        </CODE_ATTRIBUTE>
-    </ATTRIBUTES>
+    <ROOT>
+        <ATTRIBUTES>
+            <CODE_ATTRIBUTE>
+                <TAG>animal_species</TAG>
+                <VALUE>
+                    <CODE>1</CODE>
+                    <MEANING>Cat</MEANING>
+                </VALUE>
+            </CODE_ATTRIBUTE>
+            <CODE_ATTRIBUTE>
+                <TAG>other</TAG>
+                <VALUE>
+                    <CODE>2</CODE>
+                    <MEANING>Other</MEANING>
+                </VALUE>
+            </CODE_ATTRIBUTE>
+        </ATTRIBUTES>
+    </ROOT>
     """
     elem = etree.fromstring(xml)
 
@@ -118,12 +135,14 @@ def test_process_code_attribute():
 
 def test_process_string_attribute():
     xml = """
-    <ATTRIBUTES>
-        <STRING_ATTRIBUTE>
-            <TAG>sex</TAG>
-            <VALUE>Male</VALUE>
-        </STRING_ATTRIBUTE>
-    </ATTRIBUTES>
+    <ROOT>
+        <ATTRIBUTES>
+            <STRING_ATTRIBUTE>
+                <TAG>sex</TAG>
+                <VALUE>Male</VALUE>
+            </STRING_ATTRIBUTE>
+        </ATTRIBUTES>
+    </ROOT>
     """
     elem = etree.fromstring(xml)
 

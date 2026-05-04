@@ -14,6 +14,7 @@ CREATE TABLE bp_image (
     fixation_type TEXT[],                    -- array of string codes
     block_preparation TEXT[],                -- array of string codes
     specimen_type TEXT[],                    -- array of string codes
+    stains JSONB,                            -- array of stains
     search_sync BOOLEAN NOT NULL DEFAULT false,
     search_sync_date timestamptz
 );
@@ -37,5 +38,7 @@ CREATE INDEX idx_bp_image_fixation_type ON bp_image USING GIN (fixation_type);
 CREATE INDEX idx_bp_image_block_preparation ON bp_image USING GIN (block_preparation);
 CREATE INDEX idx_bp_image_specimen_type ON bp_image USING GIN (specimen_type);
 CREATE INDEX idx_bp_image_search_sync ON bp_image (search_sync);
+CREATE INDEX idx_bp_image_stains ON bp_image USING GIN (stains jsonb_path_ops);
+
 CREATE INDEX idx_bp_image_extraction_image_id ON bp_image_extraction (image_id);
 CREATE INDEX idx_bp_image_age_at_extraction ON bp_image_extraction USING GIST (age_at_extraction);

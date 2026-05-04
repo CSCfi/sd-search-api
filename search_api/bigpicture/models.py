@@ -38,10 +38,21 @@ class BigpictureSampleBlockFields(BaseModel):
     block_preparation: set[BigpictureCodeAttributeValue] = set()
 
 
+class BigpictureStainField(BaseModel):
+    """Bigpicture staining search field."""
+
+    model_config = ConfigDict(frozen=True)
+
+    staining_method: str
+    staining_procedure: BigpictureCodeAttributeValue | None = None
+    staining_procedure_text: str | None = None  # Free text alternative
+    staining_target: str | None = None
+
+
 class BigpictureStainingFields(BaseModel):
     """Bigpicture staining search fields."""
 
-    pass
+    stains: set[BigpictureStainField] = set()
 
 
 class BigpictureFields(

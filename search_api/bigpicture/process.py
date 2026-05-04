@@ -10,6 +10,7 @@ import fsspec  # type: ignore
 from search_api.bigpicture.models import (
     BigpictureFields,
     BigpictureCodeAttributeValue,
+    BigpictureStainField,
 )
 from search_api.services.dir import list_directories
 from search_api.services.xml import parse_xml, validate_xml, get_xml_value
@@ -74,6 +75,7 @@ def extract_fields(
             image_ids: list[str] = []
             map_slide_to_image_ids: dict[str, set[str]] = {}
             map_block_to_slide_ids: dict[str, set[str]] = {}
+            map_staining_to_slide_ids: dict[str, set[str]] = {}
             map_specimen_to_block_ids: dict[str, set[str]] = {}
             map_case_to_specimen_ids: dict[str, set[str]] = {}
             map_biological_being_to_case_ids: dict[str, set[str]] = {}
@@ -91,6 +93,15 @@ def extract_fields(
             def get_image_ids_for_block_id(_block_id: str) -> set[str]:
                 _image_ids = set()
                 for _slide_id in map_block_to_slide_ids.get(_block_id, []):
+                    _image_ids.update(get_image_ids_for_slide_id(_slide_id))
+                return _image_ids
+
+            def add_staining(_staining_id: str, _slide_id: str) -> None:
+                map_staining_to_slide_ids.setdefault(_staining_id, set()).add(_slide_id)
+
+            def get_image_ids_for_staining_id(_staining_id: str) -> set[str]:
+                _image_ids = set()
+                for _slide_id in map_staining_to_slide_ids.get(_staining_id, []):
                     _image_ids.update(get_image_ids_for_slide_id(_slide_id))
                 return _image_ids
 
@@ -194,6 +205,10 @@ def extract_fields(
                     slide_id = xml.get(id_attribute)
                     for block_id in xml.xpath(f"./CREATED_FROM_REF/@{id_attribute}"):
                         add_block(block_id, slide_id)
+                    for staining_id in xml.xpath(
+                        f"./STAINING_INFORMATION_REF/@{id_attribute}"
+                    ):
+                        add_staining(staining_id, slide_id)
 
                 for xml in sample_xml.xpath("/BLOCK | /SAMPLE_SET/BLOCK"):
                     block_id = xml.get(id_attribute)
@@ -282,10 +297,62 @@ def extract_fields(
 
             # Add staining fields for each image.
             for xml in staining_xml.xpath("/STAINING | /STAINING_SET/STAINING"):
-                # TODO(improve): parse staining XML
-                pass
+                for procedure_xml in xml.xpath("PROCEDURE_INFORMATION"):
+                    staining_method = _get_string_attribute_value(
+                        procedure_xml, "staining_method", is_attributes=False
+                    )
+                    staining_procedure = _get_code_attribute_value(
+                        procedure_xml, "staining_procedure", is_attributes=False
+                    )
+                    staining_procedure_text = _get_string_attribute_value(
+                        procedure_xml, "staining_procedure", is_attributes=False
+                    )
 
-            #
+                    if staining_method:
+                        for image_id in get_image_ids_for_staining_id(
+                            xml.get(id_attribute)
+                        ):
+                            fields[image_id].stains.add(
+                                BigpictureStainField(
+                                    staining_method=staining_method,
+                                    staining_procedure=staining_procedure,
+                                    staining_procedure_text=staining_procedure_text,
+                                )
+                            )
+
+                for stain_xml in xml.xpath("STAIN"):
+                    staining_method = _get_string_attribute_value(
+                        stain_xml, "staining_method", is_attributes=False
+                    )
+                    staining_procedure = _get_code_attribute_value(
+                        stain_xml, "staining_procedure", is_attributes=False
+                    )
+                    staining_procedure_text = _get_string_attribute_value(
+                        stain_xml, "staining_procedure", is_attributes=False
+                    )
+                    staining_target = _get_code_attribute_value(
+                        stain_xml, "staining_target", is_attributes=False
+                    )
+                    staining_target_text = _get_string_attribute_value(
+                        stain_xml, "staining_target", is_attributes=False
+                    )
+
+                    if staining_method:
+                        for image_id in get_image_ids_for_staining_id(
+                            xml.get(id_attribute)
+                        ):
+                            fields[image_id].stains.add(
+                                BigpictureStainField(
+                                    staining_method=staining_method,
+                                    staining_procedure=staining_procedure,
+                                    staining_procedure_text=staining_procedure_text,
+                                    staining_target=staining_target.meaning
+                                    if staining_target
+                                    else staining_target_text,
+                                )
+                            )
+
+            # Return iterator of extracted fields.
             #
 
             for image_id in image_ids:
@@ -297,9 +364,13 @@ def extract_fields(
 
 
 def _get_code_attribute_value(
-    elem: ElementTree, tag: str
+    elem: ElementTree, tag: str, *, is_attributes=True
 ) -> BigpictureCodeAttributeValue | None:
-    values = elem.xpath(f"//ATTRIBUTES/CODE_ATTRIBUTE[TAG='{tag}']/VALUE")
+    if is_attributes:
+        values = elem.xpath(f"ATTRIBUTES/CODE_ATTRIBUTE[TAG='{tag}']/VALUE")
+    else:
+        values = elem.xpath(f"CODE_ATTRIBUTE[TAG='{tag}']/VALUE")
+
     if not values:
         return None
     value = values[0]
@@ -312,8 +383,14 @@ def _get_code_attribute_value(
     )
 
 
-def _get_string_attribute_value(elem: ElementTree, tag: str) -> str | None:
-    values = elem.xpath(f"//ATTRIBUTES/STRING_ATTRIBUTE[TAG='{tag}']/VALUE/text()")
+def _get_string_attribute_value(
+    elem: ElementTree, tag: str, *, is_attributes=True
+) -> str | None:
+    if is_attributes:
+        values = elem.xpath(f"ATTRIBUTES/STRING_ATTRIBUTE[TAG='{tag}']/VALUE/text()")
+    else:
+        values = elem.xpath(f"STRING_ATTRIBUTE[TAG='{tag}']/VALUE/text()")
+
     if not values:
         return None
 

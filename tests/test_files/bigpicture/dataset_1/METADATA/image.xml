@@ -18,7 +18,7 @@
         </ATTRIBUTES>
     </IMAGE>
     <IMAGE alias="2" accession="image_2">
-        <IMAGE_OF alias="1" accession="slide_1"/>
+        <IMAGE_OF alias="1" accession="slide_2"/>
         <IMAGE_TYPE>
             <WSI_IMAGE>test2</WSI_IMAGE>
         </IMAGE_TYPE>

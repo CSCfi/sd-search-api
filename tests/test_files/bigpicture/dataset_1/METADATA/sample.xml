@@ -10,11 +10,42 @@
                     <SCHEME_VERSION/>
                 </VALUE>
             </CODE_ATTRIBUTE>
+            <STRING_ATTRIBUTE>
+                <TAG>sex</TAG>
+                <VALUE>Male</VALUE>
+            </STRING_ATTRIBUTE>
         </ATTRIBUTES>
     </BIOLOGICAL_BEING>
     <CASE alias="1" accession="case_1">
         <BIOLOGICAL_BEING_REF alias="1" accession="biological_being_1"/>
         <ATTRIBUTES>
+            <STRING_ATTRIBUTE>
+                <TAG>test</TAG>
+                <VALUE>test</VALUE>
+            </STRING_ATTRIBUTE>
+        </ATTRIBUTES>
+    </CASE>
+    <SPECIMEN alias="1" accession="specimen_1">
+        <EXTRACTED_FROM_REF alias="1" accession="biological_being_1"/>
+        <PART_OF_CASE_REF alias="1" accession="case_1"/>
+        <ATTRIBUTES>
+            <STRING_ATTRIBUTE>
+                <TAG>test</TAG>
+                <VALUE>test</VALUE>
+            </STRING_ATTRIBUTE>
+            <SET_ATTRIBUTE>
+                <TAG>age_at_extraction</TAG>
+                <VALUE>
+                    <STRING_ATTRIBUTE>
+                        <TAG>interval_start</TAG>
+                        <VALUE>P40Y</VALUE>
+                    </STRING_ATTRIBUTE>
+                    <STRING_ATTRIBUTE>
+                        <TAG>interval_length</TAG>
+                        <VALUE>P1Y</VALUE>
+                    </STRING_ATTRIBUTE>
+                </VALUE>
+            </SET_ATTRIBUTE>
             <CODE_ATTRIBUTE>
                 <TAG>anatomical_site</TAG>
                 <VALUE>
@@ -42,33 +73,6 @@
                     <SCHEME_VERSION/>
                 </VALUE>
             </CODE_ATTRIBUTE>
-            <STRING_ATTRIBUTE>
-                <TAG>sex</TAG>
-                <VALUE>Male</VALUE>
-            </STRING_ATTRIBUTE>
-        </ATTRIBUTES>
-    </CASE>
-    <SPECIMEN alias="1" accession="specimen_1">
-        <EXTRACTED_FROM_REF alias="1" accession="biological_being_1"/>
-        <PART_OF_CASE_REF alias="1" accession="case_1"/>
-        <ATTRIBUTES>
-            <STRING_ATTRIBUTE>
-                <TAG>test</TAG>
-                <VALUE>test</VALUE>
-            </STRING_ATTRIBUTE>
-            <SET_ATTRIBUTE>
-                <TAG>age_at_extraction</TAG>
-                <VALUE>
-                    <STRING_ATTRIBUTE>
-                    <TAG>interval_start</TAG>
-                    <VALUE>P40Y</VALUE>
-                    </STRING_ATTRIBUTE>
-                    <STRING_ATTRIBUTE>
-                    <TAG>interval_length</TAG>
-                    <VALUE>P1Y</VALUE>
-                    </STRING_ATTRIBUTE>
-                </VALUE>
-            </SET_ATTRIBUTE>
         </ATTRIBUTES>
     </SPECIMEN>
     <BLOCK alias="1" accession="block_1">
@@ -88,6 +92,16 @@
     <SLIDE alias="1" accession="slide_1">
         <CREATED_FROM_REF alias="1" accession="block_1"/>
         <STAINING_INFORMATION_REF alias="1" accession="staining_1"/>
+        <ATTRIBUTES>
+            <STRING_ATTRIBUTE>
+                <TAG>test</TAG>
+                <VALUE>test</VALUE>
+            </STRING_ATTRIBUTE>
+        </ATTRIBUTES>
+    </SLIDE>
+    <SLIDE alias="2" accession="slide_2">
+        <CREATED_FROM_REF alias="1" accession="block_1"/>
+        <STAINING_INFORMATION_REF alias="2" accession="staining_2"/>
         <ATTRIBUTES>
             <STRING_ATTRIBUTE>
                 <TAG>test</TAG>

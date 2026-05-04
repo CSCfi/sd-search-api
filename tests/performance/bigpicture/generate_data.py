@@ -6,7 +6,11 @@ import string
 import time
 import logging
 
-from search_api.bigpicture.models import BigpictureFields, BigpictureCodeAttributeValue
+from search_api.bigpicture.models import (
+    BigpictureFields,
+    BigpictureCodeAttributeValue,
+    BigpictureStainField,
+)
 from search_api.bigpicture.service import load_fields, sync_fields, sync_count
 from search_api.database.repository import get_connection
 
@@ -21,7 +25,7 @@ MAX_TIME = 60 * 60 * 2
 IMAGE_CNT = 10000
 
 # Number of datasets to generate.
-DATASET_CNT = 5000
+DATASET_CNT = 50000
 
 # Maximum number of codes and values.
 SEX_MAX_CNT = 2
@@ -44,6 +48,23 @@ def _generate_sex_values() -> set[str]:
 
     values = ["Male", "Female", "Not-known", "Other"]
     return set(random.choices(values, k=random.randint(0, SEX_MAX_CNT)))
+
+
+def _generate_code_value() -> BigpictureCodeAttributeValue:
+    """Generate code value with different selectivity levels."""
+
+    values = [
+        "outstanding",
+        "excellent",
+        "high",
+        "1",
+        "5",
+        "10",
+        "poor",
+    ]
+
+    code = random.choices(values, weights=SELECTIVITY, k=1)[0]
+    return BigpictureCodeAttributeValue(code=code, meaning=code)
 
 
 def _generate_code_values() -> set[BigpictureCodeAttributeValue]:
@@ -87,6 +108,18 @@ def _generate_age_at_extraction_ranges() -> set[tuple[int, int]]:
             k=random.randint(0, AGE_AT_EXTRACTION_MAX_CNT),
         )
     )
+
+
+def _generate_staining_method() -> str:
+    """Generate staining method."""
+
+    values = [
+        "chemical",
+        "immunostaining",
+        "in situ hybridization",
+    ]
+
+    return random.choice(values)
 
 
 def _generate_short_name() -> str:
@@ -223,6 +256,14 @@ async def generate_and_load_data():
                     block_preparation=block_preparation_codes,
                     specimen_type=specimen_type_codes,
                     age_at_extraction=age_at_extraction_ranges,
+                    stains={
+                        BigpictureStainField(
+                            staining_method=_generate_staining_method(),
+                            staining_procedure=_generate_code_value(),
+                            staining_procedure_text=f"procedure_{_generate_code_value()}",
+                            staining_target=f"target_{_generate_code_value()}",
+                        )
+                    },
                 )
 
                 # Load fields to the database for each image.

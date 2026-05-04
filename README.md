@@ -71,6 +71,12 @@ curl -X GET "http://localhost:9200/bp-image-index/_settings?pretty"
 curl -X GET "http://localhost:9200/bp-image-index/_mapping?pretty"
 ```
 
+Delete bp-image-index index:
+
+```
+curl -X DELETE "http://localhost:9200/bp-image-index"
+```
+
 ### Search
 
 ### All images

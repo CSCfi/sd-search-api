@@ -52,6 +52,23 @@
       },
       "age_at_extraction": {
         "type": "integer_range"
+      },
+      "stains": {
+        "type": "nested",
+        "properties": {
+          "staining_method": {
+            "type": "keyword"
+          },
+          "staining_procedure": {
+            "type": "keyword"
+          },
+          "staining_procedure_text": {
+            "type": "keyword"
+          },
+          "staining_target": {
+            "type": "keyword"
+          }
+        }
       }
     }
   }

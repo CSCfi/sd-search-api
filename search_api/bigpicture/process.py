@@ -330,6 +330,12 @@ def extract_fields(
                     staining_procedure_text = _get_string_attribute_value(
                         stain_xml, "staining_procedure", is_attributes=False
                     )
+                    staining_compound = _get_code_attribute_value(
+                        stain_xml, "staining_compound", is_attributes=False
+                    )
+                    staining_compound_text = _get_string_attribute_value(
+                        stain_xml, "staining_compound", is_attributes=False
+                    )
                     staining_target = _get_code_attribute_value(
                         stain_xml, "staining_target", is_attributes=False
                     )
@@ -346,6 +352,8 @@ def extract_fields(
                                     staining_method=staining_method,
                                     staining_procedure=staining_procedure,
                                     staining_procedure_text=staining_procedure_text,
+                                    staining_compound=staining_compound,
+                                    staining_compound_text=staining_compound_text,
                                     staining_target=staining_target.meaning
                                     if staining_target
                                     else staining_target_text,

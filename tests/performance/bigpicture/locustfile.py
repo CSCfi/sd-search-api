@@ -68,7 +68,7 @@ QUERIES = [
     },
     {
         "name": "images match species code 5% sensitivity",
-        "body": {"query": {"term": {"species": "4"}}},
+        "body": {"query": {"term": {"species": "5"}}},
     },
     {
         "name": "images match species code 10% sensitivity",
@@ -106,6 +106,104 @@ QUERIES = [
     {
         "name": "images match age_at_extraction 83.9% sensitivity",
         "body": {"query": {"range": {"age_at_extraction": {"gte": 13, "lte": 100}}}},
+    },
+    # Staining
+    {
+        "name": "images match by staining target 0.001% sensitivity",
+        "body": {
+            "query": {
+                "nested": {
+                    "path": "stains",
+                    "query": {
+                        "bool": {
+                            "must": [
+                                {"term": {"stains.staining_target": "outstanding"}}
+                            ]
+                        }
+                    },
+                }
+            }
+        },
+    },
+    {
+        "name": "images match by staining target 0.01% sensitivity",
+        "body": {
+            "query": {
+                "nested": {
+                    "path": "stains",
+                    "query": {
+                        "bool": {
+                            "must": [{"term": {"stains.staining_target": "excellent"}}]
+                        }
+                    },
+                }
+            }
+        },
+    },
+    {
+        "name": "images match by staining target 0.1% sensitivity",
+        "body": {
+            "query": {
+                "nested": {
+                    "path": "stains",
+                    "query": {
+                        "bool": {"must": [{"term": {"stains.staining_target": "high"}}]}
+                    },
+                }
+            }
+        },
+    },
+    {
+        "name": "images match by staining target 1% sensitivity",
+        "body": {
+            "query": {
+                "nested": {
+                    "path": "stains",
+                    "query": {
+                        "bool": {"must": [{"term": {"stains.staining_target": "1"}}]}
+                    },
+                }
+            }
+        },
+    },
+    {
+        "name": "images match by staining target 5% sensitivity",
+        "body": {
+            "query": {
+                "nested": {
+                    "path": "stains",
+                    "query": {
+                        "bool": {"must": [{"term": {"stains.staining_target": "5"}}]}
+                    },
+                }
+            }
+        },
+    },
+    {
+        "name": "images match by staining target 10% sensitivity",
+        "body": {
+            "query": {
+                "nested": {
+                    "path": "stains",
+                    "query": {
+                        "bool": {"must": [{"term": {"stains.staining_target": "10"}}]}
+                    },
+                }
+            }
+        },
+    },
+    {
+        "name": "images match by staining target 83.9% sensitivity",
+        "body": {
+            "query": {
+                "nested": {
+                    "path": "stains",
+                    "query": {
+                        "bool": {"must": [{"term": {"stains.staining_target": "poor"}}]}
+                    },
+                }
+            }
+        },
     },
 ]
 

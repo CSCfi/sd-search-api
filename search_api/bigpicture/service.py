@@ -110,6 +110,9 @@ async def _load_fields(
     :param stains: List of stains.
     """
 
+    def _extract_code(value: BigpictureCodeAttributeValue | None) -> str | None:
+        return value.code if value is not None else None
+
     # Replace existing image row.
     await cur.execute(
         """
@@ -160,12 +163,13 @@ async def _load_fields(
             Json(
                 [
                     {
-                        **stain.model_dump(),
-                        "staining_procedure": (
-                            stain.staining_procedure.code
-                            if stain.staining_procedure is not None
-                            else None
-                        ),
+                        # **stain.model_dump(),
+                        "staining_method": stain.staining_method,
+                        "staining_target": stain.staining_target,
+                        "staining_procedure": _extract_code(stain.staining_procedure),
+                        "staining_procedure_text": stain.staining_procedure_text,
+                        "staining_compound": _extract_code(stain.staining_compound),
+                        "staining_compound_text": stain.staining_compound_text,
                     }
                     for stain in stains
                 ]
@@ -274,7 +278,17 @@ async def get_fields(cur: AsyncCursor, image_id: str) -> BigpictureFields | None
                 "staining_procedure": BigpictureCodeAttributeValue(
                     code=stain["staining_procedure"],
                     meaning=stain["staining_procedure"],
-                ),
+                )
+                if "staining_procedure" in stain
+                and stain["staining_procedure"] is not None
+                else {},
+                "staining_compound": BigpictureCodeAttributeValue(
+                    code=stain["staining_compound"],
+                    meaning=stain["staining_compound"],
+                )
+                if "staining_compound" in stain
+                and stain["staining_compound"] is not None
+                else {},
             }
         )
         for stain in (stains or [])
@@ -411,6 +425,8 @@ async def sync_fields(cur: AsyncCursor, image_id: str | None = None) -> None:
                         "staining_method": stain.get("staining_method"),
                         "staining_procedure": stain.get("staining_procedure"),
                         "staining_procedure_text": stain.get("staining_procedure_text"),
+                        "staining_compound": stain.get("staining_compound"),
+                        "staining_compound_text": stain.get("staining_compound_text"),
                         "staining_target": stain.get("staining_target"),
                     }
                     for stain in stains

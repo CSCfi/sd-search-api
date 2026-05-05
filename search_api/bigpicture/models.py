@@ -46,6 +46,8 @@ class BigpictureStainField(BaseModel):
     staining_method: str
     staining_procedure: BigpictureCodeAttributeValue | None = None
     staining_procedure_text: str | None = None  # Free text alternative
+    staining_compound: BigpictureCodeAttributeValue | None = None
+    staining_compound_text: str | None = None  # Free text alternative
     staining_target: str | None = None
 
 

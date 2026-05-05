@@ -59,13 +59,19 @@
           "staining_method": {
             "type": "keyword"
           },
+          "staining_target": {
+            "type": "keyword"
+          },
           "staining_procedure": {
             "type": "keyword"
           },
           "staining_procedure_text": {
             "type": "keyword"
           },
-          "staining_target": {
+          "staining_compound": {
+            "type": "keyword"
+          },
+          "staining_compound_text": {
             "type": "keyword"
           }
         }

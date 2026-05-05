@@ -22,7 +22,7 @@ logging.basicConfig(level=logging.INFO)
 MAX_TIME = 60 * 60 * 2
 
 # Number of images to generate.
-IMAGE_CNT = 10000
+IMAGE_CNT = 1000000
 
 # Number of datasets to generate.
 DATASET_CNT = 50000
@@ -260,8 +260,10 @@ async def generate_and_load_data():
                         BigpictureStainField(
                             staining_method=_generate_staining_method(),
                             staining_procedure=_generate_code_value(),
-                            staining_procedure_text=f"procedure_{_generate_code_value()}",
-                            staining_target=f"target_{_generate_code_value()}",
+                            staining_procedure_text=f"{_generate_code_value().code}",
+                            staining_compound=_generate_code_value(),
+                            staining_compound_text=f"{_generate_code_value().code}",
+                            staining_target=f"{_generate_code_value().code}",
                         )
                     },
                 )

@@ -82,6 +82,8 @@ async def test_load_and_sync_fields():
                 staining_method="immunostaining",
                 staining_procedure=get_code("11"),
                 staining_procedure_text="test_procedure",
+                staining_compound=get_code("12"),
+                staining_compound_text="test_compound",
                 staining_target="test_target",
             )
         },

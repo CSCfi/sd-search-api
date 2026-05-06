@@ -1,9 +1,15 @@
 {
   "resources": [
     {
-      "id": "dataset_id",
+      "id": "dataset_title",
       "type": "string",
-      "description": "Dataset identifier",
+      "description": "Full-text search on dataset title",
+      "queryable": true
+    },
+    {
+      "id": "dataset_description",
+      "type": "string",
+      "description": "Full-text search on dataset description",
       "queryable": true
     },
     {

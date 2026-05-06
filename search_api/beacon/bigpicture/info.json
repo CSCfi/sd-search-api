@@ -1,0 +1,11 @@
+{
+  "id": "csc-bp-image-beacon",
+  "name": "CSC Bigpicture Image Beacon",
+  "apiVersion": "v2.0",
+  "organization": {
+    "name": "CSC",
+    "url": "https://csc.fi"
+  },
+  "description": "Beacon API for Bigpicture image search",
+  "datasets": []
+}

@@ -1,0 +1,76 @@
+{
+  "resources": [
+    {
+      "id": "dataset_id",
+      "type": "string",
+      "description": "Dataset identifier",
+      "queryable": true
+    },
+    {
+      "id": "animal_species",
+      "type": "string",
+      "description": "Species code",
+      "queryable": true
+    },
+    {
+      "id": "anatomical_site",
+      "type": "string",
+      "description": "Anatomical site code",
+      "queryable": true
+    },
+    {
+      "id": "sex",
+      "type": "string",
+      "description": "Sex controlled vocabulary",
+      "queryable": true
+    },
+    {
+      "id": "fixation_type",
+      "type": "string",
+      "description": "Fixation type code",
+      "queryable": true
+    },
+    {
+      "id": "block_preparation",
+      "type": "string",
+      "description": "Block preparation code",
+      "queryable": true
+    },
+    {
+      "id": "specimen_type",
+      "type": "string",
+      "description": "Specimen type code",
+      "queryable": true
+    },
+    {
+      "id": "staining.method",
+      "type": "string",
+      "description": "Staining method controlled vocabulary",
+      "queryable": true
+    },
+    {
+      "id": "staining.procedure",
+      "type": "string",
+      "description": "Staining procedure code or value",
+      "queryable": true
+    },
+    {
+      "id": "staining.target",
+      "type": "string",
+      "description": "Staining target",
+      "queryable": true
+    },
+    {
+      "id": "staining.compound",
+      "type": "string",
+      "description": "Staining compound code or value",
+      "queryable": true
+    },
+    {
+      "id": "age_at_extraction",
+      "type": "number",
+      "description": "Age at extraction",
+      "queryable": true
+    }
+  ]
+}

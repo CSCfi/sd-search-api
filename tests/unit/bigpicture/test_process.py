@@ -4,12 +4,14 @@ from lxml import etree
 
 from search_api.bigpicture.models import (
     BigpictureCodeAttributeValue,
+    BigpictureBlockFields,
+    BigpictureStainingFields,
 )
 from search_api.bigpicture.process import (
     extract_fields,
-    _get_code_attribute_value,
-    _get_string_attribute_value,
-    _get_age_at_extraction_range,
+    _extract_code_attribute_value,
+    _extract_string_attribute_value,
+    _extract_age_at_extraction_range,
 )
 
 TEST_DIR = Path(__file__).resolve().parent.parent.parent / "test_files" / "bigpicture"
@@ -23,85 +25,77 @@ def test_extract_fields():
             assert fields.image_id == "image_1"
             assert fields.dataset_id == "dataset_1"
             assert fields.dataset_description == "test_description"
-
-            assert fields.species == {
-                BigpictureCodeAttributeValue(
-                    code="1", scheme="Scheme1", meaning="Test1", scheme_version=""
-                )
-            }
-            assert fields.sex == {"Male"}
-            assert fields.anatomical_site == {
-                BigpictureCodeAttributeValue(
-                    code="2", scheme="Scheme2", meaning="Test2", scheme_version=""
-                )
-            }
-            assert fields.fixation_type == {
-                BigpictureCodeAttributeValue(
-                    code="3", scheme="Scheme3", meaning="Test3", scheme_version=""
-                )
-            }
-            assert fields.specimen_type == {
-                BigpictureCodeAttributeValue(
-                    code="4", scheme="Scheme4", meaning="Test4", scheme_version=""
-                )
-            }
-            assert fields.age_at_extraction == {(40, 41)}
-            assert fields.block_preparation == {
-                BigpictureCodeAttributeValue(
-                    code="5", scheme="Scheme5", meaning="Test5", scheme_version=""
+            assert fields.blocks == {
+                BigpictureBlockFields(
+                    block_preparation=BigpictureCodeAttributeValue(
+                        code="5", scheme="Scheme5", meaning="Test5", scheme_version=""
+                    ),
+                    species=BigpictureCodeAttributeValue(
+                        code="1", scheme="Scheme1", meaning="Test1", scheme_version=""
+                    ),
+                    sex="Male",
+                    anatomical_site=BigpictureCodeAttributeValue(
+                        code="2", scheme="Scheme2", meaning="Test2", scheme_version=""
+                    ),
+                    fixation_type=BigpictureCodeAttributeValue(
+                        code="3", scheme="Scheme3", meaning="Test3", scheme_version=""
+                    ),
+                    specimen_type=BigpictureCodeAttributeValue(
+                        code="4", scheme="Scheme4", meaning="Test4", scheme_version=""
+                    ),
+                    age_at_extraction=(40, 41),
                 )
             }
 
-            assert len(fields.stains) == 1
-            stain = next(iter(fields.stains))
-
-            assert stain.staining_method == "chemical"
-            assert stain.staining_procedure.code == "6"
-            assert stain.staining_procedure.meaning == "Test6"
-            assert stain.staining_procedure_text == "test6"
-            assert stain.staining_target is None
+            assert fields.stains == {
+                BigpictureStainingFields(
+                    staining_method="chemical",
+                    staining_procedure=BigpictureCodeAttributeValue(
+                        code="6", scheme="Scheme6", meaning="Test6", scheme_version=""
+                    ),
+                    staining_procedure_text="test6",
+                    staining_target=None,
+                )
+            }
         else:
             assert fields is not None
             assert fields.image_id == "image_2"
             assert fields.dataset_id == "dataset_1"
             assert fields.dataset_description == "test_description"
 
-            assert fields.species == {
-                BigpictureCodeAttributeValue(
-                    code="1", scheme="Scheme1", meaning="Test1", scheme_version=""
-                )
-            }
-            assert fields.sex == {"Male"}
-            assert fields.anatomical_site == {
-                BigpictureCodeAttributeValue(
-                    code="2", scheme="Scheme2", meaning="Test2", scheme_version=""
-                )
-            }
-            assert fields.fixation_type == {
-                BigpictureCodeAttributeValue(
-                    code="3", scheme="Scheme3", meaning="Test3", scheme_version=""
-                )
-            }
-            assert fields.specimen_type == {
-                BigpictureCodeAttributeValue(
-                    code="4", scheme="Scheme4", meaning="Test4", scheme_version=""
-                )
-            }
-            assert fields.age_at_extraction == {(40, 41)}
-            assert fields.block_preparation == {
-                BigpictureCodeAttributeValue(
-                    code="5", scheme="Scheme5", meaning="Test5", scheme_version=""
+            assert fields.blocks == {
+                BigpictureBlockFields(
+                    block_preparation=BigpictureCodeAttributeValue(
+                        code="5", scheme="Scheme5", meaning="Test5", scheme_version=""
+                    ),
+                    species=BigpictureCodeAttributeValue(
+                        code="1", scheme="Scheme1", meaning="Test1", scheme_version=""
+                    ),
+                    sex="Male",
+                    anatomical_site=BigpictureCodeAttributeValue(
+                        code="2", scheme="Scheme2", meaning="Test2", scheme_version=""
+                    ),
+                    fixation_type=BigpictureCodeAttributeValue(
+                        code="3", scheme="Scheme3", meaning="Test3", scheme_version=""
+                    ),
+                    specimen_type=BigpictureCodeAttributeValue(
+                        code="4", scheme="Scheme4", meaning="Test4", scheme_version=""
+                    ),
+                    age_at_extraction=(40, 41),
                 )
             }
 
-            assert len(fields.stains) == 1
-            stain = next(iter(fields.stains))
-
-            assert stain.staining_method == "immunogenic"
-            assert stain.staining_procedure.code == "7"
-            assert stain.staining_procedure.meaning == "Test7"
-            assert stain.staining_procedure_text == "test7"
-            assert stain.staining_target == "pan Cytokeratin"
+            assert fields.stains == {
+                BigpictureStainingFields(
+                    staining_method="immunogenic",
+                    staining_procedure=BigpictureCodeAttributeValue(
+                        code="7", scheme="Scheme7", meaning="Test7", scheme_version=""
+                    ),
+                    staining_procedure_text="test7",
+                    staining_target="pan Cytokeratin",
+                    staining_compound_text="antibody",
+                )
+            }
 
 
 def test_process_code_attribute():
@@ -127,7 +121,7 @@ def test_process_code_attribute():
     """
     elem = etree.fromstring(xml)
 
-    attribute = _get_code_attribute_value(elem, "animal_species")
+    attribute = _extract_code_attribute_value(elem, "animal_species")
 
     assert attribute.code == "1"
     assert attribute.meaning == "Cat"
@@ -146,7 +140,7 @@ def test_process_string_attribute():
     """
     elem = etree.fromstring(xml)
 
-    value = _get_string_attribute_value(elem, "sex")
+    value = _extract_string_attribute_value(elem, "sex")
 
     assert value == "Male"
 
@@ -171,7 +165,7 @@ def test_process_age_of_extraction_range():
     """
     elem = etree.fromstring(xml)
 
-    start, end = _get_age_at_extraction_range(elem)
+    start, end = _extract_age_at_extraction_range(elem)
 
     assert start == 40
     assert end == 41
@@ -196,7 +190,7 @@ def test_process_age_of_extraction_range():
      """
     elem = etree.fromstring(xml)
 
-    start, end = _get_age_at_extraction_range(elem)
+    start, end = _extract_age_at_extraction_range(elem)
 
     assert start == 40
     assert end == 40

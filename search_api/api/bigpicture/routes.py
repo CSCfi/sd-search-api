@@ -6,6 +6,8 @@ from pathlib import Path
 from .models import QueryRequest
 from .services import BigpictureBeaconService, MockBigpictureBeaconService
 
+DEFAULT_LIMIT = 1000
+
 router = APIRouter()
 
 
@@ -40,26 +42,28 @@ async def query_beacon(
 ):
     filters = [f.model_dump() for f in request.filters]
 
-    result = await backend.query(
-        filters=filters,
-        skip=request.skip,
-        limit=request.limit,
-        include_image_ids=(request.requestedGranularity == "record"),
-    )
+    if request.requestedGranularity == "count":
+        result = await backend.query_datasets(
+            filters=filters,
+            limit=getattr(request, "limit", DEFAULT_LIMIT),
+            after_key=getattr(request, "after_key", None),
+        )
+        result_sets = result["result_sets"]
 
-    result_sets = result["result_sets"]
+        exists = any(rs.get("resultsCount", 0) > 0 for rs in result_sets)
 
-    exists = any(rs.get("resultsCount", 0) > 0 for rs in result_sets)
-
-    return {
-        "meta": {
-            "apiVersion": "v2.0",
-            "receivedRequestSummary": {
-                "requestedGranularity": request.requestedGranularity,
-                "filters": filters,
+        return {
+            "meta": {
+                "apiVersion": "v2.0",
+                "receivedRequestSummary": {
+                    "requestedGranularity": request.requestedGranularity,
+                    "filters": filters,
+                },
+                "pagination": {"skip": request.skip, "limit": request.limit},
             },
-            "pagination": {"skip": request.skip, "limit": request.limit},
-        },
-        "responseSummary": {"exists": exists},
-        "response": {"resultSets": result_sets},
-    }
+            "responseSummary": {"exists": exists},
+            "response": {"resultSets": result_sets},
+        }
+    else:
+        # TODO: implement getting image ids
+        raise NotImplementedError()

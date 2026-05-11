@@ -9,7 +9,8 @@ import logging
 from search_api.bigpicture.models import (
     BigpictureFields,
     BigpictureCodeAttributeValue,
-    BigpictureStainField,
+    BigpictureStainingFields,
+    BigpictureBlockFields,
 )
 from search_api.bigpicture.service import load_fields, sync_fields, sync_count
 from search_api.database.repository import get_connection
@@ -22,7 +23,7 @@ logging.basicConfig(level=logging.INFO)
 MAX_TIME = 60 * 60 * 2
 
 # Number of images to generate.
-IMAGE_CNT = 1000000
+IMAGE_CNT = 10000
 
 # Number of datasets to generate.
 DATASET_CNT = 50000
@@ -43,11 +44,11 @@ SELECTIVITY = [
 ]
 
 
-def _generate_sex_values() -> set[str]:
-    """Generate deduplicated sex values with poor selectivity level (25%)."""
+def _generate_sex_value() -> str:
+    """Generate sex values with poor selectivity level (25%)."""
 
     values = ["Male", "Female", "Not-known", "Other"]
-    return set(random.choices(values, k=random.randint(0, SEX_MAX_CNT)))
+    return random.choices(values, k=1)[0]
 
 
 def _generate_code_value() -> BigpictureCodeAttributeValue:
@@ -88,8 +89,8 @@ def _generate_code_values() -> set[BigpictureCodeAttributeValue]:
     return generated_values
 
 
-def _generate_age_at_extraction_ranges() -> set[tuple[int, int]]:
-    """Generate deduplicated age ranges with different selectivity levels."""
+def _generate_age_at_extraction_range() -> tuple[int, int]:
+    """Generate age ranges with different selectivity levels."""
 
     ranges = [
         (1, 2),  # outstanding
@@ -101,13 +102,7 @@ def _generate_age_at_extraction_ranges() -> set[tuple[int, int]]:
         (13, 100),  # poor
     ]
 
-    return set(
-        random.choices(
-            ranges,
-            weights=SELECTIVITY,
-            k=random.randint(0, AGE_AT_EXTRACTION_MAX_CNT),
-        )
-    )
+    return random.choices(ranges, weights=SELECTIVITY, k=1)[0]
 
 
 def _generate_staining_method() -> str:
@@ -201,7 +196,7 @@ async def generate_and_load_data():
             logging.info("Truncate tables")
 
             await cur.execute("""
-                TRUNCATE TABLE bp_image, bp_image_extraction;
+                TRUNCATE TABLE bp_image
             """)
 
             assert await sync_count(cur) == 0
@@ -226,38 +221,28 @@ async def generate_and_load_data():
                 generated_cnt += 1
 
                 image_id = f"image{i}"
-
                 dataset_id = f"dataset{((i - 1) % DATASET_CNT) + 1}"
-
-                dataset_short_name = _generate_short_name()
-                dataset_title = _generate_title()
-                dataset_description = _generate_description()
-
-                sex_values = _generate_sex_values()
-
-                species_codes = _generate_code_values()
-                anatomical_site_codes = _generate_code_values()
-                fixation_type_codes = _generate_code_values()
-                block_preparation_codes = _generate_code_values()
-                specimen_type_codes = _generate_code_values()
-                age_at_extraction_ranges = _generate_age_at_extraction_ranges()
 
                 fields = BigpictureFields(
                     image_id=image_id,
                     dataset_id=dataset_id,
                     dataset_image_cnt=dataset_image_cnt[dataset_id],
-                    dataset_short_name=dataset_short_name,
-                    dataset_title=dataset_title,
-                    dataset_description=dataset_description,
-                    sex=sex_values,
-                    species=species_codes,
-                    anatomical_site=anatomical_site_codes,
-                    fixation_type=fixation_type_codes,
-                    block_preparation=block_preparation_codes,
-                    specimen_type=specimen_type_codes,
-                    age_at_extraction=age_at_extraction_ranges,
+                    dataset_short_name=_generate_short_name(),
+                    dataset_title=_generate_title(),
+                    dataset_description=_generate_description(),
+                    blocks={
+                        BigpictureBlockFields(
+                            sex=_generate_sex_value(),
+                            species=_generate_code_value(),
+                            anatomical_site=_generate_code_value(),
+                            fixation_type=_generate_code_value(),
+                            block_preparation=_generate_code_value(),
+                            specimen_type=_generate_code_value(),
+                            age_at_extraction=_generate_age_at_extraction_range(),
+                        )
+                    },
                     stains={
-                        BigpictureStainField(
+                        BigpictureStainingFields(
                             staining_method=_generate_staining_method(),
                             staining_procedure=_generate_code_value(),
                             staining_procedure_text=f"{_generate_code_value().code}",

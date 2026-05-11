@@ -19,31 +19,48 @@ class BigpictureCodeAttributeValue(BaseModel):
 class BigpictureSampleBiologicalBeingFields(BaseModel):
     """Bigpicture biological being search fields."""
 
-    species: set[BigpictureCodeAttributeValue] = set()
-    sex: set[Literal["Male", "Female", "Not-known", "Other"]] = set()
+    species: BigpictureCodeAttributeValue | None = None
+    sex: Literal["Male", "Female", "Not-known", "Other"] | None = None
 
 
 class BigpictureSampleSpecimenFields(BaseModel):
     """Bigpicture specimen search fields."""
 
-    anatomical_site: set[BigpictureCodeAttributeValue] = set()
-    fixation_type: set[BigpictureCodeAttributeValue] = set()
-    specimen_type: set[BigpictureCodeAttributeValue] = set()
-    age_at_extraction: set[tuple[int, int]] = set()
+    anatomical_site: BigpictureCodeAttributeValue | None = None
+    fixation_type: BigpictureCodeAttributeValue | None = None
+    specimen_type: BigpictureCodeAttributeValue | None = None
+    age_at_extraction: tuple[int, int] | None = None
 
 
 class BigpictureSampleBlockFields(BaseModel):
     """Bigpicture block search fields."""
 
-    block_preparation: set[BigpictureCodeAttributeValue] = set()
+    block_preparation: BigpictureCodeAttributeValue | None = None
 
 
-class BigpictureStainField(BaseModel):
+class BigpictureBlockFields(
+    BigpictureSampleBiologicalBeingFields,
+    BigpictureSampleSpecimenFields,
+    BigpictureSampleBlockFields,
+    BaseModel,
+):
+    """Bigpicture block search field."""
+
+    model_config = ConfigDict(frozen=True)
+
+
+class BigpictureAggregatedBlockFields(BaseModel):
+    """Bigpicture block search fields."""
+
+    blocks: set[BigpictureBlockFields] = set()
+
+
+class BigpictureStainingFields(BaseModel):
     """Bigpicture staining search field."""
 
     model_config = ConfigDict(frozen=True)
 
-    staining_method: str
+    staining_method: str | None = None
     staining_procedure: BigpictureCodeAttributeValue | None = None
     staining_procedure_text: str | None = None  # Free text alternative
     staining_compound: BigpictureCodeAttributeValue | None = None
@@ -51,17 +68,15 @@ class BigpictureStainField(BaseModel):
     staining_target: str | None = None
 
 
-class BigpictureStainingFields(BaseModel):
+class BigpictureAggregatedStainingFields(BaseModel):
     """Bigpicture staining search fields."""
 
-    stains: set[BigpictureStainField] = set()
+    stains: set[BigpictureStainingFields] = set()
 
 
 class BigpictureFields(
-    BigpictureSampleBiologicalBeingFields,
-    BigpictureSampleSpecimenFields,
-    BigpictureSampleBlockFields,
-    BigpictureStainingFields,
+    BigpictureAggregatedBlockFields,
+    BigpictureAggregatedStainingFields,
     BaseModel,
 ):
     """Bigpicture IDs and search fields."""

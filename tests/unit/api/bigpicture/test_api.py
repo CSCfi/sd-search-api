@@ -32,7 +32,6 @@ def test_info_endpoint():
     assert data["organization"]["url"] == "https://csc.fi"
 
     assert "description" in data
-    assert "datasets" in data
 
 
 def test_filtering_terms_endpoint():
@@ -46,10 +45,8 @@ def test_filtering_terms_endpoint():
     assert len(data["resources"]) > 0
 
 
-def test_query_mock_service():
-    # record granularity
-
-    request = {"filters": [], "skip": 0, "limit": 10, "requestedGranularity": "record"}
+def test_query_dataset_mock_service():
+    request = {"filters": [], "limit": 10, "requestedGranularity": "count"}
 
     response = client.post("/query", json=request)
 
@@ -60,19 +57,4 @@ def test_query_mock_service():
     assert "responseSummary" in data
     assert "response" in data
     result_sets = data["response"]["resultSets"]
-    assert result_sets == get_mock_results_sets(include_image_ids=True)
-
-    # count granularity
-
-    request = {"filters": [], "skip": 0, "limit": 10, "requestedGranularity": "count"}
-
-    response = client.post("/query", json=request)
-
-    assert response.status_code == 200
-    data = response.json()
-
-    assert "meta" in data
-    assert "responseSummary" in data
-    assert "response" in data
-    result_sets = data["response"]["resultSets"]
-    assert result_sets == get_mock_results_sets(include_image_ids=False)
+    assert result_sets == get_mock_results_sets()

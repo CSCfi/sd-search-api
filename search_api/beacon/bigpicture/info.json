@@ -6,6 +6,5 @@
     "name": "CSC",
     "url": "https://csc.fi"
   },
-  "description": "Beacon API for Bigpicture image search",
-  "datasets": []
+  "description": "Beacon API for Bigpicture image search"
 }

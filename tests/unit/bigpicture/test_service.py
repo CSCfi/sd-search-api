@@ -1,12 +1,12 @@
 import uuid
 from pathlib import Path
-from typing import Collection
 import pytest
 
 from search_api.bigpicture.models import (
     BigpictureCodeAttributeValue,
     BigpictureFields,
-    BigpictureStainField,
+    BigpictureStainingFields,
+    BigpictureBlockFields,
 )
 from search_api.bigpicture.service import load_fields, get_fields, sync_fields
 
@@ -17,29 +17,6 @@ TEST_DIR = Path(__file__).resolve().parent.parent.parent / "test_files" / "bigpi
 
 def get_code(code: str) -> BigpictureCodeAttributeValue:
     return BigpictureCodeAttributeValue(code=code, meaning=code)
-
-
-def get_codes(codes: set[str]) -> set[BigpictureCodeAttributeValue]:
-    s = set()
-    for code in codes:
-        s.add(get_code(code))
-    return s
-
-
-def assert_codes(
-    a: Collection[BigpictureCodeAttributeValue] | None,
-    b: Collection[BigpictureCodeAttributeValue] | None,
-) -> bool:
-    """
-    Compare two collections of BigpictureCodeAttributeValue by their code only.
-    """
-
-    def _to_code_set(attributes):
-        if not attributes:
-            return set()
-        return {attribute.code for attribute in attributes}
-
-    assert _to_code_set(a) == _to_code_set(b)
 
 
 @pytest.mark.asyncio
@@ -54,15 +31,6 @@ async def test_load_and_sync_fields():
     dataset_title = "test_title"
     dataset_description = "test_description"
 
-    sex_values = {"Male", "Female"}
-
-    species_codes = get_codes({"1", "2"})
-    anatomical_site_codes = get_codes({"3", "4"})
-    fixation_type_codes = get_codes({"5", "6"})
-    block_preparation_codes = get_codes({"7", "8"})
-    specimen_type_codes = get_codes({"9", "10"})
-    age_at_extraction_ranges = {(10, 20), (30, 40)}
-
     fields = BigpictureFields(
         image_id=image_id,
         dataset_id=dataset_id,
@@ -70,15 +38,19 @@ async def test_load_and_sync_fields():
         dataset_short_name=dataset_short_name,
         dataset_title=dataset_title,
         dataset_description=dataset_description,
-        sex=sex_values,
-        species=species_codes,
-        anatomical_site=anatomical_site_codes,
-        fixation_type=fixation_type_codes,
-        block_preparation=block_preparation_codes,
-        specimen_type=specimen_type_codes,
-        age_at_extraction=age_at_extraction_ranges,
+        blocks={
+            BigpictureBlockFields(
+                sex="Male",
+                species=get_code("1"),
+                anatomical_site=get_code("2"),
+                fixation_type=get_code("3"),
+                block_preparation=get_code("4"),
+                specimen_type=get_code("5"),
+                age_at_extraction=(10, 20),
+            )
+        },
         stains={
-            BigpictureStainField(
+            BigpictureStainingFields(
                 staining_method="immunostaining",
                 staining_procedure=get_code("11"),
                 staining_procedure_text="test_procedure",
@@ -103,13 +75,10 @@ async def test_load_and_sync_fields():
             assert fields.dataset_title == actual.dataset_title
             assert fields.dataset_description == actual.dataset_description
 
-            assert fields.sex == actual.sex
-            assert_codes(fields.species, actual.species)
-            assert_codes(fields.anatomical_site, actual.anatomical_site)
-            assert_codes(fields.fixation_type, actual.fixation_type)
-            assert_codes(fields.block_preparation, actual.block_preparation)
-            assert_codes(fields.specimen_type, actual.specimen_type)
-            assert fields.age_at_extraction, actual.age_at_extraction
+            assert len(fields.blocks) == 1
+            assert len(fields.stains) == 1
+
+            assert fields.blocks == actual.blocks
             assert fields.stains == actual.stains
 
             if is_sync_fields:

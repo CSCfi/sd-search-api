@@ -32,26 +32,31 @@
         "type": "text",
         "analyzer": "english_text"
       },
-      "species": {
-        "type": "keyword"
-      },
-      "anatomical_site": {
-        "type": "keyword"
-      },
-      "sex": {
-        "type": "keyword"
-      },
-      "fixation_type": {
-        "type": "keyword"
-      },
-      "block_preparation": {
-        "type": "keyword"
-      },
-      "specimen_type": {
-        "type": "keyword"
-      },
-      "age_at_extraction": {
-        "type": "integer_range"
+      "blocks": {
+        "type": "nested",
+        "properties": {
+          "species": {
+            "type": "keyword"
+          },
+          "anatomical_site": {
+            "type": "keyword"
+          },
+          "sex": {
+            "type": "keyword"
+          },
+          "fixation_type": {
+            "type": "keyword"
+          },
+          "block_preparation": {
+            "type": "keyword"
+          },
+          "specimen_type": {
+            "type": "keyword"
+          },
+          "age_at_extraction": {
+            "type": "integer_range"
+          }
+        }
       },
       "stains": {
         "type": "nested",

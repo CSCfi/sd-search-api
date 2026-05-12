@@ -2,6 +2,7 @@ import json
 import random
 from locust import HttpUser, task, between
 
+from search_api.api.bigpicture.models import BeaconQueryFilter
 from search_api.api.bigpicture.services import OpenSearchBigpictureBeaconService
 
 # locust -f tests/performance/bigpicture/locustfile.py --host=http://localhost:9200
@@ -12,63 +13,63 @@ QUERIES = [
     {
         "name": "Datasets match dataset_description",
         "body": OpenSearchBigpictureBeaconService.get_query(
-            [{"id": "dataset_description", "value": "natural variation"}]
+            [BeaconQueryFilter(id="dataset_description", value="natural variation")]
         ),
     },
     # Block
     {
         "name": "Datasets match species code 0.001% sensitivity",
         "body": OpenSearchBigpictureBeaconService.get_query(
-            [{"id": "species", "value": "outstanding"}]
+            [BeaconQueryFilter(id="species", value="outstanding")]
         ),
     },
     {
         "name": "Datasets match species code 1% sensitivity",
         "body": OpenSearchBigpictureBeaconService.get_query(
-            [{"id": "species", "value": "1"}]
+            [BeaconQueryFilter(id="species", value="1")]
         ),
     },
     {
         "name": "Datasets match species code 83.9% sensitivity",
         "body": OpenSearchBigpictureBeaconService.get_query(
-            [{"id": "species", "value": "poor"}]
+            [BeaconQueryFilter(id="species", value="poor")]
         ),
     },
     {
         "name": "Datasets match age_at_extraction 8.001% sensitivity",
         "body": OpenSearchBigpictureBeaconService.get_query(
-            [{"id": "age_at_extraction", "value": "1-2"}]
+            [BeaconQueryFilter(id="age_at_extraction", value="1-2")]
         ),
     },
     {
         "name": "Datasets match age_at_extraction 1% sensitivity",
         "body": OpenSearchBigpictureBeaconService.get_query(
-            [{"id": "age_at_extraction", "value": "7-8"}]
+            [BeaconQueryFilter(id="age_at_extraction", value="7-8")]
         ),
     },
     {
         "name": "Datasets match age_at_extraction 83.9% sensitivity",
         "body": OpenSearchBigpictureBeaconService.get_query(
-            [{"id": "age_at_extraction", "value": "13-100"}]
+            [BeaconQueryFilter(id="age_at_extraction", value="13-100")]
         ),
     },
     # Staining
     {
         "name": "Datasets match staining target code 0.001% sensitivity",
         "body": OpenSearchBigpictureBeaconService.get_query(
-            [{"id": "staining_target", "value": "outstanding"}]
+            [BeaconQueryFilter(id="staining_target", value="outstanding")]
         ),
     },
     {
         "name": "Datasets match staining target code 1% sensitivity",
         "body": OpenSearchBigpictureBeaconService.get_query(
-            [{"id": "staining_target", "value": "1"}]
+            [BeaconQueryFilter(id="staining_target", value="1")]
         ),
     },
     {
         "name": "Datasets match staining target code 83.9% sensitivity",
         "body": OpenSearchBigpictureBeaconService.get_query(
-            [{"id": "staining_target", "value": "poor"}]
+            [BeaconQueryFilter(id="staining_target", value="poor")]
         ),
     },
 ]

@@ -3,27 +3,28 @@ from typing import Any
 import json
 from pathlib import Path
 
-from .models import QueryRequest
+from .models import (
+    BeaconQueryRequest,
+    BeaconBooleanResponse,
+    BeaconCountResponse,
+    BeaconResultSetsResponse,
+    BeaconResponseMeta,
+    BeaconResultCountResponseSummary,
+    BeaconResultExistsResponseSummary,
+)
 from .services import BigpictureBeaconService, MockBigpictureBeaconService
 
-DEFAULT_LIMIT = 1000
-
 router = APIRouter()
+
+
+def get_service() -> BigpictureBeaconService:
+    return MockBigpictureBeaconService()
 
 
 def load_json(name: str) -> dict[str, Any]:
     path = Path(__file__).parent.parent.parent / "beacon" / "bigpicture" / name
     with open(path) as f:
         return json.load(f)
-
-
-# TODO: implement services
-def get_service() -> BigpictureBeaconService:
-    return MockBigpictureBeaconService()
-
-
-#
-#
 
 
 @router.get("/info")
@@ -36,34 +37,42 @@ async def get_filtering_terms():
     return load_json("filtering_terms.json")
 
 
-@router.post("/query")
+@router.post(
+    "/query",
+    response_model=(
+        BeaconBooleanResponse | BeaconCountResponse | BeaconResultSetsResponse
+    ),
+)
 async def query_beacon(
-    request: QueryRequest, backend: BigpictureBeaconService = Depends(get_service)
-):
-    filters = [f.model_dump() for f in request.filters]
+    request: BeaconQueryRequest, backend: BigpictureBeaconService = Depends(get_service)
+) -> BeaconBooleanResponse | BeaconCountResponse | BeaconResultSetsResponse:
+    response = await backend.query(
+        filters=request.query.filters,
+    )
 
-    if request.requestedGranularity == "count":
-        result = await backend.query_datasets(
-            filters=filters,
-            limit=getattr(request, "limit", DEFAULT_LIMIT),
-            after_key=getattr(request, "after_key", None),
+    meta = BeaconResponseMeta(returnedGranularity=request.query.requestedGranularity)
+
+    if request.query.requestedGranularity == "boolean":
+        return BeaconBooleanResponse(
+            meta=meta,
+            responseSummary=BeaconResultExistsResponseSummary(
+                exists=len(response.resultSet) > 0
+            ),
         )
-        result_sets = result["result_sets"]
 
-        exists = any(rs.get("resultsCount", 0) > 0 for rs in result_sets)
+    if request.query.requestedGranularity == "count":
+        return BeaconCountResponse(
+            meta=meta,
+            responseSummary=BeaconResultCountResponseSummary(
+                exists=len(response.resultSet) > 0,
+                numTotalResults=len(response.resultSet),
+            ),
+        )
 
-        return {
-            "meta": {
-                "apiVersion": "v2.0",
-                "receivedRequestSummary": {
-                    "requestedGranularity": request.requestedGranularity,
-                    "filters": filters,
-                },
-                "pagination": {"skip": request.skip, "limit": request.limit},
-            },
-            "responseSummary": {"exists": exists},
-            "response": {"resultSets": result_sets},
-        }
-    else:
-        # TODO: implement getting image ids
-        raise NotImplementedError()
+    return BeaconResultSetsResponse(
+        meta=meta,
+        responseSummary=BeaconResultCountResponseSummary(
+            exists=len(response.resultSet) > 0, numTotalResults=len(response.resultSet)
+        ),
+        response=response,
+    )

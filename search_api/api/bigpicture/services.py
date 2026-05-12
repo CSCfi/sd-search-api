@@ -3,7 +3,16 @@ from typing import Any, override
 
 from opensearchpy import AsyncOpenSearch
 
-DEFAULT_LIMIT = 1000
+from search_api.api.bigpicture.models import (
+    BeaconQueryFilter,
+    BeaconResultSets,
+    BeaconResultSet,
+    BeaconResultSetResult,
+)
+
+# TODO (improve): paginate to avoid limits
+
+DEFAULT_LIMIT = 10000
 
 TEXT_FIELDS = {
     "dataset_title": "dataset_title",
@@ -35,34 +44,36 @@ class BigpictureBeaconService(ABC):
     """
 
     @abstractmethod
-    async def query_datasets(
+    async def query(
         self,
-        filters: list[dict[str, Any]],
-        limit: int,
-        after_key: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+        filters: list[BeaconQueryFilter],
+        limit: int = DEFAULT_LIMIT,
+    ) -> BeaconResultSets:
         """
         Get matching datasets.
         """
         pass
 
 
-def get_mock_results_sets() -> list[Any]:
-    return [
-        {
-            "id": "testDataset",
-            "resultsCount": 1,  # total matching image count
-            "results": [
-                {
-                    "datasetId": "testDataset",
-                    "datasetTitle": "testTitle",
-                    "datasetDescription": "testDescription",
-                    "totalImageCount": 1,
-                    "matchingImageCount": 1,
-                }
+def get_mock_query_result() -> BeaconResultSets:
+    results = BeaconResultSets()
+
+    results.resultSet.append(
+        BeaconResultSet(
+            id="testDataset",
+            results=[
+                BeaconResultSetResult(
+                    datasetId="testDataset",
+                    datasetTitle="testTitle",
+                    datasetDescription="testDescription",
+                    totalImageCount=1,
+                    matchingImageCount=1,
+                    imageIds=["testImage"],
+                )
             ],
-        }
-    ]
+        )
+    )
+    return results
 
 
 class MockBigpictureBeaconService(BigpictureBeaconService):
@@ -71,13 +82,12 @@ class MockBigpictureBeaconService(BigpictureBeaconService):
     """
 
     @override
-    async def query_datasets(
+    async def query(
         self,
-        filters: list[dict[str, Any]],
-        limit: int,
-        after_key: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        return {"result_sets": get_mock_results_sets()}
+        filters: list[BeaconQueryFilter],
+        limit: int = DEFAULT_LIMIT,
+    ) -> BeaconResultSets:
+        return get_mock_query_result()
 
 
 class OpenSearchBigpictureBeaconService(BigpictureBeaconService):
@@ -91,9 +101,7 @@ class OpenSearchBigpictureBeaconService(BigpictureBeaconService):
 
     @staticmethod
     def get_query(
-        filters: list[dict[str, Any]],
-        limit: int = DEFAULT_LIMIT,
-        after_key: dict[str, Any] | None = None,
+        filters: list[BeaconQueryFilter], limit: int = DEFAULT_LIMIT
     ) -> dict[str, Any]:
 
         block_filters = []
@@ -101,17 +109,8 @@ class OpenSearchBigpictureBeaconService(BigpictureBeaconService):
         must_clauses = []
 
         for f in filters:
-            if "id" not in f:
-                continue
-            if "value" not in f:
-                continue
-
-            field_id = f["id"]
-            value = f["value"]
-            if field_id is None:
-                continue
-            if value is None:
-                continue
+            field_id = f.id
+            value = f.value
 
             if field_id in TEXT_FIELDS:
                 must_clauses.append({"match": {TEXT_FIELDS[field_id]: value}})
@@ -159,13 +158,9 @@ class OpenSearchBigpictureBeaconService(BigpictureBeaconService):
             "query": {"bool": {"must": must_clauses or [{"match_all": {}}]}},
             "aggs": {
                 "datasets": {
-                    "composite": {
-                        "size": limit,
-                        "sources": [{"dataset_id": {"terms": {"field": "dataset_id"}}}],
-                        **({"after": after_key} if after_key else {}),
-                    },
+                    "terms": {"field": "dataset_id", "size": limit},
                     "aggs": {
-                        "dataset_metadata": {
+                        "dataset_result": {
                             "top_hits": {
                                 "size": 1,
                                 "_source": [
@@ -174,55 +169,52 @@ class OpenSearchBigpictureBeaconService(BigpictureBeaconService):
                                     "dataset_image_cnt",
                                 ],
                             }
-                        }
+                        },
+                        "image_result": {"terms": {"field": "image_id", "size": limit}},
                     },
                 }
             },
         }
 
     @override
-    async def query_datasets(
+    async def query(
         self,
-        filters: list[dict[str, Any]],
-        limit: int,
-        after_key: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+        filters: list[BeaconQueryFilter],
+        limit: int = DEFAULT_LIMIT,
+    ) -> BeaconResultSets:
 
-        _query = self.get_query(filters, limit, after_key)
-
+        _query = self.get_query(filters, limit)
         resp = await self.client.search(index=self.index_name, body=_query)
-
         buckets = resp.get("aggregations", {}).get("datasets", {}).get("buckets", [])
 
-        result_sets = []
+        results = BeaconResultSets()
 
         for bucket in buckets:
             dataset_id = bucket["key"]
-            matching_count = bucket["doc_count"]
+            matching_image_count = bucket["doc_count"]
 
-            hits = bucket["dataset_metadata"]["hits"]["hits"]
+            hits = bucket["dataset_result"]["hits"]["hits"]
             hit_source = hits[0]["_source"] if hits else {}
 
             dataset_title = hit_source.get("dataset_title")
             dataset_description = hit_source.get("dataset_description")
-            total_image_count = hit_source.get("dataset_image_cnt")
+            total_image_count = hit_source.get("dataset_image_cnt", 0)
+            image_ids = [b["key"] for b in bucket["image_result"]["buckets"]]
 
-            result_sets.append(
-                {
-                    "id": dataset_id,
-                    "resultsCount": matching_count,
-                    "results": [
-                        {
-                            "datasetId": dataset_id,
-                            "datasetTitle": dataset_title,
-                            "datasetDescription": dataset_description,
-                            "totalImageCount": total_image_count,
-                            "matchingImageCount": matching_count,
-                        }
+            results.resultSet.append(
+                BeaconResultSet(
+                    id=dataset_id,
+                    results=[
+                        BeaconResultSetResult(
+                            datasetId=dataset_id,
+                            datasetTitle=dataset_title,
+                            datasetDescription=dataset_description,
+                            totalImageCount=total_image_count,
+                            matchingImageCount=matching_image_count,
+                            imageIds=image_ids,
+                        )
                     ],
-                }
+                )
             )
 
-        next_cursor = resp.get("aggregations", {}).get("datasets", {}).get("after_key")
-
-        return {"result_sets": result_sets, "next_cursor": next_cursor}
+        return results

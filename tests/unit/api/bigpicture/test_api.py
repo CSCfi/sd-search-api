@@ -1,23 +1,58 @@
 from fastapi.testclient import TestClient
 
+from search_api.api.bigpicture.models import (
+    BeaconQueryRequest,
+    BeaconQuery,
+    BeaconBooleanResponse,
+    BeaconCountResponse,
+    BeaconResultSetsResponse,
+)
 from search_api.main import app
 from search_api.api.bigpicture.routes import get_service
 from search_api.api.bigpicture.services import (
     MockBigpictureBeaconService,
-    get_mock_results_sets,
+    get_mock_query_result,
 )
 
 
-def _get_service():
+def get_mock_service():
     return MockBigpictureBeaconService()
 
 
-app.dependency_overrides[get_service] = _get_service
+app.dependency_overrides[get_service] = get_mock_service
 
-client = TestClient(app)
+
+def test_query_dataset_mock_service():
+    # boolean granularity
+    request = BeaconQueryRequest(query=BeaconQuery(requestedGranularity="boolean"))
+    client = TestClient(app)
+    resp = client.post("/query", json=request.model_dump())
+    assert resp.status_code == 200
+    response = BeaconBooleanResponse.model_validate(resp.json())
+    assert response.responseSummary.exists
+
+    # count granularity
+    request = BeaconQueryRequest(query=BeaconQuery(requestedGranularity="count"))
+    client = TestClient(app)
+    resp = client.post("/query", json=request.model_dump())
+    assert resp.status_code == 200
+    response = BeaconCountResponse.model_validate(resp.json())
+    assert response.responseSummary.exists
+    assert response.responseSummary.numTotalResults == 1
+
+    # record granularity
+    request = BeaconQueryRequest(query=BeaconQuery(requestedGranularity="record"))
+    client = TestClient(app)
+    resp = client.post("/query", json=request.model_dump())
+    assert resp.status_code == 200
+    response = BeaconResultSetsResponse.model_validate(resp.json())
+    assert response.responseSummary.exists
+    assert response.responseSummary.numTotalResults == 1
+    assert response.response.resultSet == get_mock_query_result().resultSet
 
 
 def test_info_endpoint():
+    client = TestClient(app)
     response = client.get("/info")
 
     assert response.status_code == 200
@@ -35,6 +70,7 @@ def test_info_endpoint():
 
 
 def test_filtering_terms_endpoint():
+    client = TestClient(app)
     response = client.get("/filtering_terms")
 
     assert response.status_code == 200
@@ -43,18 +79,3 @@ def test_filtering_terms_endpoint():
     assert "resources" in data
     assert isinstance(data["resources"], list)
     assert len(data["resources"]) > 0
-
-
-def test_query_dataset_mock_service():
-    request = {"filters": [], "limit": 10, "requestedGranularity": "count"}
-
-    response = client.post("/query", json=request)
-
-    assert response.status_code == 200
-    data = response.json()
-
-    assert "meta" in data
-    assert "responseSummary" in data
-    assert "response" in data
-    result_sets = data["response"]["resultSets"]
-    assert result_sets == get_mock_results_sets()

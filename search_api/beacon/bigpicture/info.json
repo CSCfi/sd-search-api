@@ -1,10 +1,8 @@
 {
-  "id": "csc-bp-image-beacon",
-  "name": "CSC Bigpicture Image Beacon",
-  "apiVersion": "v2.0",
-  "organization": {
-    "name": "CSC",
-    "url": "https://csc.fi"
-  },
-  "description": "Beacon API for Bigpicture image search"
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "_comment": "Partial implementation of the Beacon V2 framework standard: https://docs.genomebeacons.org/framework/.",
+  "meta": {
+    "apiVersion": "v2.0",
+    "beaconId": "fi.csc.bigpicture.beacon.v2"
+  }
 }

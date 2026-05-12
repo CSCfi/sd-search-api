@@ -1,69 +1,64 @@
 {
-  "resources": [
-    {
-      "id": "dataset_title",
-      "type": "string",
-      "description": "Full-text search on dataset title"
-    },
-    {
-      "id": "dataset_description",
-      "type": "string",
-      "description": "Full-text search on dataset description"
-    },
-    {
-      "id": "animal_species",
-      "type": "string",
-      "description": "Species code"
-    },
-    {
-      "id": "anatomical_site",
-      "type": "string",
-      "description": "Anatomical site code"
-    },
-    {
-      "id": "sex",
-      "type": "string",
-      "description": "Sex controlled vocabulary"
-    },
-    {
-      "id": "fixation_type",
-      "type": "string",
-      "description": "Fixation type code"
-    },
-    {
-      "id": "block_preparation",
-      "type": "string",
-      "description": "Block preparation code"
-    },
-    {
-      "id": "specimen_type",
-      "type": "string",
-      "description": "Specimen type code"
-    },
-    {
-      "id": "staining.method",
-      "type": "string",
-      "description": "Staining method controlled vocabulary"
-    },
-    {
-      "id": "staining.procedure",
-      "type": "string",
-      "description": "Staining procedure code or value"
-    },
-    {
-      "id": "staining.target",
-      "type": "string",
-      "description": "Staining target"
-    },
-    {
-      "id": "staining.compound",
-      "type": "string",
-      "description": "Staining compound code or value"
-    },
-    {
-      "id": "age_at_extraction",
-      "type": "number",
-      "description": "Age at extraction"
-    }
-  ]
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "_comment": "Partial implementation of the Beacon V2 framework standard: https://docs.genomebeacons.org/framework/.",
+  "meta": {
+    "apiVersion": "v2.0",
+    "beaconId": "fi.csc.bigpicture.beacon.v2"
+  },
+  "response": {
+    "filteringTerms": [
+      {
+        "id": "dataset_title",
+        "type": "alphanumeric"
+      },
+      {
+        "id": "dataset_description",
+        "type": "alphanumeric"
+      },
+      {
+        "id": "animal_species",
+        "type": "SNOMED CT"
+      },
+      {
+        "id": "anatomical_site",
+        "type": "SNOMED CT"
+      },
+      {
+        "id": "sex",
+        "type": "alphanumeric"
+      },
+      {
+        "id": "fixation_type",
+        "type": "SNOMED CT"
+      },
+      {
+        "id": "block_preparation",
+        "type": "SNOMED CT"
+      },
+      {
+        "id": "specimen_type",
+        "type": "SNOMED CT"
+      },
+      {
+        "id": "staining_method",
+        "type": "alphanumeric"
+      },
+      {
+        "id": "staining_procedure",
+        "type": "SNOMED CT"
+      },
+      {
+        "id": "staining_target",
+        "type": "alphanumeric"
+      },
+      {
+        "id": "staining_compound",
+        "type": "alphanumeric"
+      },
+      {
+        "id": "age_at_extraction",
+        "type": "alphanumeric"
+      }
+    ]
+  }
 }

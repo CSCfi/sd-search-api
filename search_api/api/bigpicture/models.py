@@ -17,15 +17,21 @@ class BeaconQueryMeta(BaseModel):
 
 # https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/requests/filteringTerms.json
 class BeaconQueryFilter(BaseModel):
-    """Beacon V2 filter is ignored except for partially supported AlphanumericFilter."""
+    """Beacon V2 query filter based on AlphanumericFilter and OntologyFilter. Does not validate against the JSON schema."""
 
     id: str
+
+    # AlphanumericFilter
     value: Any
     operator: Literal["="] = "="  # Only equality operator is supported
 
+    # TODO(improve): support ontology descendant extension.
+    # OntologyFilter
+    includeDescendantTerms: bool = True
+
 
 class BeaconQuery(BaseModel):
-    """Beacon V2 query is ignored except for filters and requestedGranularity."""
+    """Beacon V2 query."""
 
     filters: list[BeaconQueryFilter] = Field(default_factory=list)
     requestedGranularity: BeaconQueryGranularity = "count"
@@ -44,8 +50,7 @@ class BeaconQueryRequest(BaseModel):
 
 
 class BeaconResponseMeta(BaseModel):
-    """Beacon V2 response meta is only partially supported and does not
-    validate against the JSON schema."""
+    """Beacon V2 meta response. Does not validate against the JSON schema."""
 
     apiVersion: str = "v2.0"
     beaconId: str = "fi.csc.bigpicture.beacon.v2"

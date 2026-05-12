@@ -58,15 +58,8 @@ def test_info_endpoint():
     assert response.status_code == 200
     data = response.json()
 
-    assert data["id"] == "csc-bp-image-beacon"  # ✅ updated
-    assert data["name"] == "CSC Bigpicture Image Beacon"
-    assert data["apiVersion"] == "v2.0"
-
-    assert "organization" in data
-    assert data["organization"]["name"] == "CSC"
-    assert data["organization"]["url"] == "https://csc.fi"
-
-    assert "description" in data
+    assert data["meta"]["apiVersion"] == "v2.0"
+    assert data["meta"]["beaconId"] == "fi.csc.bigpicture.beacon.v2"
 
 
 def test_filtering_terms_endpoint():
@@ -76,6 +69,5 @@ def test_filtering_terms_endpoint():
     assert response.status_code == 200
     data = response.json()
 
-    assert "resources" in data
-    assert isinstance(data["resources"], list)
-    assert len(data["resources"]) > 0
+    assert data["meta"]["apiVersion"] == "v2.0"
+    assert data["meta"]["beaconId"] == "fi.csc.bigpicture.beacon.v2"

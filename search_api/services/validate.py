@@ -1,7 +1,7 @@
 import json
 from typing import Any
 
-import fsspec
+import fsspec  # type: ignore[import-untyped]
 from jsonschema import validators, ValidationError
 from referencing import Registry, Resource
 
@@ -19,7 +19,7 @@ def make_registry() -> Registry:
         schema = load_json(uri)
         return Resource.from_contents(schema)
 
-    return Registry(retrieve=retrieve)
+    return Registry(retrieve=retrieve)  # type: ignore[call-arg]
 
 
 def validate_json(data: dict, schema_source: str | dict[str, Any]):

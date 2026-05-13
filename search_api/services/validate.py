@@ -1,34 +1,25 @@
 import json
 from typing import Any
-from pathlib import Path
 
-import requests
+import fsspec
 from jsonschema import validators, ValidationError
+from referencing import Registry, Resource
 
 
-def _load_schema(schema_source: str) -> dict[str, Any]:
+def load_json(uri: str) -> dict[str, Any]:
     """
-    Load JSON schema from, URL or local file path.
+    Load JSON  from, URL or local file path.
     """
+    with fsspec.open(uri) as f:
+        return json.load(f)
 
-    if schema_source.startswith(("http://", "https://")):
-        try:
-            response = requests.get(schema_source, timeout=10)
-            response.raise_for_status()
-            return response.json()
-        except requests.RequestException:
-            raise ValidationError(f"Failed to fetch JSON schema: {schema_source}")
-        except ValueError:
-            raise ValidationError(f"Invalid JSON schema: {schema_source}")
 
-    try:
-        path = Path(schema_source)
-        if not path.exists():
-            raise ValidationError(f"JSON schema file not found: {schema_source}")
+def make_registry() -> Registry:
+    def retrieve(uri: str) -> Resource:
+        schema = load_json(uri)
+        return Resource.from_contents(schema)
 
-        return json.loads(path.read_text(encoding="utf-8"))
-    except ValueError:
-        raise ValidationError(f"Invalid JSON schema: {schema_source}")
+    return Registry(retrieve=retrieve)
 
 
 def validate_json(data: dict, schema_source: str | dict[str, Any]):
@@ -37,12 +28,15 @@ def validate_json(data: dict, schema_source: str | dict[str, Any]):
     """
 
     if isinstance(schema_source, str):
-        schema_source = _load_schema(schema_source)
+        schema = load_json(schema_source)
+        schema["$id"] = schema_source
+    else:
+        schema = schema_source
 
-    validator_cls = validators.validator_for(schema_source)
-    validator_cls.check_schema(schema_source)
+    validator_cls = validators.validator_for(schema)
+    validator_cls.check_schema(schema)
 
-    validator = validator_cls(schema_source)
+    validator = validator_cls(schema, registry=make_registry())
 
     errors = sorted(validator.iter_errors(data), key=lambda e: list(e.path))
 

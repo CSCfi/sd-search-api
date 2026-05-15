@@ -1,3 +1,5 @@
+import json
+
 from fastapi.testclient import TestClient
 
 from search_api.api.beacon.models import (
@@ -61,7 +63,9 @@ def test_info_endpoint():
 
     assert response.status_code == 200
     data = response.json()
-    assert data == BP_INFO_RESPONSE.model_dump()
+    assert json.dumps(data) == json.dumps(
+        BP_INFO_RESPONSE.model_dump(exclude_none=True)
+    )
 
 
 def test_filtering_terms_endpoint():
@@ -70,4 +74,6 @@ def test_filtering_terms_endpoint():
 
     assert response.status_code == 200
     data = response.json()
-    assert data == BP_FILTERING_TERMS_RESPONSE.model_dump()
+    assert json.dumps(data) == json.dumps(
+        BP_FILTERING_TERMS_RESPONSE.model_dump(exclude_none=True)
+    )

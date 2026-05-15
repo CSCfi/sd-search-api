@@ -25,12 +25,20 @@ def get_service() -> BigpictureBeaconService:
     return OpenSearchBigpictureBeaconService(OPENSEARCH_HOST, OPENSEARCH_PORT)
 
 
-@router.get("/info", response_model=BeaconInfoResponse)
+@router.get(
+    "/info",
+    response_model=BeaconInfoResponse,
+    response_model_exclude_none=True,
+)
 async def info() -> BeaconInfoResponse:
     return BP_INFO_RESPONSE
 
 
-@router.get("/filtering_terms", response_model=BeaconFilteringTermsResponse)
+@router.get(
+    "/filtering_terms",
+    response_model=BeaconFilteringTermsResponse,
+    response_model_exclude_none=True,
+)
 async def filtering_terms() -> BeaconFilteringTermsResponse:
     return BP_FILTERING_TERMS_RESPONSE
 
@@ -40,6 +48,7 @@ async def filtering_terms() -> BeaconFilteringTermsResponse:
     response_model=(
         BeaconBooleanResponse | BeaconCountResponse | BeaconResultSetsResponse
     ),
+    response_model_exclude_none=True,
 )
 async def query_beacon(
     request: BeaconQueryRequest, backend: BigpictureBeaconService = Depends(get_service)

@@ -6,6 +6,10 @@ from search_api.api.beacon.models import (
     BeaconQueryGranularity,
     BeaconQueryFilter,
 )
+from search_api.api.bigpicture.models import (
+    BP_FILTERING_TERMS_RESPONSE,
+    BP_INFO_RESPONSE,
+)
 from search_api.services.validate import validate_json
 
 
@@ -39,3 +43,19 @@ def test_beacon_query_request():
         )
 
         validate_json(request.model_dump(), schema_url)
+
+
+def test_filtering_terms_response():
+    schema_url = "https://raw.githubusercontent.com/ga4gh-beacon/beacon-v2/refs/heads/main/framework/json/responses/beaconFilteringTermsResponse.json"
+
+    # Filtering term response is Beacon V2 compatible.
+
+    validate_json(BP_FILTERING_TERMS_RESPONSE.model_dump(exclude_none=True), schema_url)
+
+
+def test_info_terms_response():
+    schema_url = "https://raw.githubusercontent.com/ga4gh-beacon/beacon-v2/refs/heads/main/framework/json/responses/beaconInfoResponse.json"
+
+    # Info term response is Beacon V2 compatible.
+
+    validate_json(BP_INFO_RESPONSE.model_dump(exclude_none=True), schema_url)

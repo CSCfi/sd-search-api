@@ -1,6 +1,5 @@
 from search_api.api.beacon.models import (
     SNOMED_ONTOLOGY_ID,
-    BeaconFilteringMeta,
     BeaconFilteringTerm,
     BeaconFilteringControlledVocabulary,
     BeaconFilteringOntology,
@@ -8,17 +7,30 @@ from search_api.api.beacon.models import (
     BeaconFilteringTerms,
     BeaconInfoResponse,
     BeaconInfoMeta,
+    BeaconSchema,
+    BeaconInfo,
 )
 
 BP_BEACON_ID = "fi.csc.bigpicture.beacon.v2"
+BP_BEACON_NAME = "fi.csc.bigpicture.beacon.v2"
 
-BP_DATASET_SCOPE = ["dataset"]
-BP_BIOLOGICAL_BEING_SCOPE = ["biological_being"]
-BP_SPECIMEN_SCOPE = ["specimen"]
-BP_BLOCK_SCOPE = ["block"]
-BP_STAINING_SCOPE = ["staining"]
-
-BP_FILTERING_META = BeaconFilteringMeta(beaconId=BP_BEACON_ID)
+BP_DATASET_SCHEMA = "dataset"
+BP_BIOLOGICAL_BEING_SCHEMA = "biological_being"
+BP_SPECIMEN_SCHEMA = "specimen"
+BP_BLOCK_SCHEMA = "block"
+BP_STAINING_SCHEMA = "staining"
+BP_SCHEMAS = [
+    BP_DATASET_SCHEMA,
+    BP_BIOLOGICAL_BEING_SCHEMA,
+    BP_SPECIMEN_SCHEMA,
+    BP_BLOCK_SCHEMA,
+    BP_STAINING_SCHEMA,
+]
+BP_DATASET_SCOPE = [BP_DATASET_SCHEMA]
+BP_BIOLOGICAL_BEING_SCOPE = [BP_BIOLOGICAL_BEING_SCHEMA]
+BP_SPECIMEN_SCOPE = [BP_SPECIMEN_SCHEMA]
+BP_BLOCK_SCOPE = [BP_BLOCK_SCHEMA]
+BP_STAINING_SCOPE = [BP_STAINING_SCHEMA]
 
 BP_DATASET_TITLE_FILTERING_TERM = BeaconFilteringTerm(
     id="dataset_title", type="text", scopes=BP_DATASET_SCOPE
@@ -106,9 +118,22 @@ BP_FILTERING_TERMS = [
     BP_STAINING_COMPOUND_FILTERING_TERM,
 ]
 
+BP_META_RESPONSE = BeaconInfoMeta(
+    beaconId=BP_BEACON_ID,
+    returnedSchemas=[BeaconSchema(entityType=schema) for schema in BP_SCHEMAS],
+)
+
 BP_FILTERING_TERMS_RESPONSE = BeaconFilteringTermsResponse(
-    meta=BeaconFilteringMeta(beaconId=BP_BEACON_ID),
+    meta=BP_META_RESPONSE,
     response=BeaconFilteringTerms(filteringTerms=BP_FILTERING_TERMS),
 )
 
-BP_INFO_RESPONSE = BeaconInfoResponse(meta=BeaconInfoMeta(beaconId=BP_BEACON_ID))
+BP_INFO_RESPONSE = BeaconInfoResponse(
+    meta=BP_META_RESPONSE,
+    response=BeaconInfo(
+        id=BP_BEACON_ID,
+        name=BP_BEACON_NAME,
+        # TODO(improve): show actual environment
+        environment="dev",
+    ),
+)

@@ -2,6 +2,8 @@ from pydantic import BaseModel, Field, model_validator
 from typing import Any, Literal
 
 BEACON_API_VERSION = "v2.0"
+BEACON_ORGANISATION_ID = "fi.csc"
+BEACON_ORGANISATION_NAME = "CSC – IT Center for Science"
 
 SNOMED_ONTOLOGY_ID = "SNOMEDCT"
 
@@ -145,11 +147,18 @@ class BeaconResultSetsResponse(BaseModel):
 #
 
 
-class BeaconFilteringMeta(BaseModel):
-    """Beacon V2 filtering meta. Does not validate against the JSON schema."""
+class BeaconSchema(BaseModel):
+    """Beacon V2 schema."""
+
+    entityType: str
+
+
+class BeaconInfoMeta(BaseModel):
+    """Beacon V2 info meta."""
 
     apiVersion: str = BEACON_API_VERSION
     beaconId: str
+    returnedSchemas: list[BeaconSchema]
 
 
 class BeaconFilteringOntology(BaseModel):
@@ -204,7 +213,7 @@ class BeaconFilteringTerms(BaseModel):
 class BeaconFilteringTermsResponse(BaseModel):
     """Beacon V2 filtering terms response."""
 
-    meta: BeaconFilteringMeta
+    meta: BeaconInfoMeta
     response: BeaconFilteringTerms
 
 
@@ -212,11 +221,23 @@ class BeaconFilteringTermsResponse(BaseModel):
 #
 
 
-class BeaconInfoMeta(BaseModel):
-    """Beacon V2 info meta. Does not validate against the JSON schema."""
+# https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/responses/sections/beaconInfoResults.json
+class BeaconOrganisation(BaseModel):
+    """Beacon V2 organisation."""
 
+    id: str = BEACON_ORGANISATION_ID
+    name: str = BEACON_ORGANISATION_NAME
+
+
+# https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/responses/sections/beaconInfoResults.json
+class BeaconInfo(BaseModel):
+    """Beacon V2 info."""
+
+    id: str
+    name: str
     apiVersion: str = BEACON_API_VERSION
-    beaconId: str
+    environment: Literal["prod", "test", "dev", "staging"]
+    organization: BeaconOrganisation = BeaconOrganisation()
 
 
 # https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/responses/beaconInfoResponse.json
@@ -224,3 +245,4 @@ class BeaconInfoResponse(BaseModel):
     """Beacon V2 info response."""
 
     meta: BeaconInfoMeta
+    response: BeaconInfo

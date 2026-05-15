@@ -1,7 +1,20 @@
 services:
+  sd-search-api:
+    build:
+      dockerfile: ./dockerfiles/Dockerfile
+      context: .
+    image: cscfi/sd-search-api
+    command: [ "uv", "run", "sd_search_api" ]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
   postgres:
-    profiles:
-      - dev
     image: postgres:18-alpine
     hostname: postgres
     environment:

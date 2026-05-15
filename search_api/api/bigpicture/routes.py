@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from .models import BP_BEACON_ID, BP_FILTERING_TERMS_RESPONSE, BP_INFO_RESPONSE
 from ..beacon.models import (
@@ -17,7 +17,7 @@ from .services import BigpictureBeaconService, OpenSearchBigpictureBeaconService
 router = APIRouter()
 
 # TODO(improve): use environmental variables
-OPENSEARCH_HOST = "localhost"
+OPENSEARCH_HOST = "host.docker.internal"  # "localhost"
 OPENSEARCH_PORT = 9200
 
 
@@ -85,3 +85,15 @@ async def query_beacon(
         ),
         response=response,
     )
+
+
+@router.get("/health")
+async def health(service: BigpictureBeaconService = Depends(get_service)):
+    try:
+        if await service.is_healthy():
+            return {"status": "ok"}
+
+        raise HTTPException(status_code=503, detail="unhealthy")
+
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=str(e))

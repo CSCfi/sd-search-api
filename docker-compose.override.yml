@@ -1,5 +1,8 @@
 services:
-  # Allow connecting to the database outside the docker network.
+  # Allow connections outside the docker network.
+  sd-search-api:
+    ports:
+      - "8000:8000"
   postgres:
     ports:
       - "5434:5432"

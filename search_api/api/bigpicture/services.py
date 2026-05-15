@@ -112,9 +112,10 @@ class BigpictureBeaconService(ABC):
         filters: list[BeaconQueryFilter],
         limit: int = DEFAULT_LIMIT,
     ) -> BeaconResultSets:
-        """
-        Get matching datasets.
-        """
+        pass
+
+    @abstractmethod
+    async def is_healthy(self) -> bool:
         pass
 
 
@@ -152,6 +153,10 @@ class MockBigpictureBeaconService(BigpictureBeaconService):
     ) -> BeaconResultSets:
         return get_mock_query_result()
 
+    @override
+    async def is_healthy(self) -> bool:
+        return True
+
 
 class OpenSearchBigpictureBeaconService(BigpictureBeaconService):
     """
@@ -168,6 +173,14 @@ class OpenSearchBigpictureBeaconService(BigpictureBeaconService):
             hosts=[{"host": host, "port": port}],
             # use_ssl=False,
         )
+
+    @override
+    async def is_healthy(self) -> bool:
+        try:
+            resp = await self.client.cluster.health()
+            return resp.get("status") in {"green", "yellow"}
+        except Exception:
+            return False
 
     @staticmethod
     def get_query(

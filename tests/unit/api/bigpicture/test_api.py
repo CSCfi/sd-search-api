@@ -1,11 +1,15 @@
 from fastapi.testclient import TestClient
 
-from search_api.api.bigpicture.models import (
+from search_api.api.beacon.models import (
     BeaconQueryRequest,
     BeaconQuery,
     BeaconBooleanResponse,
     BeaconCountResponse,
     BeaconResultSetsResponse,
+)
+from search_api.api.bigpicture.models import (
+    BP_INFO_RESPONSE,
+    BP_FILTERING_TERMS_RESPONSE,
 )
 from search_api.main import app
 from search_api.api.bigpicture.routes import get_service
@@ -57,9 +61,7 @@ def test_info_endpoint():
 
     assert response.status_code == 200
     data = response.json()
-
-    assert data["meta"]["apiVersion"] == "v2.0"
-    assert data["meta"]["beaconId"] == "fi.csc.bigpicture.beacon.v2"
+    assert data == BP_INFO_RESPONSE.model_dump()
 
 
 def test_filtering_terms_endpoint():
@@ -68,6 +70,4 @@ def test_filtering_terms_endpoint():
 
     assert response.status_code == 200
     data = response.json()
-
-    assert data["meta"]["apiVersion"] == "v2.0"
-    assert data["meta"]["beaconId"] == "fi.csc.bigpicture.beacon.v2"
+    assert data == BP_FILTERING_TERMS_RESPONSE.model_dump()

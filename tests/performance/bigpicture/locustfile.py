@@ -2,12 +2,13 @@ import json
 import random
 from locust import HttpUser, task, between
 
-from search_api.api.bigpicture.models import BeaconQueryFilter
-from search_api.api.bigpicture.services import OpenSearchBigpictureBeaconService
+from search_api.api.beacon.models import BeaconQueryFilter
+from search_api.api.bigpicture.services import (
+    OpenSearchBigpictureBeaconService,
+    BP_OPENSEARCH_INDEX,
+)
 
 # locust -f tests/performance/bigpicture/locustfile.py --host=http://localhost:9200
-
-INDEX = "bp-image-index"
 
 QUERIES = [
     {
@@ -20,19 +21,19 @@ QUERIES = [
     {
         "name": "Datasets match species code 0.001% sensitivity",
         "body": OpenSearchBigpictureBeaconService.get_query(
-            [BeaconQueryFilter(id="species", value="outstanding")]
+            [BeaconQueryFilter(id="animal_species", value="outstanding")]
         ),
     },
     {
         "name": "Datasets match species code 1% sensitivity",
         "body": OpenSearchBigpictureBeaconService.get_query(
-            [BeaconQueryFilter(id="species", value="1")]
+            [BeaconQueryFilter(id="animal_species", value="1")]
         ),
     },
     {
         "name": "Datasets match species code 83.9% sensitivity",
         "body": OpenSearchBigpictureBeaconService.get_query(
-            [BeaconQueryFilter(id="species", value="poor")]
+            [BeaconQueryFilter(id="animal_species", value="poor")]
         ),
     },
     {
@@ -83,7 +84,7 @@ class OpenSearchUser(HttpUser):
         query = random.choice(QUERIES)
 
         response = self.client.post(
-            f"/{INDEX}/_search",
+            f"/{BP_OPENSEARCH_INDEX}/_search",
             json=query["body"],
             headers={"Content-Type": "application/json"},
             name=query["name"],

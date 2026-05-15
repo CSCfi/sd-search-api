@@ -1,6 +1,6 @@
 from typing import cast
 
-from search_api.api.bigpicture.models import (
+from search_api.api.beacon.models import (
     BeaconQueryRequest,
     BeaconQuery,
     BeaconQueryGranularity,

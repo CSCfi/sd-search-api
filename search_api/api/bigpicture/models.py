@@ -1,134 +1,114 @@
-from pydantic import BaseModel, Field
-from typing import Any, Literal
+from search_api.api.beacon.models import (
+    SNOMED_ONTOLOGY_ID,
+    BeaconFilteringMeta,
+    BeaconFilteringTerm,
+    BeaconFilteringControlledVocabulary,
+    BeaconFilteringOntology,
+    BeaconFilteringTermsResponse,
+    BeaconFilteringTerms,
+    BeaconInfoResponse,
+    BeaconInfoMeta,
+)
 
-BeaconQueryGranularity = Literal["boolean", "count", "record"]
+BP_BEACON_ID = "fi.csc.bigpicture.beacon.v2"
 
+BP_DATASET_SCOPE = ["dataset"]
+BP_BIOLOGICAL_BEING_SCOPE = ["biological_being"]
+BP_SPECIMEN_SCOPE = ["specimen"]
+BP_BLOCK_SCOPE = ["block"]
+BP_STAINING_SCOPE = ["staining"]
 
-# Beacon V2 query
-#
+BP_FILTERING_META = BeaconFilteringMeta(beaconId=BP_BEACON_ID)
 
+BP_DATASET_TITLE_FILTERING_TERM = BeaconFilteringTerm(
+    id="dataset_title", type="text", scopes=BP_DATASET_SCOPE
+)
+BP_DATASET_DESCRIPTION_FILTERING_TERM = BeaconFilteringTerm(
+    id="dataset_description", type="text", scopes=BP_DATASET_SCOPE
+)
+BP_SPECIES_FILTERING_TERM = BeaconFilteringTerm(
+    id="animal_species",
+    type="ontology",
+    ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
+    scopes=BP_BIOLOGICAL_BEING_SCOPE,
+)
+BP_SEX_FILTERING_TERM = BeaconFilteringTerm(
+    id="sex",
+    type="controlledVocabulary",
+    controlledVocabulary=BeaconFilteringControlledVocabulary(
+        allowedTerms=["Male", "Female", "Not-known", "Other"]
+    ),
+    scopes=BP_BIOLOGICAL_BEING_SCOPE,
+)
+BP_ANATOMICAL_SITE_FILTERING_TERM = BeaconFilteringTerm(
+    id="anatomical_site",
+    type="ontology",
+    ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
+    scopes=BP_SPECIMEN_SCOPE,
+)
+BP_FIXATION_TYPE_FILTERING_TERM = BeaconFilteringTerm(
+    id="fixation_type",
+    type="ontology",
+    ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
+    scopes=BP_SPECIMEN_SCOPE,
+)
+BP_SPECIMEN_TYPE_FILTERING_TERM = BeaconFilteringTerm(
+    id="specimen_type",
+    type="ontology",
+    ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
+    scopes=BP_SPECIMEN_SCOPE,
+)
+BP_AGE_AT_EXTRACTION_FILTERING_TERM = BeaconFilteringTerm(
+    id="age_at_extraction", type="numberRange", scopes=BP_SPECIMEN_SCOPE
+)
 
-# https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/requests/beaconRequestMeta.json
-class BeaconQueryMeta(BaseModel):
-    """Beacon V2 query request meta is ignored."""
+BP_BLOCK_PREPARATION_FILTERING_TERM = BeaconFilteringTerm(
+    id="block_preparation",
+    type="ontology",
+    ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
+    scopes=BP_BLOCK_SCOPE,
+)
+BP_STAINING_METHOD_FILTERING_TERM = BeaconFilteringTerm(
+    id="staining_method",
+    type="ontology",
+    ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
+    scopes=BP_STAINING_SCOPE,
+)
+BP_STAINING_TARGET_FILTERING_TERM = BeaconFilteringTerm(
+    id="staining_target", type="text", scopes=BP_STAINING_SCOPE
+)
+BP_STAINING_PROCEDURE_FILTERING_TERM = BeaconFilteringTerm(
+    id="staining_procedure",
+    type="ontologyOrValue",
+    ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
+    scopes=BP_STAINING_SCOPE,
+)
+BP_STAINING_COMPOUND_FILTERING_TERM = BeaconFilteringTerm(
+    id="staining_compound",
+    type="ontologyOrValue",
+    ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
+    scopes=BP_STAINING_SCOPE,
+)
 
-    apiVersion: str = "v2.0"
+BP_FILTERING_TERMS = [
+    BP_DATASET_TITLE_FILTERING_TERM,
+    BP_DATASET_DESCRIPTION_FILTERING_TERM,
+    BP_SPECIES_FILTERING_TERM,
+    BP_SEX_FILTERING_TERM,
+    BP_ANATOMICAL_SITE_FILTERING_TERM,
+    BP_FIXATION_TYPE_FILTERING_TERM,
+    BP_SPECIMEN_TYPE_FILTERING_TERM,
+    BP_AGE_AT_EXTRACTION_FILTERING_TERM,
+    BP_BLOCK_PREPARATION_FILTERING_TERM,
+    BP_STAINING_METHOD_FILTERING_TERM,
+    BP_STAINING_TARGET_FILTERING_TERM,
+    BP_STAINING_PROCEDURE_FILTERING_TERM,
+    BP_STAINING_COMPOUND_FILTERING_TERM,
+]
 
+BP_FILTERING_TERMS_RESPONSE = BeaconFilteringTermsResponse(
+    meta=BeaconFilteringMeta(beaconId=BP_BEACON_ID),
+    response=BeaconFilteringTerms(filteringTerms=BP_FILTERING_TERMS),
+)
 
-# https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/requests/filteringTerms.json
-class BeaconQueryFilter(BaseModel):
-    """
-    Beacon V2 query filter.
-
-    All fields are queried using id as the field name and value as the filter value.
-    Ontology fields additionally support includeDescendantTerms, which enables
-    inclusion of all descendant ontology terms (e.g. SNOMED CT concepts)
-    in the query results.
-    """
-
-    # Used in all Beacon V2 filters.
-    id: str
-
-    # Used in Beacon V2 AlphanumericFilter.
-    value: Any
-    operator: Literal["="] = "="  # Only equality operator is supported
-
-    # Used in Beacon V2 OntologyFilter.
-    # TODO(improve): support ontology descendants.
-    includeDescendantTerms: bool = True
-
-
-class BeaconQuery(BaseModel):
-    """Beacon V2 query."""
-
-    filters: list[BeaconQueryFilter] = Field(default_factory=list)
-    requestedGranularity: BeaconQueryGranularity = "count"
-
-
-# https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/requests/beaconRequestBody.json
-class BeaconQueryRequest(BaseModel):
-    """Beacon V2 query request."""
-
-    meta: BeaconQueryMeta = BeaconQueryMeta()
-    query: BeaconQuery
-
-
-# Beacon V2 result
-#
-
-
-class BeaconResponseMeta(BaseModel):
-    """Beacon V2 meta response. Does not validate against the JSON schema."""
-
-    apiVersion: str = "v2.0"
-    beaconId: str = "fi.csc.bigpicture.beacon.v2"
-    returnedGranularity: BeaconQueryGranularity
-
-
-# https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/responses/sections/beaconBooleanResponseSection.json
-class BeaconResultExistsResponseSummary(BaseModel):
-    """Beacon V2 result exists response summary."""
-
-    exists: bool
-
-
-# https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/responses/beaconBooleanResponse.json
-class BeaconBooleanResponse(BaseModel):
-    """Beacon V2 boolean response."""
-
-    meta: BeaconResponseMeta
-    responseSummary: BeaconResultExistsResponseSummary
-
-
-# https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/responses/sections/beaconCountResponseSection.json
-# https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/responses/sections/beaconSummaryResponseSection.json
-class BeaconResultCountResponseSummary(BaseModel):
-    """Beacon V2 result count response summary."""
-
-    exists: bool
-    numTotalResults: int
-
-
-# https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/responses/beaconCountResponse.json
-class BeaconCountResponse(BaseModel):
-    """Beacon V2 count response."""
-
-    meta: BeaconResponseMeta
-    responseSummary: BeaconResultCountResponseSummary
-
-
-class BeaconResultSetResult(BaseModel):
-    """Beacon V2 result sets result. Not constrained by a JSON schema."""
-
-    datasetId: str
-    datasetTitle: str | None
-    datasetDescription: str | None
-    totalImageCount: int
-    matchingImageCount: int
-    imageIds: list[str] = Field(default_factory=list)
-
-
-# https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/responses/sections/beaconResultsets.json
-class BeaconResultSet(BaseModel):
-    """Beacon V2 result set."""
-
-    id: str
-    setType: str = "dataset"
-    exists: bool = True
-    results: list[BeaconResultSetResult]
-
-
-# https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/responses/sections/beaconResultsets.json
-class BeaconResultSets(BaseModel):
-    """Beacon V2 result sets response."""
-
-    resultSet: list[BeaconResultSet] = Field(default_factory=list)
-
-
-# https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/responses/beaconResultsetsResponse.json
-class BeaconResultSetsResponse(BaseModel):
-    """Beacon V2 result sets response."""
-
-    meta: BeaconResponseMeta
-    responseSummary: BeaconResultCountResponseSummary
-    response: BeaconResultSets
+BP_INFO_RESPONSE = BeaconInfoResponse(meta=BeaconInfoMeta(beaconId=BP_BEACON_ID))

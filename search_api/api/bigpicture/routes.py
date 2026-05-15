@@ -1,9 +1,7 @@
 from fastapi import APIRouter, Depends
-from typing import Any
-import json
-from pathlib import Path
 
-from .models import (
+from .models import BP_BEACON_ID, BP_FILTERING_TERMS_RESPONSE, BP_INFO_RESPONSE
+from ..beacon.models import (
     BeaconQueryRequest,
     BeaconBooleanResponse,
     BeaconCountResponse,
@@ -11,30 +9,30 @@ from .models import (
     BeaconResponseMeta,
     BeaconResultCountResponseSummary,
     BeaconResultExistsResponseSummary,
+    BeaconFilteringTermsResponse,
+    BeaconInfoResponse,
 )
-from .services import BigpictureBeaconService, MockBigpictureBeaconService
+from .services import BigpictureBeaconService, OpenSearchBigpictureBeaconService
 
 router = APIRouter()
 
+# TODO(improve): use environmental variables
+OPENSEARCH_HOST = "localhost"
+OPENSEARCH_PORT = 9200
+
 
 def get_service() -> BigpictureBeaconService:
-    return MockBigpictureBeaconService()
+    return OpenSearchBigpictureBeaconService(OPENSEARCH_HOST, OPENSEARCH_PORT)
 
 
-def load_json(name: str) -> dict[str, Any]:
-    path = Path(__file__).parent.parent.parent / "beacon" / "bigpicture" / name
-    with open(path) as f:
-        return json.load(f)
+@router.get("/info", response_model=BeaconInfoResponse)
+async def info() -> BeaconInfoResponse:
+    return BP_INFO_RESPONSE
 
 
-@router.get("/info")
-async def get_info():
-    return load_json("info.json")
-
-
-@router.get("/filtering_terms")
-async def get_filtering_terms():
-    return load_json("filtering_terms.json")
+@router.get("/filtering_terms", response_model=BeaconFilteringTermsResponse)
+async def filtering_terms() -> BeaconFilteringTermsResponse:
+    return BP_FILTERING_TERMS_RESPONSE
 
 
 @router.post(
@@ -50,7 +48,9 @@ async def query_beacon(
         filters=request.query.filters,
     )
 
-    meta = BeaconResponseMeta(returnedGranularity=request.query.requestedGranularity)
+    meta = BeaconResponseMeta(
+        returnedGranularity=request.query.requestedGranularity, beaconId=BP_BEACON_ID
+    )
 
     if request.query.requestedGranularity == "boolean":
         return BeaconBooleanResponse(

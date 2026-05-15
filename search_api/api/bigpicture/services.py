@@ -3,39 +3,102 @@ from typing import Any, override
 
 from opensearchpy import AsyncOpenSearch
 
-from search_api.api.bigpicture.models import (
+from search_api.api.beacon.models import (
     BeaconQueryFilter,
     BeaconResultSets,
     BeaconResultSet,
     BeaconResultSetResult,
+    BeaconFilteringTerm,
+)
+from search_api.api.bigpicture.models import (
+    BP_FILTERING_TERMS,
+    BP_DATASET_SCOPE,
+    BP_BIOLOGICAL_BEING_SCOPE,
+    BP_SPECIMEN_SCOPE,
+    BP_BLOCK_SCOPE,
+    BP_STAINING_SCOPE,
 )
 
-# TODO (improve): paginate to avoid limits
+BP_OPENSEARCH_INDEX = "bp-image-index"
 
-DEFAULT_LIMIT = 10000
-
-TEXT_FIELDS = {
+# Map filter term to OpenSearch field.
+BP_OPENSEARCH_FIELD = {
     "dataset_title": "dataset_title",
     "dataset_description": "dataset_description",
-}
-
-BLOCK_TERM_FIELDS = {
-    "species": "species",
+    "animal_species": "species",
     "sex": "sex",
     "anatomical_site": "anatomical_site",
     "fixation_type": "fixation_type",
     "specimen_type": "specimen_type",
+    "age_at_extraction": "age_at_extraction",
     "block_preparation": "block_preparation",
-}
-
-BLOCK_RANGE_FIELDS = {"age_at_extraction": "age_at_extraction"}
-
-STAIN_TERM_FIELDS = {
     "staining_method": "staining_method",
     "staining_target": "staining_target",
-    "staining_procedure": "staining_procedure",
-    "staining_compound": "staining_compound",
+    "staining_procedure": ["staining_procedure", "staining_procedure_text"],
+    "staining_compound": ["staining_compound", "staining_compound_text"],
 }
+
+# TODO (improve): paginate to avoid limits
+DEFAULT_LIMIT = 10000
+
+
+def get_term(field_id: str) -> BeaconFilteringTerm:
+    for term in BP_FILTERING_TERMS:
+        if term.id == field_id:
+            return term
+
+    raise ValueError(f"Unsupported field: {field_id}")
+
+
+def build_query(term: BeaconFilteringTerm, value: str) -> dict[str, Any]:
+    field_ids = BP_OPENSEARCH_FIELD[term.id]
+    if isinstance(field_ids, str):
+        field_ids = [field_ids]
+
+    builders = {
+        "text": build_match_query,
+        "controlledVocabulary": build_term_query,
+        "ontology": build_term_query,
+        "ontologyOrValue": build_term_query,
+        "numberRange": build_range_query,
+    }
+
+    builder = builders.get(term.type)
+    if not builder:
+        raise ValueError(f"Unsupported term type {term.type}")
+
+    return or_queries([builder(f, value) for f in field_ids])
+
+
+def build_match_query(field_id: str, value: str) -> dict[str, Any]:
+    return {"match": {field_id: value}}
+
+
+def build_term_query(field_id: str, value: str) -> dict[str, Any]:
+    return {"term": {field_id: value}}
+
+
+def build_range_query(field_id: str, value: str) -> dict[str, Any]:
+    parts = value.split("-", 1)
+
+    try:
+        gte = int(parts[0])
+        lte = int(parts[1]) if len(parts) > 1 else gte
+    except ValueError:
+        raise ValueError(f"Invalid range value: {value}")
+
+    return {
+        "range": {
+            field_id: {
+                "gte": gte,
+                "lte": lte,
+            }
+        }
+    }
+
+
+def or_queries(queries: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"bool": {"should": queries, "minimum_should_match": 1}}
 
 
 class BigpictureBeaconService(ABC):
@@ -95,9 +158,16 @@ class OpenSearchBigpictureBeaconService(BigpictureBeaconService):
     OpenSearch Bigpicture Beacon search.
     """
 
-    def __init__(self, client: AsyncOpenSearch, index_name: str):
-        self.client = client
-        self.index_name = index_name
+    def __init__(self, host: str, port: int):
+        self.client = self._create_client(host, port)
+        self.index_name = BP_OPENSEARCH_INDEX
+
+    @staticmethod
+    def _create_client(host: str, port: int) -> AsyncOpenSearch:
+        return AsyncOpenSearch(
+            hosts=[{"host": host, "port": port}],
+            # use_ssl=False,
+        )
 
     @staticmethod
     def get_query(
@@ -109,29 +179,19 @@ class OpenSearchBigpictureBeaconService(BigpictureBeaconService):
         must_clauses = []
 
         for f in filters:
-            field_id = f.id
+            term = get_term(f.id)
             value = f.value
 
-            if field_id in TEXT_FIELDS:
-                must_clauses.append({"match": {TEXT_FIELDS[field_id]: value}})
-
-            elif field_id in BLOCK_TERM_FIELDS:
-                block_filters.append({"term": {BLOCK_TERM_FIELDS[field_id]: value}})
-
-            elif field_id in BLOCK_RANGE_FIELDS:
-                r = {}
-                parts = value.split("-", 1)
-
-                if len(parts) > 0:
-                    r["gte"] = r["lte"] = int(parts[0])
-
-                if len(parts) > 1 and parts[1]:
-                    r["lte"] = int(parts[1])
-
-                block_filters.append({"range": {BLOCK_RANGE_FIELDS[field_id]: r}})
-
-            elif field_id in STAIN_TERM_FIELDS:
-                stain_filters.append({"term": {STAIN_TERM_FIELDS[field_id]: value}})
+            if term.scopes == BP_DATASET_SCOPE:
+                must_clauses.append(build_query(term, value))
+            elif term.scopes in (
+                BP_BIOLOGICAL_BEING_SCOPE,
+                BP_SPECIMEN_SCOPE,
+                BP_BLOCK_SCOPE,
+            ):
+                block_filters.append(build_query(term, value))
+            elif term.scopes in (BP_STAINING_SCOPE,):
+                stain_filters.append(build_query(term, value))
 
         if block_filters:
             must_clauses.append(
@@ -182,7 +242,6 @@ class OpenSearchBigpictureBeaconService(BigpictureBeaconService):
         filters: list[BeaconQueryFilter],
         limit: int = DEFAULT_LIMIT,
     ) -> BeaconResultSets:
-
         _query = self.get_query(filters, limit)
         resp = await self.client.search(index=self.index_name, body=_query)
         buckets = resp.get("aggregations", {}).get("datasets", {}).get("buckets", [])

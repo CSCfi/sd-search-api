@@ -17,16 +17,24 @@ class BeaconQueryMeta(BaseModel):
 
 # https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/requests/filteringTerms.json
 class BeaconQueryFilter(BaseModel):
-    """Beacon V2 query filter based on AlphanumericFilter and OntologyFilter. Does not validate against the JSON schema."""
+    """
+    Beacon V2 query filter.
 
+    All fields are queried using id as the field name and value as the filter value.
+    Ontology fields additionally support includeDescendantTerms, which enables
+    inclusion of all descendant ontology terms (e.g. SNOMED CT concepts)
+    in the query results.
+    """
+
+    # Used in all Beacon V2 filters.
     id: str
 
-    # AlphanumericFilter
+    # Used in Beacon V2 AlphanumericFilter.
     value: Any
     operator: Literal["="] = "="  # Only equality operator is supported
 
-    # TODO(improve): support ontology descendant extension.
-    # OntologyFilter
+    # Used in Beacon V2 OntologyFilter.
+    # TODO(improve): support ontology descendants.
     includeDescendantTerms: bool = True
 
 

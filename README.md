@@ -247,6 +247,55 @@ curl -X POST "http://localhost:9200/bp-image-index/_search" -H "Content-Type: ap
 '
 ```
 
+## Ollama
+
+The AI search endpoint uses a local [Ollama](https://ollama.com) model. Install and start it before running the API:
+
+```bash
+brew install ollama
+ollama pull qwen2.5:14b
+ollama serve
+```
+
+## AI-powered search
+
+The `/ai/query` endpoint accepts a natural language query. Claude translates it into
+Beacon V2 filters using the MCP server and returns structured results.
+
+Requires `ANTHROPIC_API_KEY` to be set in the environment.
+
+```bash
+curl -X POST "http://localhost:8000/ai/query" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "find female human lung tissue images with immunostaining, age 40-60"}'
+```
+
+Example response:
+
+```json
+{
+  "interpretation": "Searching for images of female human subjects with lung anatomical site, immunostaining method, and age at extraction between 40 and 60 years.",
+  "filters": [
+    {"id": "sex", "value": "Female"},
+    {"id": "anatomical_site", "value": "lung"},
+    {"id": "staining_method", "value": "immunostaining"},
+    {"id": "age_at_extraction", "value": "40-60"}
+  ],
+  "result_count": 142,
+  "datasets": [
+    {
+      "dataset_id": "ds-001",
+      "dataset_title": "Lung Cancer Cohort",
+      "matching_image_count": 142,
+      "total_image_count": 5000
+    }
+  ]
+}
+```
+
+Note: SNOMED CT ontology resolution (Snowstorm) is not yet integrated. Ontology fields
+are searched using the term or code passed directly.
+
 ## Bigpicture OpenSearch performance tests
 
 Data for OpenSearch performance tests has been generated and

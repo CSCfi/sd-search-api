@@ -1,9 +1,9 @@
 from fastapi import FastAPI
-from .api.bigpicture.routes import router
 import uvicorn
 
-# uvicorn search_api.main:app --reload
+from search_api.api.bigpicture.routes import router
 
+# uvicorn search_api.main:app --reload
 
 # TODO(improve): support other than Bigpicture Beacons
 

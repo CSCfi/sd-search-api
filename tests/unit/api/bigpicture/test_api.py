@@ -14,21 +14,21 @@ from search_api.api.bigpicture.models import (
     BP_FILTERING_TERMS_RESPONSE,
 )
 from search_api.main import app
-from search_api.api.bigpicture.routes import get_service
-from search_api.api.bigpicture.services import (
+from search_api.api.bigpicture.routes import get_beacon_service
+from search_api.api.bigpicture.services.beacon import (
     MockBigpictureBeaconService,
     get_mock_query_result,
 )
 
 
-def get_mock_service():
+def mock_beacon_service():
     return MockBigpictureBeaconService()
 
 
-app.dependency_overrides[get_service] = get_mock_service
+app.dependency_overrides[get_beacon_service] = mock_beacon_service
 
 
-def test_query_dataset_mock_service():
+def test_query_dataset():
     # boolean granularity
     request = BeaconQueryRequest(query=BeaconQuery(requestedGranularity="boolean"))
     client = TestClient(app)

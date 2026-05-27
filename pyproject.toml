@@ -23,6 +23,7 @@ dependencies = [
     "types-jsonschema>=4.26.0.20260508",
     "types-requests>=2.33.0.20260508",
     "uvicorn>=0.47.0",
+    "pydantic-ai>=0.3.0",
 ]
 
 [dependency-groups]

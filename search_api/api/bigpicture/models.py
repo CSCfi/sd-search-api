@@ -1,3 +1,5 @@
+from pydantic import BaseModel
+
 from search_api.api.beacon.models import (
     SNOMED_ONTOLOGY_ID,
     BeaconFilteringTerm,
@@ -137,3 +139,7 @@ BP_INFO_RESPONSE = BeaconInfoResponse(
         environment="dev",
     ),
 )
+
+
+class AIQueryRequest(BaseModel):
+    query: str

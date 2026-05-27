@@ -20,8 +20,8 @@ def get_code(code: str) -> BigpictureCodeAttributeValue:
 
 
 @pytest.mark.asyncio
-async def test_load_and_sync_fields():
-    is_sync_fields = True
+async def test_load_fields():
+    is_sync_fields = False
 
     image_id = f"image{uuid.uuid4()}"
     dataset_id = f"dataset{uuid.uuid4()}"

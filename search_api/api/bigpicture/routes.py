@@ -1,6 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 
-from .models import BP_BEACON_ID, BP_FILTERING_TERMS_RESPONSE, BP_INFO_RESPONSE
+from .models import (
+    BP_BEACON_ID,
+    BP_FILTERING_TERMS_RESPONSE,
+    BP_INFO_RESPONSE,
+    AIQueryRequest,
+)
 from ..beacon.models import (
     BeaconQueryRequest,
     BeaconBooleanResponse,
@@ -12,7 +17,8 @@ from ..beacon.models import (
     BeaconFilteringTermsResponse,
     BeaconInfoResponse,
 )
-from .services import BigpictureBeaconService, OpenSearchBigpictureBeaconService
+from .services.beacon import BigpictureBeaconService, OpenSearchBigpictureBeaconService
+from .services.ai import AISearchResult, ai_search
 
 router = APIRouter()
 
@@ -21,7 +27,7 @@ OPENSEARCH_HOST = "host.docker.internal"  # "localhost"
 OPENSEARCH_PORT = 9200
 
 
-def get_service() -> BigpictureBeaconService:
+def get_beacon_service() -> BigpictureBeaconService:
     return OpenSearchBigpictureBeaconService(OPENSEARCH_HOST, OPENSEARCH_PORT)
 
 
@@ -51,7 +57,8 @@ async def filtering_terms() -> BeaconFilteringTermsResponse:
     response_model_exclude_none=True,
 )
 async def query_beacon(
-    request: BeaconQueryRequest, backend: BigpictureBeaconService = Depends(get_service)
+    request: BeaconQueryRequest,
+    backend: BigpictureBeaconService = Depends(get_beacon_service),
 ) -> BeaconBooleanResponse | BeaconCountResponse | BeaconResultSetsResponse:
     response = await backend.query(
         filters=request.query.filters,
@@ -87,8 +94,19 @@ async def query_beacon(
     )
 
 
+@router.post(
+    "/ai/query",
+    response_model=AISearchResult,
+)
+async def ai_query(
+    request: AIQueryRequest,
+    beacon_service: BigpictureBeaconService = Depends(get_beacon_service),
+) -> AISearchResult:
+    return await ai_search(request.query, beacon_service)
+
+
 @router.get("/health")
-async def health(service: BigpictureBeaconService = Depends(get_service)):
+async def health(service: BigpictureBeaconService = Depends(get_beacon_service)):
     try:
         if await service.is_healthy():
             return {"status": "ok"}

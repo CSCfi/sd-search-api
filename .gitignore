@@ -5,3 +5,15 @@
 /.idea/modules.xml
 /.idea/vcs.xml
 /.coverage
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Tools
+.venv/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.pytest_cache/

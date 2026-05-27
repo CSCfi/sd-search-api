@@ -4,6 +4,8 @@ from typing import AsyncGenerator
 from psycopg import AsyncConnection, AsyncCursor
 from psycopg.rows import tuple_row
 
+from search_api.conf import common_config
+
 
 @asynccontextmanager
 async def get_connection() -> AsyncGenerator[AsyncConnection, None]:
@@ -12,13 +14,13 @@ async def get_connection() -> AsyncGenerator[AsyncConnection, None]:
 
     :return: a new database connection.
     """
-    # TODO(improve): read connection details from an environmental variable
-
+    cfg = common_config()
     conn = await AsyncConnection.connect(
-        host="localhost",
-        dbname="sd_search",
-        user="postgres",
-        password="test",
+        host=cfg.POSTGRES_HOST,
+        port=cfg.POSTGRES_PORT,
+        dbname=cfg.POSTGRES_DB,
+        user=cfg.POSTGRES_USER,
+        password=cfg.POSTGRES_PASSWORD,
         autocommit=True,
     )
     try:

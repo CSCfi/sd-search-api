@@ -2,9 +2,11 @@
 import asyncio
 import atexit
 import logging
+from typing import Any
 
 from opensearchpy import AsyncOpenSearch, helpers
-from typing import Any
+
+from search_api.conf import common_config as _common_config
 
 logging.basicConfig(level=logging.INFO)
 
@@ -18,8 +20,13 @@ def _search(host: str, port: int, user: str, password: str) -> AsyncOpenSearch:
     )
 
 
-# TODO(improve): read connection details from an environmental variable
-bp_search = _search("localhost", 9200, "admin", "admin")
+_cfg = _common_config()
+bp_search = _search(
+    _cfg.OPENSEARCH_HOST,
+    _cfg.OPENSEARCH_PORT,
+    _cfg.OPENSEARCH_USER,
+    _cfg.OPENSEARCH_PASSWORD,
+)
 
 
 def _close_bp_search():

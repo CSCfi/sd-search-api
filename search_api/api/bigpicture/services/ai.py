@@ -1,13 +1,14 @@
 """AI-powered natural language search using pydantic-ai and Ollama."""
 
-
 from pydantic import BaseModel
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
+
 from search_api.api.beacon.models import BeaconQueryFilter
 from search_api.api.bigpicture.models import BP_FILTERING_TERMS
 from search_api.api.bigpicture.services.beacon import BigpictureBeaconService
+from search_api.conf import bigpicture_config as _bigpicture_config
 
 
 class AIQueryFilter(BaseModel):
@@ -34,10 +35,11 @@ class AISearchResult(BaseModel):
     datasets: list[AIDatasetResult]
 
 
+_cfg = _bigpicture_config()
 _OLLAMA_MODEL = OpenAIChatModel(
     # These models are too small to construct filters correctly: "qwen2.5:3b",
     "qwen2.5:14b",
-    provider=OpenAIProvider(base_url="http://localhost:11434/v1", api_key="ollama"),
+    provider=OpenAIProvider(base_url=_cfg.LLM_BASE_URL, api_key=_cfg.LLM_API_KEY),
 )
 
 _SYSTEM_PROMPT = """\

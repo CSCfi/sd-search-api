@@ -19,16 +19,14 @@ from ..beacon.models import (
 )
 from .services.beacon import BigpictureBeaconService, OpenSearchBigpictureBeaconService
 from .services.ai import AISearchResult, ai_search
+from search_api.conf import common_config
 
 router = APIRouter()
 
-# TODO(improve): use environmental variables
-OPENSEARCH_HOST = "host.docker.internal"  # "localhost"
-OPENSEARCH_PORT = 9200
-
 
 def get_beacon_service() -> BigpictureBeaconService:
-    return OpenSearchBigpictureBeaconService(OPENSEARCH_HOST, OPENSEARCH_PORT)
+    cfg = common_config()
+    return OpenSearchBigpictureBeaconService(cfg.OPENSEARCH_HOST, cfg.OPENSEARCH_PORT)
 
 
 @router.get(

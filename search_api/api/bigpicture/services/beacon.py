@@ -163,15 +163,19 @@ class OpenSearchBigpictureBeaconService(BigpictureBeaconService):
     OpenSearch Bigpicture Beacon search.
     """
 
-    def __init__(self, host: str, port: int):
-        self.client = self._create_client(host, port)
+    def __init__(self, host: str, port: int, user: str, password: str):
+        self.client = self._create_client(host, port, user, password)
         self.index_name = BP_OPENSEARCH_INDEX
 
     @staticmethod
-    def _create_client(host: str, port: int) -> AsyncOpenSearch:
+    def _create_client(
+        host: str, port: int, user: str, password: str
+    ) -> AsyncOpenSearch:
         return AsyncOpenSearch(
             hosts=[{"host": host, "port": port}],
-            # use_ssl=False,
+            http_auth=(user, password),
+            use_ssl=True,
+            verify_certs=False,
         )
 
     @override

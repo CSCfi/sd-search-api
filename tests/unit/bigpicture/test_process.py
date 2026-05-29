@@ -14,7 +14,7 @@ from search_api.bigpicture.process import (
     _extract_age_at_extraction_range,
 )
 
-TEST_DIR = Path(__file__).resolve().parent.parent.parent / "test_files" / "bigpicture"
+TEST_DIR = Path(__file__).resolve().parent.parent.parent / "files" / "bigpicture"
 
 
 def test_extract_fields():

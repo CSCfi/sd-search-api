@@ -12,7 +12,7 @@ from search_api.bigpicture.service import load_fields, get_fields, sync_fields
 
 from search_api.database.repository import get_connection
 
-TEST_DIR = Path(__file__).resolve().parent.parent.parent / "test_files" / "bigpicture"
+TEST_DIR = Path(__file__).resolve().parent.parent.parent / "files" / "bigpicture"
 
 
 def get_code(code: str) -> BigpictureCodeAttributeValue:

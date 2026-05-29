@@ -26,7 +26,7 @@ class CommonConfiguration(BaseSettings):
         default="admin", description="OpenSearch user."
     )  # TODO: remove default value
     OPENSEARCH_PASSWORD: str = Field(
-        default="admin", description="OpenSearch password."
+        default="Sd@Search9x!", description="OpenSearch password."
     )  # TODO: remove default value
 
 

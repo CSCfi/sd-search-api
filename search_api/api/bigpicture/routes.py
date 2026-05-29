@@ -26,7 +26,12 @@ router = APIRouter()
 
 def get_beacon_service() -> BigpictureBeaconService:
     cfg = common_config()
-    return OpenSearchBigpictureBeaconService(cfg.OPENSEARCH_HOST, cfg.OPENSEARCH_PORT)
+    return OpenSearchBigpictureBeaconService(
+        cfg.OPENSEARCH_HOST,
+        cfg.OPENSEARCH_PORT,
+        cfg.OPENSEARCH_USER,
+        cfg.OPENSEARCH_PASSWORD,
+    )
 
 
 @router.get(

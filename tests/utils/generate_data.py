@@ -1,11 +1,15 @@
 """Generate data for Bigpicture performance testing."""
 
+import argparse
 import asyncio
+import json
+import logging
 import random
 import string
 import time
-import logging
+from pathlib import Path
 
+from search_api.api.bigpicture.services.beacon import BP_OPENSEARCH_INDEX
 from search_api.bigpicture.models import (
     BigpictureFields,
     BigpictureCodeAttributeValue,
@@ -14,19 +18,22 @@ from search_api.bigpicture.models import (
 )
 from search_api.bigpicture.service import load_fields, sync_fields, sync_count
 from search_api.database.repository import get_connection
+from search_api.services.search import bp_search
+
+_INDEX_MAPPING_PATH = (
+    Path(__file__).resolve().parent.parent.parent
+    / "search_api"
+    / "opensearch"
+    / "bigpicture"
+    / "bp-image-index.json"
+)
 
 logging.basicConfig(level=logging.INFO)
 
-# uv run python -m tests.performance.bigpicture.generate_data
+# uv run python -m tests.utils.generate_data --images 1000 --datasets 100
 
 # Maximum time to generate data in seconds.
 MAX_TIME = 60 * 60 * 2
-
-# Number of images to generate.
-IMAGE_CNT = 10000
-
-# Number of datasets to generate.
-DATASET_CNT = 50000
 
 # Maximum number of codes and values.
 SEX_MAX_CNT = 2
@@ -182,7 +189,7 @@ def _generate_description() -> str:
     return random.choice(DESCRIPTIONS)
 
 
-async def generate_and_load_data():
+async def generate_and_load_data(image_cnt: int, dataset_cnt: int) -> None:
     """Generate and load data into the database."""
 
     start_time = time.time()
@@ -204,24 +211,24 @@ async def generate_and_load_data():
             # Load data.
             #
 
-            logging.info(f"Load {IMAGE_CNT} images")
+            logging.info(f"Load {image_cnt} images")
 
             # Get dataset image count.
-            base = IMAGE_CNT // DATASET_CNT
-            remainder = IMAGE_CNT % DATASET_CNT
+            base = image_cnt // dataset_cnt
+            remainder = image_cnt % dataset_cnt
             dataset_image_cnt = {
                 f"dataset{k}": base + (1 if k <= remainder else 0)
-                for k in range(1, DATASET_CNT + 1)
+                for k in range(1, dataset_cnt + 1)
             }
 
-            for i in range(1, IMAGE_CNT + 1):
+            for i in range(1, image_cnt + 1):
                 if time.time() - start_time > MAX_TIME:
                     print("Time limited exceeded.")
                     break
                 generated_cnt += 1
 
                 image_id = f"image{i}"
-                dataset_id = f"dataset{((i - 1) % DATASET_CNT) + 1}"
+                dataset_id = f"dataset{((i - 1) % dataset_cnt) + 1}"
 
                 fields = BigpictureFields(
                     image_id=image_id,
@@ -266,10 +273,25 @@ async def generate_and_load_data():
             assert await sync_count(cur) == generated_cnt
 
 
-async def sync_data():
+async def ensure_index() -> None:
+    """Create the OpenSearch index from the mapping file if it does not already exist."""
+
+    if await bp_search.indices.exists(index=BP_OPENSEARCH_INDEX):
+        logging.info(
+            f"Index '{BP_OPENSEARCH_INDEX}' already exists, skipping creation."
+        )
+        return
+
+    index_conf = json.loads(_INDEX_MAPPING_PATH.read_text())
+    logging.info(f"Creating index '{BP_OPENSEARCH_INDEX}'")
+    await bp_search.indices.create(index=BP_OPENSEARCH_INDEX, body=index_conf)
+    logging.info(f"Index '{BP_OPENSEARCH_INDEX}' created.")
+
+
+async def sync_data() -> None:
     """Sync data from the database to OpenSearch."""
 
-    logging.info("Syncing images to to OpenSearch")
+    logging.info("Syncing images to OpenSearch")
 
     start_time = time.time()
 
@@ -284,9 +306,27 @@ async def sync_data():
             assert await sync_count(cur) == 0
 
 
-def main():
-    async def run():
-        await generate_and_load_data()
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Generate and load Bigpicture test data."
+    )
+    parser.add_argument(
+        "--images",
+        type=int,
+        default=10000,
+        help="Number of images to generate (default: 10000).",
+    )
+    parser.add_argument(
+        "--datasets",
+        type=int,
+        default=50000,
+        help="Number of datasets to generate (default: 50000).",
+    )
+    args = parser.parse_args()
+
+    async def run() -> None:
+        await ensure_index()
+        await generate_and_load_data(args.images, args.datasets)
         await sync_data()
 
     asyncio.run(run())

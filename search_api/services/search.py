@@ -15,7 +15,7 @@ def _search(host: str, port: int, user: str, password: str) -> AsyncOpenSearch:
     return AsyncOpenSearch(
         hosts=[{"host": host, "port": port}],
         http_auth=(user, password),
-        use_ssl=False,
+        use_ssl=True,
         verify_certs=False,
     )
 

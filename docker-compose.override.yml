@@ -6,3 +6,9 @@ services:
   postgres:
     ports:
       - "5434:5432"
+  opensearch:
+    ports:
+      - "9200:9200"
+  opensearch-dashboards:
+    ports:
+      - "5601:5601"

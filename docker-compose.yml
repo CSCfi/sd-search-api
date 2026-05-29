@@ -1,13 +1,25 @@
 services:
   sd-search-api:
+    profiles: [ "dev" ]
     build:
       dockerfile: ./dockerfiles/Dockerfile
       context: .
     image: cscfi/sd-search-api
     command: [ "uv", "run", "sd_search_api" ]
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - OPENSEARCH_HOST=opensearch
+      - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD:-Sd@Search9x!}
     depends_on:
       postgres:
         condition: service_healthy
+      opensearch:
+        condition: service_healthy
+      generate-data:
+        condition: service_completed_successfully
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 10s
@@ -15,15 +27,75 @@ services:
       retries: 5
       start_period: 10s
   postgres:
+    profiles: [ "dev" ]
     image: postgres:18-alpine
     hostname: postgres
     environment:
       - POSTGRES_DB=postgres
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
+    volumes:
+      - ./search_api/database/schema/bigpicture/create.sql:/docker-entrypoint-initdb.d/create.sql
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
+  opensearch:
+    profiles: [ "dev" ]
+    image: opensearchproject/opensearch:2
+    hostname: opensearch
+    environment:
+      - discovery.type=single-node
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_PASSWORD:-Sd@Search9x!}
+      - plugins.security.disabled=false
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -fks https://localhost:9200/_cluster/health -u admin:${OPENSEARCH_PASSWORD:-Sd@Search9x!} | grep -qv '\"status\":\"red\"'" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+  opensearch-dashboards:
+    profiles: [ "dev" ]
+    image: opensearchproject/opensearch-dashboards:2
+    hostname: opensearch-dashboards
+    entrypoint: [ "/usr/share/opensearch-dashboards/entrypoint.sh" ]
+    environment:
+      - OPENSEARCH_HOSTS=["https://opensearch:9200"]
+      - OPENSEARCH_USERNAME=admin
+      - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD:-Sd@Search9x!}
+      - OPENSEARCH_SSL_VERIFICATIONMODE=none
+    volumes:
+      - ./dockerfiles/opensearch-dashboards-entrypoint.sh:/usr/share/opensearch-dashboards/entrypoint.sh
+    depends_on:
+      opensearch:
+        condition: service_healthy
+  generate-data:
+    profiles: [ "dev" ]
+    build:
+      dockerfile: ./dockerfiles/Dockerfile
+      context: .
+    image: cscfi/sd-search-api
+    entrypoint: [ "uv", "run", "python", "-m", "tests.utils.generate_data",
+                  "--images", "${GENERATE_DATA_IMAGES:-1000}",
+                  "--datasets", "${GENERATE_DATA_DATASETS:-100}" ]
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - OPENSEARCH_HOST=opensearch
+      - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD:-Sd@Search9x!}
+    volumes:
+      - ./tests:/app/tests
+    depends_on:
+      postgres:
+        condition: service_healthy
+      opensearch:
+        condition: service_healthy
+    restart: "no"

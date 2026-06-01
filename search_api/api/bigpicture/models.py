@@ -114,15 +114,21 @@ BP_STAINING_PROCEDURE_FILTERING_TERM = BeaconFilteringTerm(
 )
 BP_STAINING_COMPOUND_FILTERING_TERM = BeaconFilteringTerm(
     id="staining_compound",
-    type="ontologyOrValue",
+    type="ontologyOrControlledVocabulary",
     ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
     ontologyConcept="397165007",  # Stain
+    controlledVocabulary=BeaconFilteringControlledVocabulary(
+        allowedTerms=[
+            "antibody",
+            "Double-stranded DNA",
+            "Single-stranded DNA",
+            "RNA",
+            "Synthetic oligonucleo",
+        ]
+    ),
     scopes=BP_STAINING_SCOPE,
 )
 # TODO: targeted staining
-# controlledVocabulary=BeaconFilteringControlledVocabulary(
-#         allowedTerms=["antibody", "Double-stranded DNA", "Single-stranded DNA", "RNA", "Synthetic oligonucleo"]
-#     ),
 
 BP_FILTERING_TERMS = [
     BP_DATASET_TITLE_FILTERING_TERM,

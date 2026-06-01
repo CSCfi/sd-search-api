@@ -60,6 +60,7 @@ def build_query(term: BeaconFilteringTerm, value: str) -> dict[str, Any]:
         "controlledVocabulary": build_term_query,
         "ontology": build_term_query,
         "ontologyOrValue": build_term_query,
+        "ontologyOrControlledVocabulary": build_term_query,
         "numberRange": build_range_query,
     }
 

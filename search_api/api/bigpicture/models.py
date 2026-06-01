@@ -44,6 +44,7 @@ BP_SPECIES_FILTERING_TERM = BeaconFilteringTerm(
     id="animal_species",
     type="ontology",
     ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
+    ontologyConcept="410607006",  # Organism (organism)
     scopes=BP_BIOLOGICAL_BEING_SCOPE,
 )
 BP_SEX_FILTERING_TERM = BeaconFilteringTerm(
@@ -58,18 +59,21 @@ BP_ANATOMICAL_SITE_FILTERING_TERM = BeaconFilteringTerm(
     id="anatomical_site",
     type="ontology",
     ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
+    ontologyConcept="123037004",  # Body structure (body structure)
     scopes=BP_SPECIMEN_SCOPE,
 )
 BP_FIXATION_TYPE_FILTERING_TERM = BeaconFilteringTerm(
     id="fixation_type",
     type="ontology",
     ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
+    ontologyConcept="1388477003",  # Tissue fixative (product)
     scopes=BP_SPECIMEN_SCOPE,
 )
 BP_SPECIMEN_TYPE_FILTERING_TERM = BeaconFilteringTerm(
     id="specimen_type",
     type="ontology",
     ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
+    ontologyConcept="91720002",  # Body substance (substance)
     scopes=BP_SPECIMEN_SCOPE,
 )
 BP_AGE_AT_EXTRACTION_FILTERING_TERM = BeaconFilteringTerm(
@@ -80,12 +84,22 @@ BP_BLOCK_PREPARATION_FILTERING_TERM = BeaconFilteringTerm(
     id="block_preparation",
     type="ontology",
     ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
+    ontologyConcept=[
+        "311731000",  # Paraffin wax (substance)
+        "433469005",  # Frozen section embedding medium (substance)
+        "61088005",  # Plastic (substance)
+        "10249006",  # Agar (substance)
+        "65345002",  # Epoxy resin (substance)
+        "261712009",  # Acrylic polymer (substance)
+    ],
     scopes=BP_BLOCK_SCOPE,
 )
 BP_STAINING_METHOD_FILTERING_TERM = BeaconFilteringTerm(
     id="staining_method",
-    type="ontology",
-    ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
+    type="controlledVocabulary",
+    controlledVocabulary=BeaconFilteringControlledVocabulary(
+        allowedTerms=["chemical", "immunostaining", "in situ hybridization"]
+    ),
     scopes=BP_STAINING_SCOPE,
 )
 BP_STAINING_TARGET_FILTERING_TERM = BeaconFilteringTerm(
@@ -95,14 +109,20 @@ BP_STAINING_PROCEDURE_FILTERING_TERM = BeaconFilteringTerm(
     id="staining_procedure",
     type="ontologyOrValue",
     ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
+    ontologyConcept="127790008",  # Staining method (procedure)
     scopes=BP_STAINING_SCOPE,
 )
 BP_STAINING_COMPOUND_FILTERING_TERM = BeaconFilteringTerm(
     id="staining_compound",
     type="ontologyOrValue",
     ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
+    ontologyConcept="397165007",  # Stain
     scopes=BP_STAINING_SCOPE,
 )
+# TODO: targeted staining
+# controlledVocabulary=BeaconFilteringControlledVocabulary(
+#         allowedTerms=["antibody", "Double-stranded DNA", "Single-stranded DNA", "RNA", "Synthetic oligonucleo"]
+#     ),
 
 BP_FILTERING_TERMS = [
     BP_DATASET_TITLE_FILTERING_TERM,

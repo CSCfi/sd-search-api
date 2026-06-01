@@ -2759,6 +2759,7 @@ source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "fsspec" },
+    { name = "httpx" },
     { name = "jsonschema" },
     { name = "lxml" },
     { name = "opensearch-py", extra = ["async"] },
@@ -2781,7 +2782,6 @@ tox = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "locust" },
     { name = "mypy" },
     { name = "pytest" },
@@ -2796,6 +2796,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.136.1" },
     { name = "fsspec", specifier = ">=2026.2.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "jsonschema", specifier = ">=4.26.0" },
     { name = "lxml", specifier = ">=6.0.2" },
     { name = "mypy", marker = "extra == 'tox'", specifier = ">=1.19.1" },
@@ -2815,7 +2816,6 @@ provides-extras = ["tox"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = ">=0.28.1" },
     { name = "locust", specifier = ">=2.43.4" },
     { name = "mypy", specifier = ">=1.19.1" },
     { name = "pytest", specifier = ">=9.0.2" },

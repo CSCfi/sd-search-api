@@ -5,7 +5,7 @@ BEACON_API_VERSION = "v2.0"
 BEACON_ORGANISATION_ID = "fi.csc"
 BEACON_ORGANISATION_NAME = "CSC – IT Center for Science"
 
-SNOMED_ONTOLOGY_ID = "SNOMEDCT"
+SNOMED_ONTOLOGY_ID = "SCTID"
 
 BeaconQueryGranularity = Literal["boolean", "count", "record"]
 BeaconFilteringTermType = Literal[
@@ -184,8 +184,24 @@ class BeaconFilteringTerm(BaseModel):
     label: str | None = None
     # Beacon V2 extension.
     description: str | None = None
-    ontology: BeaconFilteringOntology | None = None
+    ontology: BeaconFilteringOntology | None = Field(
+        default=None,
+        description="The ontology used for the field.",
+    )
+    ontologyConcept: str | list[str] | None = Field(
+        default=None,
+        description="A single ontology concept ID including descendants or a list of concept IDs.",
+    )
     controlledVocabulary: BeaconFilteringControlledVocabulary | None = None
+
+    @property
+    def snomed_ecl(self) -> str | None:
+        """Build a SNOMED CT ECL expression from ontology concepts."""
+        if self.ontologyConcept is None:
+            return None
+        if isinstance(self.ontologyConcept, str):
+            return f"<< {self.ontologyConcept}"
+        return " OR ".join(self.ontologyConcept) if self.ontologyConcept else None
 
     @model_validator(mode="after")
     def validate_filtering_term(self):

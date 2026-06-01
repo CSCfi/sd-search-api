@@ -1,7 +1,7 @@
 """Integration tests for the AI search endpoint. Requires Ollama running locally."""
 
+import pytest
 from fastapi.testclient import TestClient
-
 from search_api.api.bigpicture.routes import get_beacon_service
 from search_api.api.bigpicture.services.ai import (
     AISearchResult,
@@ -11,6 +11,8 @@ from search_api.api.bigpicture.services.ai import (
 from search_api.api.bigpicture.services.beacon import MockBigpictureBeaconService
 from search_api.main import app
 
+skip = pytest.mark.skip(reason="Requires Ollama")
+
 
 def mock_beacon_service():
     return MockBigpictureBeaconService()
@@ -19,6 +21,7 @@ def mock_beacon_service():
 app.dependency_overrides[get_beacon_service] = mock_beacon_service
 
 
+@skip
 def test_ai_query_returns_result():
     resp = TestClient(app).post(
         "/ai/query", json={"query": "images for human females"}, timeout=60.0
@@ -43,6 +46,7 @@ def test_ai_query_returns_result():
         assert AIQueryFilter(id="animal_species", value="human") in result.filters
 
 
+@skip
 def test_ai_query_missing_body_returns_422():
     resp = TestClient(app).post("/ai/query", json={})
     assert resp.status_code == 422

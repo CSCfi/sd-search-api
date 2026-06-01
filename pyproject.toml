@@ -15,6 +15,7 @@ requires-python = ">=3.14"
 dependencies = [
     "fastapi>=0.136.1",
     "fsspec>=2026.2.0",
+    "httpx>=0.28.1",
     "jsonschema>=4.26.0",
     "lxml>=6.0.2",
     "opensearch-py[async]>=3.1.0",
@@ -29,7 +30,6 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28.1",
     "locust>=2.43.4",
     "mypy>=1.19.1",
     "pytest>=9.0.2",
@@ -54,3 +54,8 @@ tox = [
 
 [project.scripts]
 sd_search_api = "search_api.main:main"
+
+[tool.pytest.ini_options]
+markers = [
+    "external: marks tests that require external network access (deselect with '-m not external')",
+]

@@ -68,6 +68,20 @@ curl -X POST "http://localhost:8000/ai/query" \
   -d '{"query": "images for human females"}'
 ```
 
+## External dependencies
+
+### Snowstorm
+
+[Snowstorm](https://github.com/IHTSDO/snowstorm) is a SNOMED CT terminology server backed by
+Elasticsearch. SD Search API uses it to resolve and expand SNOMED CT codes used as filter values
+in Bigpicture image search.
+
+Verify that the SNOMED CT ontology is loaded:
+
+```bash
+curl -s "$SNOWSTORM_URL/codesystems" | jq '.[].shortName'
+```
+
 ## Performance tests
 
 See [tests/performance/README.md](tests/performance/README.md).

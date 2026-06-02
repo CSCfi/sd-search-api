@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from .models import (
     BP_BEACON_ID,
+    BP_FILTERING_TERMS,
     BP_FILTERING_TERMS_RESPONSE,
     BP_INFO_RESPONSE,
     AIQueryRequest,
@@ -20,6 +21,7 @@ from ..beacon.models import (
 from .services.beacon import BigpictureBeaconService, OpenSearchBigpictureBeaconService
 from .services.ai import AISearchResult, ai_search
 from search_api.conf import common_config
+from search_api.services.snomed import SnomedConcept, autocomplete_concepts
 
 router = APIRouter()
 
@@ -106,6 +108,27 @@ async def ai_query(
     beacon_service: BigpictureBeaconService = Depends(get_beacon_service),
 ) -> AISearchResult:
     return await ai_search(request.query, beacon_service)
+
+
+@router.get(
+    "/autocomplete",
+    response_model=list[SnomedConcept],
+)
+async def autocomplete(
+    field: str = Query(description="Filtering term field ID."),
+    term: str = Query(description="Partial text to search for."),
+    limit: int = Query(default=10, ge=1, le=50),
+) -> list[SnomedConcept]:
+    """Return SNOMED CT concept suggestions for a given ontology field and search term."""
+    filtering_term = next((t for t in BP_FILTERING_TERMS if t.id == field), None)
+    if filtering_term is None:
+        raise HTTPException(status_code=404, detail=f"Unknown field: '{field}'.")
+
+    ecl = filtering_term.snomed_ecl
+    if ecl is None:
+        raise HTTPException(status_code=400, detail=f"Unsupported field: '{field}'.")
+
+    return await autocomplete_concepts(term=term, ecl=ecl, limit=limit)
 
 
 @router.get("/health")

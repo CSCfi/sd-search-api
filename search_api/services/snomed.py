@@ -197,21 +197,36 @@ async def autocomplete_concepts(
     ecl: str,
     branch: str = "MAIN",
     limit: int = 10,
+    prefix_match: bool = True,
 ) -> list[SnomedConcept]:
     """Return autocomplete suggestions for term within a concept hierarchy.
 
     Filters an in-memory cached list of all concepts limited by the ecl expression.
 
     Args:
-        term: Partial text to match against concept preferred terms (case-insensitive
-              substring match).
+        term: Partial text to match against concept preferred terms.
         ecl: ECL expression defining the concept hierarchy to search within.
         branch: SNOMED CT branch path to search. Defaults to ``"MAIN"``
         limit: Maximum number of suggestions to return.
+        prefix_match: When True, matches concepts where any word in the preferred
+                      term starts with term. When False, matches concepts where term
+                      appears anywhere in the preferred term.
 
     Returns:
-        Suggestions for term within a concept hierarchy.
+        Matching concepts.
     """
     all_concepts = await _fetch_all_concepts(ecl, branch)
     term_lower = term.lower()
-    return [c for c in all_concepts if term_lower in c.term.lower()][:limit]
+
+    if prefix_match:
+        # Term must appear at the start of any word in the preferred term.
+        matches = [
+            c
+            for c in all_concepts
+            if any(word.startswith(term_lower) for word in c.term.lower().split())
+        ]
+    else:
+        # Term can appear anywhere in the preferred term.
+        matches = [c for c in all_concepts if term_lower in c.term.lower()]
+
+    return matches[:limit]

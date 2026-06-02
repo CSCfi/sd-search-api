@@ -118,6 +118,10 @@ async def autocomplete(
     field: str = Query(description="Filtering term field ID."),
     term: str = Query(description="Partial text to search for."),
     limit: int = Query(default=10, ge=1, le=50),
+    prefix_match: bool = Query(
+        default=True,
+        description="Use word-boundary prefix matching instead of substring matching.",
+    ),
 ) -> list[SnomedConcept]:
     """Return SNOMED CT concept suggestions for a given ontology field and search term."""
     filtering_term = next((t for t in BP_FILTERING_TERMS if t.id == field), None)
@@ -128,7 +132,9 @@ async def autocomplete(
     if ecl is None:
         raise HTTPException(status_code=400, detail=f"Unsupported field: '{field}'.")
 
-    return await autocomplete_concepts(term=term, ecl=ecl, limit=limit)
+    return await autocomplete_concepts(
+        term=term, ecl=ecl, limit=limit, prefix_match=prefix_match
+    )
 
 
 @router.get("/health")

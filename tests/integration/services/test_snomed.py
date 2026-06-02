@@ -13,7 +13,9 @@ async def test_find_concept():
     concept_id = await find_concept("human", ecl=BP_SPECIES_FILTERING_TERM.snomed_ecl)
     assert concept_id is not None
     assert concept_id == "337915000"  # Homo sapiens (organism)
-    concept_id = await find_concept("337915000", ecl=BP_SPECIES_FILTERING_TERM.snomed_ecl)
+    concept_id = await find_concept(
+        "337915000", ecl=BP_SPECIES_FILTERING_TERM.snomed_ecl
+    )
     assert concept_id is not None
     assert concept_id == "337915000"  # Homo sapiens (organism)
 

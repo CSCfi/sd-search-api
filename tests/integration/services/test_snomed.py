@@ -28,9 +28,9 @@ async def test_find_concept():
 @pytest.mark.asyncio
 async def test_list_descendants():
     concept_id = BP_SPECIES_FILTERING_TERM.ontologyConcept  # Organism (organism)
-    concepts = await _snomed.list_descendants(concept_id)
+    concepts = await _snomed.get_descendants(concept_id)
     concept_ids = {c.concept_id for c in concepts}
     assert len(concepts) > 1
     assert concept_id not in concept_ids  # root excluded (strict descendants only)
     assert "337915000" in concept_ids  # Homo sapiens (organism)
-    assert all(c.term for c in concepts)
+    assert all(c.preferred_term for c in concepts)

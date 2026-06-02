@@ -15,12 +15,12 @@ _SYNONYM_BATCH_SIZE = 100
 
 class SnomedConcept(BaseModel):
     concept_id: str
-    term: str
+    preferred_term: str
     matched_term: str | None = None
     synonyms: list[str] = Field(default_factory=list, exclude=True)
 
 
-class IndexedConceptsProvider(Protocol):
+class IndexedConceptIdProvider(Protocol):
     async def get_indexed_values(self, field_id: str) -> set[str] | None: ...
 
 
@@ -116,7 +116,9 @@ async def _fetch_concepts(
             if not data.get("active"):
                 return []
             return [
-                SnomedConcept(concept_id=data["conceptId"], term=data["pt"]["term"])
+                SnomedConcept(
+                    concept_id=data["conceptId"], preferred_term=data["pt"]["term"]
+                )
             ]
 
         params: dict[str, str | int] = {
@@ -131,7 +133,7 @@ async def _fetch_concepts(
         items = resp.json().get("items", [])
 
     return [
-        SnomedConcept(concept_id=item["conceptId"], term=item["pt"]["term"])
+        SnomedConcept(concept_id=item["conceptId"], preferred_term=item["pt"]["term"])
         for item in items
     ]
 
@@ -169,7 +171,10 @@ async def _fetch_all_concepts(ecl: str, branch: str) -> list[SnomedConcept]:
             items = data.get("items", [])
             for item in items:
                 concepts.append(
-                    {"concept_id": item["conceptId"], "term": item["pt"]["term"]}
+                    {
+                        "concept_id": item["conceptId"],
+                        "preferred_term": item["pt"]["term"],
+                    }
                 )
 
             offset += len(items)
@@ -182,7 +187,7 @@ async def _fetch_all_concepts(ecl: str, branch: str) -> list[SnomedConcept]:
     return [
         SnomedConcept(
             concept_id=concept["concept_id"],
-            term=concept["term"],
+            preferred_term=concept["preferred_term"],
             synonyms=synonyms.get(concept["concept_id"], []),
         )
         for concept in concepts
@@ -192,7 +197,7 @@ async def _fetch_all_concepts(ecl: str, branch: str) -> list[SnomedConcept]:
 class SnomedService:
     """SNOMED CT concept lookup service."""
 
-    def __init__(self, index_provider: IndexedConceptsProvider | None = None) -> None:
+    def __init__(self, index_provider: IndexedConceptIdProvider | None = None) -> None:
         self._index_provider = index_provider
 
     async def find_concept(
@@ -240,8 +245,8 @@ class SnomedService:
         """
         return await _fetch_concepts(term, ecl, branch, limit)
 
-    async def list_descendants(
-        self,
+    @staticmethod
+    async def get_descendants(
         concept_id: str,
         branch: str = "MAIN",
     ) -> list[SnomedConcept]:
@@ -256,7 +261,30 @@ class SnomedService:
         """
         return await _fetch_all_concepts(f"< {concept_id}", branch)
 
-    async def autocomplete_concepts(
+    @staticmethod
+    async def get_preferred_terms(
+        concept_ids: set[str],
+        ecl: str,
+        branch: str = "MAIN",
+    ) -> dict[str, str]:
+        """Return a mapping of concept IDs to preferred term for the given concept IDs.
+
+        Args:
+            concept_ids: Concept IDs to map.
+            ecl: ECL expression defining the concept hierarchy.
+            branch: SNOMED CT branch path to search. Defaults to ``"MAIN"``
+
+        Returns:
+            Mapping of concept IDs to preferred terms. Concept IDs not found are excluded.
+        """
+        all_concepts = await _fetch_all_concepts(ecl, branch)
+        return {
+            c.concept_id: c.preferred_term
+            for c in all_concepts
+            if c.concept_id in concept_ids
+        }
+
+    async def suggest_concepts(
         self,
         term: str,
         field_id: str,
@@ -308,7 +336,7 @@ class SnomedService:
                 and concept.concept_id not in indexed_concept_ids
             ):
                 continue
-            if _matches(concept.term):
+            if _matches(concept.preferred_term):
                 results.append(concept.model_copy(update={"matched_term": None}))
             else:
                 for synonym in concept.synonyms:

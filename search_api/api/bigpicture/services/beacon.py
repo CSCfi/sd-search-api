@@ -111,6 +111,11 @@ class BigpictureBeaconService(ABC):
         """Return indexed values or None if unsupported."""
         pass
 
+    @abstractmethod
+    async def get_indexed_value_counts(self, field_id: str) -> dict[str, int] | None:
+        """Return indexed values with counts, or None if unsupported."""
+        pass
+
 
 def get_mock_query_result() -> BeaconResultSets:
     results = BeaconResultSets()
@@ -154,6 +159,10 @@ class MockBigpictureBeaconService(BigpictureBeaconService):
     async def get_indexed_values(self, field_id: str) -> set[str] | None:
         return None
 
+    @override
+    async def get_indexed_value_counts(self, field_id: str) -> dict[str, int] | None:
+        return None
+
 
 class OpenSearchBigpictureBeaconService(BigpictureBeaconService):
     """
@@ -185,12 +194,15 @@ class OpenSearchBigpictureBeaconService(BigpictureBeaconService):
 
     @override
     async def get_indexed_values(self, field_id: str) -> set[str] | None:
-        # TODO(improve): check field type
-        field_paths = BP_OPENSEARCH_FIELD_PATHS.get(field_id)
-        if field_paths is None:
+        counts = await self.get_indexed_value_counts(field_id)
+        return set(counts.keys()) if counts is not None else None
+
+    @override
+    async def get_indexed_value_counts(self, field_id: str) -> dict[str, int] | None:
+        field_path = BP_OPENSEARCH_FIELD_PATHS.get(field_id)
+        if field_path is None:
             return None
-        keywords = await fetch_indexed_keywords(self.index_name, field_paths)
-        return set(keywords.keys())
+        return await fetch_indexed_keywords(self.index_name, field_path)
 
     @staticmethod
     def get_query(

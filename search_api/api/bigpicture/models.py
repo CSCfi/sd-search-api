@@ -167,5 +167,11 @@ BP_INFO_RESPONSE = BeaconInfoResponse(
 )
 
 
+class FieldValueCount(BaseModel):
+    value: str
+    count: int
+    concept_id: str | None = None
+
+
 class AIQueryRequest(BaseModel):
     query: str

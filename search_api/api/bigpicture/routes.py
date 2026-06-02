@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
 from .models import (
     BP_BEACON_ID,
@@ -6,6 +6,7 @@ from .models import (
     BP_FILTERING_TERMS_RESPONSE,
     BP_INFO_RESPONSE,
     AIQueryRequest,
+    FieldValueCount,
 )
 from ..beacon.models import (
     BeaconQueryRequest,
@@ -117,11 +118,11 @@ async def ai_query(
 
 
 @router.get(
-    "/autocomplete",
+    "/fields/{field_id}/suggestions",
     response_model=list[SnomedConcept],
 )
-async def autocomplete(
-    field: str = Query(description="Filtering term field ID."),
+async def suggestions(
+    field_id: str = Path(description="Filtering term field ID."),
     term: str = Query(description="Partial text to search for."),
     limit: int = Query(default=10, ge=1, le=50),
     prefix_match: bool = Query(
@@ -130,18 +131,54 @@ async def autocomplete(
     ),
     snomed_service: SnomedService = Depends(get_snomed_service),
 ) -> list[SnomedConcept]:
-    """Return SNOMED CT concept suggestions for a given ontology field and search term."""
-    filtering_term = next((t for t in BP_FILTERING_TERMS if t.id == field), None)
+    """Return concept suggestions for a given ontology field and search term."""
+    filtering_term = next((t for t in BP_FILTERING_TERMS if t.id == field_id), None)
     if filtering_term is None:
-        raise HTTPException(status_code=404, detail=f"Unknown field: '{field}'.")
+        raise HTTPException(status_code=404, detail=f"Unknown field: '{field_id}'.")
 
     ecl = filtering_term.snomed_ecl
     if ecl is None:
-        raise HTTPException(status_code=400, detail=f"Unsupported field: '{field}'.")
+        raise HTTPException(status_code=400, detail=f"Unsupported field: '{field_id}'.")
 
-    return await snomed_service.autocomplete_concepts(
-        term=term, field_id=field, ecl=ecl, limit=limit, prefix_match=prefix_match
+    return await snomed_service.suggest_concepts(
+        term=term, field_id=field_id, ecl=ecl, limit=limit, prefix_match=prefix_match
     )
+
+
+@router.get(
+    "/fields/{field_id}/values",
+    response_model=list[FieldValueCount],
+)
+async def values(
+    field_id: str = Path(description="Filtering term field ID."),
+    limit: int = Query(default=10, ge=1, le=1000),
+    beacon_service: BigpictureBeaconService = Depends(get_beacon_service),
+    snomed_service: SnomedService = Depends(get_snomed_service),
+) -> list[FieldValueCount]:
+    """Return the most common indexed values for a field, ordered by count."""
+    counts = await beacon_service.get_indexed_value_counts(field_id)
+    if counts is None:
+        raise HTTPException(status_code=400, detail=f"Unsupported field: '{field_id}'.")
+
+    filtering_term = next((t for t in BP_FILTERING_TERMS if t.id == field_id), None)
+    ecl = filtering_term.snomed_ecl if filtering_term is not None else None
+
+    if ecl is not None:
+        preferred_terms = await snomed_service.get_preferred_terms(
+            set(counts.keys()), ecl
+        )
+        sorted_counts = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:limit]
+        return [
+            FieldValueCount(
+                value=preferred_terms.get(concept_id, concept_id),
+                count=count,
+                concept_id=concept_id,
+            )
+            for concept_id, count in sorted_counts
+        ]
+
+    sorted_values = sorted(counts.items(), key=lambda x: x[1], reverse=True)[:limit]
+    return [FieldValueCount(value=v, count=c) for v, c in sorted_values]
 
 
 @router.get("/health")

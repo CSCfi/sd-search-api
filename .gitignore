@@ -11,6 +11,10 @@ __pycache__/
 *.pyc
 *.pyo
 
+### Claude ###
+.claude/
+CLAUDE.local.md
+
 # Tools
 .venv/
 .mypy_cache/

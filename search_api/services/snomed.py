@@ -1,11 +1,13 @@
 """SNOMED CT concept lookup via the Snowstorm terminology server."""
 
 import httpx
+from aiocache import cached
 from pydantic import BaseModel
 
 from search_api.conf import common_config
 
 _PAGE_SIZE = 1000
+_CACHE_TTL = 60 * 60 * 24 * 30  # 30 days
 
 
 class SnomedConcept(BaseModel):
@@ -21,45 +23,55 @@ def _client() -> httpx.AsyncClient:
     )
 
 
+def _is_concept_id(value: str) -> bool:
+    """Return True if value is a SNOMED CT concept ID (digits only)."""
+    return value.isdigit()
+
+
+@cached(ttl=_CACHE_TTL)
 async def find_concept(
     term: str,
     ecl: str | None = None,
     branch: str = "MAIN",
 ) -> str | None:
-    """Search for an active SNOMED CT concept by term.
+    """Return the conceptId for term, or ``None`` if not found.
+
+    If term is a numeric SNOMED CT concept ID the concept is looked up directly.
 
     Args:
-        term: Free-text search term.
+        term: Free-text search term or SNOMED CT concept ID.
         ecl: Optional ECL expression to restrict the search to a concept hierarchy.
-             Example: ``"<< 410607006"`` searches within Organism and all descendants.
-        branch: SNOMED CT branch to search. Defaults to ``MAIN`` (International Edition).
+        branch: SNOMED CT branch. Defaults to ``MAIN`` (International Edition).
 
     Returns:
-        The ``conceptId`` of the best-matching active concept, or ``None`` if no
-        match is found.
+        The concept id of the best-matching active concept, or None.
     """
     cfg = common_config()
-    url = f"{cfg.SNOWSTORM_URL}/{branch}/concepts"
-    params: dict[str, str | int] = {
-        "term": term,
-        "activeFilter": "true",
-        "limit": 1,
-    }
-    if ecl is not None:
-        params["ecl"] = ecl
+    base_url = f"{cfg.SNOWSTORM_URL}/{branch}/concepts"
 
     async with _client() as client:
-        resp = await client.get(url, params=params)
-        resp.raise_for_status()
-        data = resp.json()
+        if _is_concept_id(term):
+            resp = await client.get(f"{base_url}/{term}")
+            if resp.status_code == 404:
+                return None
+            resp.raise_for_status()
+            data = resp.json()
+            return data["conceptId"] if data.get("active") else None
+        else:
+            params: dict[str, str | int] = {
+                "term": term,
+                "activeFilter": "true",
+                "limit": 1,
+            }
+            if ecl is not None:
+                params["ecl"] = ecl
+            resp = await client.get(base_url, params=params)
+            resp.raise_for_status()
+            items = resp.json().get("items", [])
+            return items[0]["conceptId"] if items else None
 
-    items = data.get("items", [])
-    if not items:
-        return None
 
-    return items[0]["conceptId"]
-
-
+@cached(ttl=_CACHE_TTL)
 async def list_descendants(
     concept_id: str,
     branch: str = "MAIN",
@@ -71,7 +83,7 @@ async def list_descendants(
         branch: SNOMED CT branch to search. Defaults to ``MAIN`` (International Edition).
 
     Returns:
-        All active descendants of the concept id..
+        All active descendants of the concept id.
     """
     cfg = common_config()
     url = f"{cfg.SNOWSTORM_URL}/{branch}/concepts"

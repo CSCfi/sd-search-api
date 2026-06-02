@@ -2,17 +2,21 @@
 
 import httpx
 from aiocache import cached  # type: ignore[import-untyped]
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from search_api.conf import common_config
 
 _PAGE_SIZE = 1000
 _CACHE_TTL = 60 * 60 * 24 * 30  # 30 days
+_SYNONYM_TYPE = "SYNONYM"
+_SYNONYM_BATCH_SIZE = 100
 
 
 class SnomedConcept(BaseModel):
     concept_id: str
     term: str
+    matched_term: str | None = None
+    synonyms: list[str] = Field(default_factory=list, exclude=True)
 
 
 def _client() -> httpx.AsyncClient:
@@ -26,6 +30,50 @@ def _client() -> httpx.AsyncClient:
 def _is_concept_id(value: str) -> bool:
     """Return True if value is a SNOMED CT concept ID (digits only)."""
     return value.isdigit()
+
+
+async def _fetch_synonyms(
+    concept_ids: list[str],
+    branch: str,
+    client: httpx.AsyncClient,
+) -> dict[str, list[str]]:
+    """Fetch active synonyms for the given concept IDs.
+
+    Args:
+        concept_ids: concept IDs to fetch synonyms for.
+        branch: SNOMED CT branch path (e.g. ``"MAIN"``).
+        client: Shared HTTP client.
+
+    Returns:
+        Mapping of concept ID to list of active synonym terms.
+    """
+    cfg = common_config()
+    url = f"{cfg.SNOWSTORM_URL}/{branch}/descriptions"
+    result: dict[str, list[str]] = {cid: [] for cid in concept_ids}
+
+    for i in range(0, len(concept_ids), _SYNONYM_BATCH_SIZE):
+        batch = concept_ids[i : i + _SYNONYM_BATCH_SIZE]
+        offset = 0
+        while True:
+            params: dict[str, str | int] = {
+                "conceptIds": ",".join(batch),
+                "limit": _PAGE_SIZE,
+                "offset": offset,
+            }
+            resp = await client.get(url, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            items = data.get("items", [])
+            for item in items:
+                if item.get("active") and item.get("type") == _SYNONYM_TYPE:
+                    cid = item.get("conceptId")
+                    if cid in result:
+                        result[cid].append(item["term"])
+            offset += len(items)
+            if offset >= data.get("total", 0):
+                break
+
+    return result
 
 
 async def _fetch_concepts(
@@ -48,7 +96,7 @@ async def _fetch_concepts(
         limit: Maximum number of concepts to return.
 
     Returns:
-        Concepts matching term, ordered by Snowstorm relevance score.
+        Active concepts matching term.
     """
     cfg = common_config()
     base_url = f"{cfg.SNOWSTORM_URL}/{branch}/concepts"
@@ -98,7 +146,7 @@ async def _fetch_all_concepts(ecl: str, branch: str) -> list[SnomedConcept]:
     cfg = common_config()
     url = f"{cfg.SNOWSTORM_URL}/{branch}/concepts"
 
-    results: list[SnomedConcept] = []
+    concepts: list[dict[str, str]] = []
     offset = 0
 
     async with _client() as client:
@@ -115,18 +163,25 @@ async def _fetch_all_concepts(ecl: str, branch: str) -> list[SnomedConcept]:
 
             items = data.get("items", [])
             for item in items:
-                results.append(
-                    SnomedConcept(
-                        concept_id=item["conceptId"],
-                        term=item["pt"]["term"],
-                    )
+                concepts.append(
+                    {"concept_id": item["conceptId"], "term": item["pt"]["term"]}
                 )
 
             offset += len(items)
             if offset >= data.get("total", 0):
                 break
 
-    return results
+        concept_ids = [concept["concept_id"] for concept in concepts]
+        synonyms = await _fetch_synonyms(concept_ids, branch, client)
+
+    return [
+        SnomedConcept(
+            concept_id=concept["concept_id"],
+            term=concept["term"],
+            synonyms=synonyms.get(concept["concept_id"], []),
+        )
+        for concept in concepts
+    ]
 
 
 @cached(ttl=_CACHE_TTL)
@@ -204,29 +259,38 @@ async def autocomplete_concepts(
     Filters an in-memory cached list of all concepts limited by the ecl expression.
 
     Args:
-        term: Partial text to match against concept preferred terms.
+        term: Partial text to match against concept preferred terms and synonyms.
         ecl: ECL expression defining the concept hierarchy to search within.
         branch: SNOMED CT branch path to search. Defaults to ``"MAIN"``
         limit: Maximum number of suggestions to return.
         prefix_match: When True, matches concepts where any word in the preferred
-                      term starts with term. When False, matches concepts where term
-                      appears anywhere in the preferred term.
+                      term or a synonym starts with term. When False, matches concepts
+                      where term appears anywhere in the preferred term or a synonym.
 
     Returns:
-        Matching concepts.
+        Matching concepts. matched_term is set to the synonym that caused the
+        match when the preferred term did not match. None when the preferred
+        term matched.
     """
     all_concepts = await _fetch_all_concepts(ecl, branch)
     term_lower = term.lower()
 
-    if prefix_match:
-        # Term must appear at the start of any word in the preferred term.
-        matches = [
-            c
-            for c in all_concepts
-            if any(word.startswith(term_lower) for word in c.term.lower().split())
-        ]
-    else:
-        # Term can appear anywhere in the preferred term.
-        matches = [c for c in all_concepts if term_lower in c.term.lower()]
+    def _matches(text: str) -> bool:
+        text_lower = text.lower()
+        if prefix_match:
+            return any(word.startswith(term_lower) for word in text_lower.split())
+        return term_lower in text_lower
 
-    return matches[:limit]
+    results: list[SnomedConcept] = []
+    for concept in all_concepts:
+        if _matches(concept.term):
+            results.append(concept.model_copy(update={"matched_term": None}))
+        else:
+            for synonym in concept.synonyms:
+                if _matches(synonym):
+                    results.append(concept.model_copy(update={"matched_term": synonym}))
+                    break
+        if len(results) >= limit:
+            break
+
+    return results

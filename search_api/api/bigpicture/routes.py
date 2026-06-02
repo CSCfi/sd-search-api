@@ -21,7 +21,7 @@ from ..beacon.models import (
 from .services.beacon import BigpictureBeaconService, OpenSearchBigpictureBeaconService
 from .services.ai import AISearchResult, ai_search
 from search_api.conf import common_config
-from search_api.services.snomed import SnomedConcept, autocomplete_concepts
+from search_api.services.snomed import SnomedConcept, SnomedService
 
 router = APIRouter()
 
@@ -34,6 +34,12 @@ def get_beacon_service() -> BigpictureBeaconService:
         cfg.OPENSEARCH_USER,
         cfg.OPENSEARCH_PASSWORD,
     )
+
+
+def get_snomed_service(
+    beacon_service: BigpictureBeaconService = Depends(get_beacon_service),
+) -> SnomedService:
+    return SnomedService(beacon_service)
 
 
 @router.get(
@@ -122,6 +128,7 @@ async def autocomplete(
         default=True,
         description="Use word-boundary prefix matching instead of substring matching.",
     ),
+    snomed_service: SnomedService = Depends(get_snomed_service),
 ) -> list[SnomedConcept]:
     """Return SNOMED CT concept suggestions for a given ontology field and search term."""
     filtering_term = next((t for t in BP_FILTERING_TERMS if t.id == field), None)
@@ -132,8 +139,8 @@ async def autocomplete(
     if ecl is None:
         raise HTTPException(status_code=400, detail=f"Unsupported field: '{field}'.")
 
-    return await autocomplete_concepts(
-        term=term, ecl=ecl, limit=limit, prefix_match=prefix_match
+    return await snomed_service.autocomplete_concepts(
+        term=term, field_id=field, ecl=ecl, limit=limit, prefix_match=prefix_match
     )
 
 

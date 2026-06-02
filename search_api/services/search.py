@@ -4,6 +4,7 @@ import atexit
 import logging
 from typing import Any
 
+from aiocache import cached  # type: ignore[import-untyped]
 from opensearchpy import AsyncOpenSearch, helpers
 
 from search_api.conf import common_config as _common_config
@@ -117,3 +118,80 @@ async def bp_index_documents(
     :param docs: The OpenSearch documents to index.
     """
     await index_documents(bp_search, "bp-image-index", ids, docs)
+
+
+_FETCH_INDEXED_KEYWORDS = 60 * 60 * 4  # 4 hours
+
+
+@cached(ttl=_FETCH_INDEXED_KEYWORDS)
+async def fetch_indexed_keywords(index_name: str, field_name: str) -> dict[str, int]:
+    """Return all keyword values and their document counts for a keyword field.
+
+    For nested fields (e.g. ``"blocks.species"``) a nested aggregation is used
+    automatically.
+
+    Args:
+        index_name: OpenSearch index to query.
+        field_name: Full dotted field path.
+
+    Returns:
+        Mapping of keyword value to document count.
+    """
+    parts = field_name.split(".", 1)
+    if len(parts) == 2:
+        nested_path = parts[0]
+        body: dict[str, Any] = {
+            "size": 0,
+            "aggs": {
+                "nested_values": {
+                    "nested": {"path": nested_path},
+                    "aggs": {
+                        "values": {"terms": {"field": field_name, "size": 10000}},
+                    },
+                }
+            },
+        }
+        resp = await bp_search.search(index=index_name, body=body)
+        buckets = resp["aggregations"]["nested_values"]["values"]["buckets"]
+    else:
+        body = {
+            "size": 0,
+            "aggs": {
+                "values": {"terms": {"field": field_name, "size": 10000}},
+            },
+        }
+        resp = await bp_search.search(index=index_name, body=body)
+        buckets = resp["aggregations"]["values"]["buckets"]
+
+    return {bucket["key"]: bucket["doc_count"] for bucket in buckets}
+
+
+def build_match_query(field_id: str, value: str) -> dict[str, Any]:
+    return {"match": {field_id: value}}
+
+
+def build_term_query(field_id: str, value: str) -> dict[str, Any]:
+    return {"term": {field_id: value}}
+
+
+def build_range_query(field_id: str, value: str) -> dict[str, Any]:
+    parts = value.split("-", 1)
+
+    try:
+        gte = int(parts[0])
+        lte = int(parts[1]) if len(parts) > 1 else gte
+    except ValueError:
+        raise ValueError(f"Invalid range value: {value}")
+
+    return {
+        "range": {
+            field_id: {
+                "gte": gte,
+                "lte": lte,
+            }
+        }
+    }
+
+
+def or_queries(queries: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"bool": {"should": queries, "minimum_should_match": 1}}

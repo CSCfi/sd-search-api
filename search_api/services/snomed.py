@@ -3,6 +3,7 @@
 import httpx
 from aiocache import cached  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field
+from typing import Protocol
 
 from search_api.conf import common_config
 
@@ -17,6 +18,10 @@ class SnomedConcept(BaseModel):
     term: str
     matched_term: str | None = None
     synonyms: list[str] = Field(default_factory=list, exclude=True)
+
+
+class IndexedConceptsProvider(Protocol):
+    async def get_indexed_values(self, field_id: str) -> set[str] | None: ...
 
 
 def _client() -> httpx.AsyncClient:
@@ -184,113 +189,135 @@ async def _fetch_all_concepts(ecl: str, branch: str) -> list[SnomedConcept]:
     ]
 
 
-@cached(ttl=_CACHE_TTL)
-async def find_concept(
-    term: str,
-    ecl: str | None = None,
-    branch: str = "MAIN",
-) -> str | None:
-    """Return the concept ID for the term, or None if not found.
+class SnomedService:
+    """SNOMED CT concept lookup service."""
 
-    If term is a concept ID it is looked up directly.
+    def __init__(self, index_provider: IndexedConceptsProvider | None = None) -> None:
+        self._index_provider = index_provider
 
-    Args:
-        term: Free-text search term or concept ID.
-        ecl: ECL expression to restrict the text search to a concept hierarchy.
-             Ignored when term is a concept ID. None searches all concepts.
-        branch: SNOMED CT branch path to search. Defaults to ``"MAIN"``
+    async def find_concept(
+        self,
+        term: str,
+        ecl: str | None = None,
+        branch: str = "MAIN",
+    ) -> str | None:
+        """Return the concept ID for the term, or None if not found.
 
-    Returns:
-        The concept id of the best-matching active concept, or None if no
-        active concept matches.
-    """
-    concepts = await _fetch_concepts(term, ecl, branch, limit=1)
-    return concepts[0].concept_id if concepts else None
+        If term is a concept ID it is looked up directly.
 
+        Args:
+            term: Free-text search term or concept ID.
+            ecl: ECL expression to restrict the text search to a concept hierarchy.
+                 Ignored when term is a concept ID. None searches all concepts.
+            branch: SNOMED CT branch path to search. Defaults to ``"MAIN"``
 
-@cached(ttl=_CACHE_TTL)
-async def search_concepts(
-    term: str,
-    ecl: str | None = None,
-    branch: str = "MAIN",
-    limit: int = 10,
-) -> list[SnomedConcept]:
-    """Search for active concepts matching the term.
+        Returns:
+            The concept id of the best-matching active concept, or None if no
+            active concept matches.
+        """
+        concepts = await _fetch_concepts(term, ecl, branch, limit=1)
+        return concepts[0].concept_id if concepts else None
 
-    Args:
-        term: Free-text search term matched against concept preferred terms and synonyms,
-        or concept ID.
-        ecl: ECL expression to restrict results to a concept hierarchy.
-            None searches across all concepts.
-        branch: SNOMED CT branch path to search. Defaults to ``"MAIN"``
-        limit: Maximum number of results to return.
+    async def search_concepts(
+        self,
+        term: str,
+        ecl: str | None = None,
+        branch: str = "MAIN",
+        limit: int = 10,
+    ) -> list[SnomedConcept]:
+        """Search for active concepts matching the term.
 
-    Returns:
-        Matching concepts ordered by Snowstorm relevance score.
-    """
-    return await _fetch_concepts(term, ecl, branch, limit)
+        Args:
+            term: Free-text search term matched against concept preferred terms and synonyms,
+            or concept ID.
+            ecl: ECL expression to restrict results to a concept hierarchy.
+                None searches across all concepts.
+            branch: SNOMED CT branch path to search. Defaults to ``"MAIN"``
+            limit: Maximum number of results to return.
 
+        Returns:
+            Matching concepts ordered by Snowstorm relevance score.
+        """
+        return await _fetch_concepts(term, ecl, branch, limit)
 
-async def list_descendants(
-    concept_id: str,
-    branch: str = "MAIN",
-) -> list[SnomedConcept]:
-    """Return all active descendants of concept ID.
+    async def list_descendants(
+        self,
+        concept_id: str,
+        branch: str = "MAIN",
+    ) -> list[SnomedConcept]:
+        """Return all active descendants of concept ID.
 
-    Args:
-        concept_id: Concept ID of the root node whose descendants are to be retrieved.
-        branch: SNOMED CT branch path to search. Defaults to ``"MAIN"``
+        Args:
+            concept_id: Concept ID of the root node whose descendants are to be retrieved.
+            branch: SNOMED CT branch path to search. Defaults to ``"MAIN"``
 
-    Returns:
-        Every active concept that is a  descendant of the concept ID.
-    """
-    return await _fetch_all_concepts(f"< {concept_id}", branch)
+        Returns:
+            Every active concept that is a  descendant of the concept ID.
+        """
+        return await _fetch_all_concepts(f"< {concept_id}", branch)
 
+    async def autocomplete_concepts(
+        self,
+        term: str,
+        field_id: str,
+        ecl: str,
+        branch: str = "MAIN",
+        limit: int = 10,
+        prefix_match: bool = True,
+    ) -> list[SnomedConcept]:
+        """Return autocomplete suggestions for term within a concept hierarchy.
 
-async def autocomplete_concepts(
-    term: str,
-    ecl: str,
-    branch: str = "MAIN",
-    limit: int = 10,
-    prefix_match: bool = True,
-) -> list[SnomedConcept]:
-    """Return autocomplete suggestions for term within a concept hierarchy.
+        Filters an in-memory cached list of all concepts limited by the ecl expression.
+        When an index provider is configured, results are restricted to concept IDs
+        present in the index.
 
-    Filters an in-memory cached list of all concepts limited by the ecl expression.
+        Args:
+            term: Partial text to match against concept preferred terms and synonyms.
+            field_id: Filtering term field ID, used to look up indexed concept IDs.
+            ecl: ECL expression defining the concept hierarchy to search within.
+            branch: SNOMED CT branch path to search. Defaults to ``"MAIN"``
+            limit: Maximum number of suggestions to return.
+            prefix_match: When True, matches concepts where any word in the preferred
+                          term or a synonym starts with term. When False, matches concepts
+                          where term appears anywhere in the preferred term or a synonym.
 
-    Args:
-        term: Partial text to match against concept preferred terms and synonyms.
-        ecl: ECL expression defining the concept hierarchy to search within.
-        branch: SNOMED CT branch path to search. Defaults to ``"MAIN"``
-        limit: Maximum number of suggestions to return.
-        prefix_match: When True, matches concepts where any word in the preferred
-                      term or a synonym starts with term. When False, matches concepts
-                      where term appears anywhere in the preferred term or a synonym.
+        Returns:
+            Matching concepts. matched_term is set to the synonym that caused the
+            match when the preferred term did not match. None when the preferred
+            term matched.
+        """
+        indexed_concept_ids: set[str] | None = None
+        if self._index_provider is not None:
+            indexed_concept_ids = await self._index_provider.get_indexed_values(
+                field_id
+            )
 
-    Returns:
-        Matching concepts. matched_term is set to the synonym that caused the
-        match when the preferred term did not match. None when the preferred
-        term matched.
-    """
-    all_concepts = await _fetch_all_concepts(ecl, branch)
-    term_lower = term.lower()
+        all_concepts = await _fetch_all_concepts(ecl, branch)
+        term_lower = term.lower()
 
-    def _matches(text: str) -> bool:
-        text_lower = text.lower()
-        if prefix_match:
-            return any(word.startswith(term_lower) for word in text_lower.split())
-        return term_lower in text_lower
+        def _matches(text: str) -> bool:
+            text_lower = text.lower()
+            if prefix_match:
+                return any(word.startswith(term_lower) for word in text_lower.split())
+            return term_lower in text_lower
 
-    results: list[SnomedConcept] = []
-    for concept in all_concepts:
-        if _matches(concept.term):
-            results.append(concept.model_copy(update={"matched_term": None}))
-        else:
-            for synonym in concept.synonyms:
-                if _matches(synonym):
-                    results.append(concept.model_copy(update={"matched_term": synonym}))
-                    break
-        if len(results) >= limit:
-            break
+        results: list[SnomedConcept] = []
+        for concept in all_concepts:
+            if (
+                indexed_concept_ids is not None
+                and concept.concept_id not in indexed_concept_ids
+            ):
+                continue
+            if _matches(concept.term):
+                results.append(concept.model_copy(update={"matched_term": None}))
+            else:
+                for synonym in concept.synonyms:
+                    if _matches(synonym):
+                        results.append(
+                            concept.model_copy(update={"matched_term": synonym})
+                        )
+                        break
+            if len(results) >= limit:
+                break
 
-    return results
+        return results

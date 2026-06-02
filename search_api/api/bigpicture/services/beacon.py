@@ -3,6 +3,14 @@ from typing import Any, override
 
 from opensearchpy import AsyncOpenSearch
 
+from search_api.services.search import (
+    fetch_indexed_keywords,
+    build_match_query,
+    build_term_query,
+    build_range_query,
+    or_queries,
+)
+
 from search_api.api.beacon.models import (
     BeaconQueryFilter,
     BeaconResultSets,
@@ -22,7 +30,7 @@ from search_api.api.bigpicture.models import (
 BP_OPENSEARCH_INDEX = "bp-image-index"
 
 # Map filter term to OpenSearch field.
-BP_OPENSEARCH_FIELD = {
+BP_OPENSEARCH_FIELD: dict[str, str | list[str]] = {
     "dataset_title": "dataset_title",
     "dataset_description": "dataset_description",
     "animal_species": "species",
@@ -38,6 +46,16 @@ BP_OPENSEARCH_FIELD = {
     "staining_compound": ["staining_compound", "staining_compound_text"],
 }
 
+BP_OPENSEARCH_FIELD_PATHS: dict[str, str] = {
+    "animal_species": "blocks.species",
+    "anatomical_site": "blocks.anatomical_site",
+    "fixation_type": "blocks.fixation_type",
+    "specimen_type": "blocks.specimen_type",
+    "block_preparation": "blocks.block_preparation",
+    "staining_procedure": "stains.staining_procedure",
+    "staining_compound": "stains.staining_compound",
+}
+
 # TODO (improve): paginate to avoid limits
 DEFAULT_LIMIT = 10000
 
@@ -50,7 +68,7 @@ def get_term(field_id: str) -> BeaconFilteringTerm:
     raise ValueError(f"Unsupported field: {field_id}")
 
 
-def build_query(term: BeaconFilteringTerm, value: str) -> dict[str, Any]:
+def build_opensearch_query(term: BeaconFilteringTerm, value: str) -> dict[str, Any]:
     field_ids = BP_OPENSEARCH_FIELD[term.id]
     if isinstance(field_ids, str):
         field_ids = [field_ids]
@@ -71,37 +89,6 @@ def build_query(term: BeaconFilteringTerm, value: str) -> dict[str, Any]:
     return or_queries([builder(f, value) for f in field_ids])
 
 
-def build_match_query(field_id: str, value: str) -> dict[str, Any]:
-    return {"match": {field_id: value}}
-
-
-def build_term_query(field_id: str, value: str) -> dict[str, Any]:
-    return {"term": {field_id: value}}
-
-
-def build_range_query(field_id: str, value: str) -> dict[str, Any]:
-    parts = value.split("-", 1)
-
-    try:
-        gte = int(parts[0])
-        lte = int(parts[1]) if len(parts) > 1 else gte
-    except ValueError:
-        raise ValueError(f"Invalid range value: {value}")
-
-    return {
-        "range": {
-            field_id: {
-                "gte": gte,
-                "lte": lte,
-            }
-        }
-    }
-
-
-def or_queries(queries: list[dict[str, Any]]) -> dict[str, Any]:
-    return {"bool": {"should": queries, "minimum_should_match": 1}}
-
-
 class BigpictureBeaconService(ABC):
     """
     Abstract Bigpicture Beacon search.
@@ -117,6 +104,11 @@ class BigpictureBeaconService(ABC):
 
     @abstractmethod
     async def is_healthy(self) -> bool:
+        pass
+
+    @abstractmethod
+    async def get_indexed_values(self, field_id: str) -> set[str] | None:
+        """Return indexed values or None if unsupported."""
         pass
 
 
@@ -158,6 +150,10 @@ class MockBigpictureBeaconService(BigpictureBeaconService):
     async def is_healthy(self) -> bool:
         return True
 
+    @override
+    async def get_indexed_values(self, field_id: str) -> set[str] | None:
+        return None
+
 
 class OpenSearchBigpictureBeaconService(BigpictureBeaconService):
     """
@@ -187,6 +183,15 @@ class OpenSearchBigpictureBeaconService(BigpictureBeaconService):
         except Exception:
             return False
 
+    @override
+    async def get_indexed_values(self, field_id: str) -> set[str] | None:
+        # TODO(improve): check field type
+        field_paths = BP_OPENSEARCH_FIELD_PATHS.get(field_id)
+        if field_paths is None:
+            return None
+        keywords = await fetch_indexed_keywords(self.index_name, field_paths)
+        return set(keywords.keys())
+
     @staticmethod
     def get_query(
         filters: list[BeaconQueryFilter], limit: int = DEFAULT_LIMIT
@@ -201,15 +206,15 @@ class OpenSearchBigpictureBeaconService(BigpictureBeaconService):
             value = f.value
 
             if term.scopes == BP_DATASET_SCOPE:
-                must_clauses.append(build_query(term, value))
+                must_clauses.append(build_opensearch_query(term, value))
             elif term.scopes in (
                 BP_BIOLOGICAL_BEING_SCOPE,
                 BP_SPECIMEN_SCOPE,
                 BP_BLOCK_SCOPE,
             ):
-                block_filters.append(build_query(term, value))
+                block_filters.append(build_opensearch_query(term, value))
             elif term.scopes in (BP_STAINING_SCOPE,):
-                stain_filters.append(build_query(term, value))
+                stain_filters.append(build_opensearch_query(term, value))
 
         if block_filters:
             must_clauses.append(

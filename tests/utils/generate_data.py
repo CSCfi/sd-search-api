@@ -231,6 +231,7 @@ async def generate_and_load_data(image_cnt: int, dataset_cnt: int) -> None:
                             species=_generate_code_value(),
                             anatomical_site=_generate_code_value(),
                             fixation_type=_generate_code_value(),
+                            fixation_type_text=f"{_generate_code_value().code}",
                             block_preparation=_generate_code_value(),
                             specimen_type=_generate_code_value(),
                             age_at_extraction=_generate_age_at_extraction_range(),

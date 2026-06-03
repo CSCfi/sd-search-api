@@ -47,6 +47,9 @@
           "fixation_type": {
             "type": "keyword"
           },
+          "fixation_type_text": {
+            "type": "keyword"
+          },
           "block_preparation": {
             "type": "keyword"
           },

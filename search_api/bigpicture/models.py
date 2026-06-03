@@ -28,6 +28,7 @@ class BigpictureSampleSpecimenFields(BaseModel):
 
     anatomical_site: BigpictureCodeAttributeValue | None = None
     fixation_type: BigpictureCodeAttributeValue | None = None
+    fixation_type_text: str | None = None  # Free text alternative
     specimen_type: BigpictureCodeAttributeValue | None = None
     age_at_extraction: tuple[int, int] | None = None
 

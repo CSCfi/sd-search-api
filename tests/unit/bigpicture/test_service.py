@@ -44,6 +44,7 @@ async def test_load_fields():
                 species=get_code("1"),
                 anatomical_site=get_code("2"),
                 fixation_type=get_code("3"),
+                fixation_type_text="test_fixation",
                 block_preparation=get_code("4"),
                 specimen_type=get_code("5"),
                 age_at_extraction=(10, 20),

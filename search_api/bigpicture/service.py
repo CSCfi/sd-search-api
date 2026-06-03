@@ -114,6 +114,7 @@ async def _load_fields(
                                 ),
                                 "anatomical_site": _extract_code(block.anatomical_site),
                                 "fixation_type": _extract_code(block.fixation_type),
+                                "fixation_type_text": block.fixation_type_text,
                                 "specimen_type": _extract_code(block.specimen_type),
                                 "age_at_extraction": (
                                     {

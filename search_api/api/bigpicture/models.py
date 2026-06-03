@@ -79,7 +79,7 @@ BP_ANATOMICAL_SITE_FILTERING_TERM = BeaconFilteringTerm(
 )
 BP_FIXATION_TYPE_FILTERING_TERM = BeaconFilteringTerm(
     id="fixation_type",
-    type="ontology",
+    type="ontologyOrValue",
     ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
     ontologyConcept="1388477003",  # Tissue fixative (product)
     scopes=BP_SPECIMEN_SCOPE,

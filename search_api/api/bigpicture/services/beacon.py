@@ -36,7 +36,7 @@ BP_OPENSEARCH_FIELD: dict[str, str | list[str]] = {
     "animal_species": "species",
     "sex": "sex",
     "anatomical_site": "anatomical_site",
-    "fixation_type": "fixation_type",
+    "fixation_type": ["fixation_type", "fixation_type_text"],
     "specimen_type": "specimen_type",
     "age_at_extraction": "age_at_extraction",
     "block_preparation": "block_preparation",

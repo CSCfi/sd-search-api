@@ -10,6 +10,7 @@ from search_api.bigpicture.models import (
 from search_api.bigpicture.process import (
     extract_fields,
     _extract_code_attribute_value,
+    _extract_fixation_type,
     _extract_string_attribute_value,
     _extract_age_at_extraction_range,
 )
@@ -194,3 +195,53 @@ def test_process_age_of_extraction_range():
 
     assert start == 40
     assert end == 40
+
+
+def test_extract_fixation_type_standard_scheme():
+    xml = """
+    <ROOT>
+        <ATTRIBUTES>
+            <CODE_ATTRIBUTE>
+                <TAG>fixation_type</TAG>
+                <VALUE>
+                    <CODE>3</CODE>
+                    <SCHEME>Scheme3</SCHEME>
+                    <MEANING>Test3</MEANING>
+                    <SCHEME_VERSION/>
+                </VALUE>
+            </CODE_ATTRIBUTE>
+        </ATTRIBUTES>
+    </ROOT>
+    """
+    elem = etree.fromstring(xml)
+
+    fixation_type, fixation_type_text = _extract_fixation_type(elem)
+
+    assert fixation_type == BigpictureCodeAttributeValue(
+        code="3", scheme="Scheme3", meaning="Test3", scheme_version=""
+    )
+    assert fixation_type_text is None
+
+
+def test_extract_fixation_type_other_scheme():
+    xml = """
+    <ROOT>
+        <ATTRIBUTES>
+            <CODE_ATTRIBUTE>
+                <TAG>fixation_type</TAG>
+                <VALUE>
+                    <CODE>Test7</CODE>
+                    <SCHEME>Other</SCHEME>
+                    <MEANING>Test7</MEANING>
+                    <SCHEME_VERSION/>
+                </VALUE>
+            </CODE_ATTRIBUTE>
+        </ATTRIBUTES>
+    </ROOT>
+    """
+    elem = etree.fromstring(xml)
+
+    fixation_type, fixation_type_text = _extract_fixation_type(elem)
+
+    assert fixation_type is None
+    assert fixation_type_text == "Test7"

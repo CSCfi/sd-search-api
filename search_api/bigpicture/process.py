@@ -322,9 +322,12 @@ def _extract_sample_biological_being_fields(
 
 
 def _extract_sample_specimen_fields(xml: ElementTree) -> BigpictureSampleSpecimenFields:
+    fixation_type, fixation_type_text = _extract_fixation_type(xml)
+
     return BigpictureSampleSpecimenFields(
         anatomical_site=_extract_code_attribute_value(xml, "anatomical_site"),
-        fixation_type=_extract_code_attribute_value(xml, "fixation_type"),
+        fixation_type=fixation_type,
+        fixation_type_text=fixation_type_text,
         specimen_type=_extract_code_attribute_value(xml, "specimen_type"),
         age_at_extraction=_extract_age_at_extraction_range(xml),
     )
@@ -397,6 +400,17 @@ def _extract_code_attribute_value(
         meaning=value.findtext("MEANING"),
         scheme_version=value.findtext("SCHEME_VERSION"),
     )
+
+
+def _extract_fixation_type(
+    xml: ElementTree,
+) -> tuple[BigpictureCodeAttributeValue | None, str | None]:
+    value = _extract_code_attribute_value(xml, "fixation_type")
+
+    if value and value.scheme == "Other":
+        return None, value.meaning or value.code
+
+    return value, None
 
 
 def _extract_string_attribute_value(

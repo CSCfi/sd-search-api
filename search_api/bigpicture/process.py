@@ -325,7 +325,7 @@ def _extract_sample_specimen_fields(xml: ElementTree) -> BigpictureSampleSpecime
     fixation_type, fixation_type_text = _extract_fixation_type(xml)
 
     return BigpictureSampleSpecimenFields(
-        anatomical_site=_extract_code_attribute_value(xml, "anatomical_site"),
+        anatomical_site=_extract_anatomical_sites(xml),
         fixation_type=fixation_type,
         fixation_type_text=fixation_type_text,
         specimen_type=_extract_code_attribute_value(xml, "specimen_type"),
@@ -400,6 +400,40 @@ def _extract_code_attribute_value(
         meaning=value.findtext("MEANING"),
         scheme_version=value.findtext("SCHEME_VERSION"),
     )
+
+
+def _extract_code_attribute_values(
+    elem: ElementTree, tag: str, *, is_attributes=True
+) -> frozenset[BigpictureCodeAttributeValue]:
+    if is_attributes:
+        values = elem.xpath(f"ATTRIBUTES/CODE_ATTRIBUTE[TAG='{tag}']/VALUE")
+    else:
+        values = elem.xpath(f"CODE_ATTRIBUTE[TAG='{tag}']/VALUE")
+
+    return frozenset(
+        BigpictureCodeAttributeValue(
+            code=v.findtext("CODE"),
+            scheme=v.findtext("SCHEME"),
+            meaning=v.findtext("MEANING"),
+            scheme_version=v.findtext("SCHEME_VERSION"),
+        )
+        for v in values
+    )
+
+
+def _extract_anatomical_sites(
+    elem: ElementTree,
+) -> frozenset[BigpictureCodeAttributeValue]:
+    direct = _extract_code_attribute_values(elem, "anatomical_site")
+
+    set_nodes = elem.xpath("ATTRIBUTES/SET_ATTRIBUTE[TAG='anatomical_site_list']/VALUE")
+    from_set: frozenset[BigpictureCodeAttributeValue] = frozenset()
+    if set_nodes:
+        from_set = _extract_code_attribute_values(
+            set_nodes[0], "anatomical_site", is_attributes=False
+        )
+
+    return direct | from_set
 
 
 def _extract_fixation_type(

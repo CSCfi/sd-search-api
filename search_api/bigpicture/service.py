@@ -70,6 +70,11 @@ async def _load_fields(
     def _extract_code(value: BigpictureCodeAttributeValue | None) -> str | None:
         return value.code if value is not None else None
 
+    def _extract_codes(
+        values: frozenset[BigpictureCodeAttributeValue],
+    ) -> list[str] | None:
+        return [v.code for v in values] or None
+
     # Replace existing image row.
     await cur.execute(
         """
@@ -112,7 +117,9 @@ async def _load_fields(
                                 "block_preparation": _extract_code(
                                     block.block_preparation
                                 ),
-                                "anatomical_site": _extract_code(block.anatomical_site),
+                                "anatomical_site": _extract_codes(
+                                    block.anatomical_site
+                                ),
                                 "fixation_type": _extract_code(block.fixation_type),
                                 "fixation_type_text": block.fixation_type_text,
                                 "specimen_type": _extract_code(block.specimen_type),
@@ -215,6 +222,17 @@ async def get_fields(cur: AsyncCursor, image_id: str) -> BigpictureFields | None
             return {}
         return {key: BigpictureCodeAttributeValue(code=v, meaning=v)}
 
+    def _convert_codes(key: str, _dict: dict) -> dict:
+        v = _dict.get(key)
+        if not v:
+            return {}
+        codes = v if isinstance(v, list) else [v]
+        return {
+            key: frozenset(
+                BigpictureCodeAttributeValue(code=c, meaning=c) for c in codes
+            )
+        }
+
     def _convert_age_at_extraction(_dict: dict) -> dict:
         v = _dict.get("age_at_extraction")
         if v is None:
@@ -227,7 +245,7 @@ async def get_fields(cur: AsyncCursor, image_id: str) -> BigpictureFields | None
                 **block,
                 **_convert_code("block_preparation", block),
                 **_convert_code("species", block),
-                **_convert_code("anatomical_site", block),
+                **_convert_codes("anatomical_site", block),
                 **_convert_code("fixation_type", block),
                 **_convert_code("specimen_type", block),
                 **_convert_age_at_extraction(block),

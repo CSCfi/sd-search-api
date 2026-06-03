@@ -9,7 +9,9 @@ from search_api.bigpicture.models import (
 )
 from search_api.bigpicture.process import (
     extract_fields,
+    _extract_anatomical_sites,
     _extract_code_attribute_value,
+    _extract_code_attribute_values,
     _extract_fixation_type,
     _extract_string_attribute_value,
     _extract_age_at_extraction_range,
@@ -37,8 +39,15 @@ def test_extract_fields():
                         code="1", scheme="Scheme1", meaning="Test1", scheme_version=""
                     ),
                     sex="Male",
-                    anatomical_site=BigpictureCodeAttributeValue(
-                        code="2", scheme="Scheme2", meaning="Test2", scheme_version=""
+                    anatomical_site=frozenset(
+                        [
+                            BigpictureCodeAttributeValue(
+                                code="2",
+                                scheme="Scheme2",
+                                meaning="Test2",
+                                scheme_version="",
+                            )
+                        ]
                     ),
                     fixation_type=BigpictureCodeAttributeValue(
                         code="3", scheme="Scheme3", meaning="Test3", scheme_version=""
@@ -74,8 +83,15 @@ def test_extract_fields():
                         code="1", scheme="Scheme1", meaning="Test1", scheme_version=""
                     ),
                     sex="Male",
-                    anatomical_site=BigpictureCodeAttributeValue(
-                        code="2", scheme="Scheme2", meaning="Test2", scheme_version=""
+                    anatomical_site=frozenset(
+                        [
+                            BigpictureCodeAttributeValue(
+                                code="2",
+                                scheme="Scheme2",
+                                meaning="Test2",
+                                scheme_version="",
+                            )
+                        ]
                     ),
                     fixation_type=BigpictureCodeAttributeValue(
                         code="3", scheme="Scheme3", meaning="Test3", scheme_version=""
@@ -195,6 +211,168 @@ def test_process_age_of_extraction_range():
 
     assert start == 40
     assert end == 40
+
+
+def test_extract_code_attribute_values_single():
+    xml = """
+    <ROOT>
+        <ATTRIBUTES>
+            <CODE_ATTRIBUTE>
+                <TAG>anatomical_site</TAG>
+                <VALUE>
+                    <CODE>2</CODE>
+                    <SCHEME>Scheme2</SCHEME>
+                    <MEANING>Test2</MEANING>
+                    <SCHEME_VERSION/>
+                </VALUE>
+            </CODE_ATTRIBUTE>
+        </ATTRIBUTES>
+    </ROOT>
+    """
+    elem = etree.fromstring(xml)
+
+    values = _extract_code_attribute_values(elem, "anatomical_site")
+
+    assert values == frozenset(
+        [
+            BigpictureCodeAttributeValue(
+                code="2", scheme="Scheme2", meaning="Test2", scheme_version=""
+            )
+        ]
+    )
+
+
+def test_extract_code_attribute_values_from_list():
+    xml = """
+    <ROOT>
+        <ATTRIBUTES>
+            <CODE_ATTRIBUTE>
+                <TAG>anatomical_site</TAG>
+                <VALUE>
+                    <CODE>2</CODE>
+                    <SCHEME>Scheme2</SCHEME>
+                    <MEANING>Test2</MEANING>
+                    <SCHEME_VERSION/>
+                </VALUE>
+            </CODE_ATTRIBUTE>
+            <CODE_ATTRIBUTE>
+                <TAG>anatomical_site</TAG>
+                <VALUE>
+                    <CODE>8</CODE>
+                    <SCHEME>Scheme8</SCHEME>
+                    <MEANING>Test8</MEANING>
+                    <SCHEME_VERSION/>
+                </VALUE>
+            </CODE_ATTRIBUTE>
+        </ATTRIBUTES>
+    </ROOT>
+    """
+    elem = etree.fromstring(xml)
+
+    values = _extract_code_attribute_values(elem, "anatomical_site")
+
+    assert values == frozenset(
+        [
+            BigpictureCodeAttributeValue(
+                code="2", scheme="Scheme2", meaning="Test2", scheme_version=""
+            ),
+            BigpictureCodeAttributeValue(
+                code="8", scheme="Scheme8", meaning="Test8", scheme_version=""
+            ),
+        ]
+    )
+
+
+def test_extract_anatomical_sites_from_set():
+    xml = """
+    <ROOT>
+        <ATTRIBUTES>
+            <SET_ATTRIBUTE>
+                <TAG>anatomical_site_list</TAG>
+                <VALUE>
+                    <CODE_ATTRIBUTE>
+                        <TAG>anatomical_site</TAG>
+                        <VALUE>
+                            <CODE>2</CODE>
+                            <SCHEME>Scheme2</SCHEME>
+                            <MEANING>Test2</MEANING>
+                            <SCHEME_VERSION/>
+                        </VALUE>
+                    </CODE_ATTRIBUTE>
+                    <CODE_ATTRIBUTE>
+                        <TAG>anatomical_site</TAG>
+                        <VALUE>
+                            <CODE>8</CODE>
+                            <SCHEME>Scheme8</SCHEME>
+                            <MEANING>Test8</MEANING>
+                            <SCHEME_VERSION/>
+                        </VALUE>
+                    </CODE_ATTRIBUTE>
+                </VALUE>
+            </SET_ATTRIBUTE>
+        </ATTRIBUTES>
+    </ROOT>
+    """
+    elem = etree.fromstring(xml)
+
+    sites = _extract_anatomical_sites(elem)
+
+    assert sites == frozenset(
+        [
+            BigpictureCodeAttributeValue(
+                code="2", scheme="Scheme2", meaning="Test2", scheme_version=""
+            ),
+            BigpictureCodeAttributeValue(
+                code="8", scheme="Scheme8", meaning="Test8", scheme_version=""
+            ),
+        ]
+    )
+
+
+def test_extract_anatomical_sites_from_list_and_set():
+    xml = """
+    <ROOT>
+        <ATTRIBUTES>
+            <CODE_ATTRIBUTE>
+                <TAG>anatomical_site</TAG>
+                <VALUE>
+                    <CODE>1</CODE>
+                    <SCHEME>Scheme1</SCHEME>
+                    <MEANING>Test1</MEANING>
+                    <SCHEME_VERSION/>
+                </VALUE>
+            </CODE_ATTRIBUTE>
+            <SET_ATTRIBUTE>
+                <TAG>anatomical_site_list</TAG>
+                <VALUE>
+                    <CODE_ATTRIBUTE>
+                        <TAG>anatomical_site</TAG>
+                        <VALUE>
+                            <CODE>2</CODE>
+                            <SCHEME>Scheme2</SCHEME>
+                            <MEANING>Test2</MEANING>
+                            <SCHEME_VERSION/>
+                        </VALUE>
+                    </CODE_ATTRIBUTE>
+                </VALUE>
+            </SET_ATTRIBUTE>
+        </ATTRIBUTES>
+    </ROOT>
+    """
+    elem = etree.fromstring(xml)
+
+    sites = _extract_anatomical_sites(elem)
+
+    assert sites == frozenset(
+        [
+            BigpictureCodeAttributeValue(
+                code="1", scheme="Scheme1", meaning="Test1", scheme_version=""
+            ),
+            BigpictureCodeAttributeValue(
+                code="2", scheme="Scheme2", meaning="Test2", scheme_version=""
+            ),
+        ]
+    )
 
 
 def test_extract_fixation_type_standard_scheme():

@@ -42,7 +42,7 @@ async def test_load_fields():
             BigpictureBlockFields(
                 sex="Male",
                 species=get_code("1"),
-                anatomical_site=get_code("2"),
+                anatomical_site=frozenset([get_code("2")]),
                 fixation_type=get_code("3"),
                 fixation_type_text="test_fixation",
                 block_preparation=get_code("4"),

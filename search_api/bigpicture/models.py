@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 
 class BigpictureCodeAttributeValue(BaseModel):
@@ -26,11 +26,22 @@ class BigpictureSampleBiologicalBeingFields(BaseModel):
 class BigpictureSampleSpecimenFields(BaseModel):
     """Bigpicture specimen search fields."""
 
-    anatomical_site: BigpictureCodeAttributeValue | None = None
+    anatomical_site: frozenset[BigpictureCodeAttributeValue] = Field(
+        default_factory=frozenset
+    )
     fixation_type: BigpictureCodeAttributeValue | None = None
     fixation_type_text: str | None = None  # Free text alternative
     specimen_type: BigpictureCodeAttributeValue | None = None
     age_at_extraction: tuple[int, int] | None = None
+
+    @field_serializer("anatomical_site")
+    def _serialize_anatomical_site(
+        self, v: frozenset[BigpictureCodeAttributeValue]
+    ) -> list[dict]:
+        # BigpictureFields.blocks is defined as set[BigpictureBlockFields], and
+        # Python requires set elements to be hashable. By default, Pydantic serialises
+        # frozenset[BaseModel] as set[dict]. However, dict, unlike list, is unhashable.
+        return [item.model_dump() for item in v]
 
 
 class BigpictureSampleBlockFields(BaseModel):

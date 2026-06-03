@@ -2,7 +2,10 @@
 import asyncio
 import atexit
 import logging
+from datetime import timedelta
 from typing import Any
+
+import isodate  # type: ignore[import-untyped]
 
 from aiocache import cached  # type: ignore[import-untyped]
 from opensearchpy import AsyncOpenSearch, helpers
@@ -167,30 +170,32 @@ async def fetch_indexed_keywords(index_name: str, field_name: str) -> dict[str, 
 
 
 def build_match_query(field_id: str, value: str) -> dict[str, Any]:
+    """Build an OpenSearch match query."""
     return {"match": {field_id: value}}
 
 
 def build_term_query(field_id: str, value: str) -> dict[str, Any]:
+    """Build an OpenSearch term query."""
     return {"term": {field_id: value}}
 
 
-def build_range_query(field_id: str, value: str) -> dict[str, Any]:
+def iso8601_duration_to_days(duration: str) -> int:
+    """Convert an ISO-8601 duration string to number of days.
+
+    Uses: 1 year = 365 days, 1 month = 30 days.
+    """
+    d = isodate.parse_duration(duration)
+    if isinstance(d, timedelta):
+        return d.days
+    return int(d.years) * 365 + int(d.months) * 30 + d.tdelta.days
+
+
+def build_iso8601_range_query(field_id: str, value: str) -> dict[str, Any]:
+    """Build an OpenSearch range query from an ISO-8601 duration range."""
     parts = value.split("-", 1)
-
-    try:
-        gte = int(parts[0])
-        lte = int(parts[1]) if len(parts) > 1 else gte
-    except ValueError:
-        raise ValueError(f"Invalid range value: {value}")
-
-    return {
-        "range": {
-            field_id: {
-                "gte": gte,
-                "lte": lte,
-            }
-        }
-    }
+    gte = iso8601_duration_to_days(parts[0])
+    lte = iso8601_duration_to_days(parts[1]) if len(parts) > 1 else gte
+    return {"range": {field_id: {"gte": gte, "lte": lte}}}
 
 
 def or_queries(queries: list[dict[str, Any]]) -> dict[str, Any]:

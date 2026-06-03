@@ -3,7 +3,6 @@ from pydantic import BaseModel
 from search_api.api.beacon.models import (
     SNOMED_ONTOLOGY_ID,
     BeaconFilteringTerm,
-    BeaconFilteringControlledVocabulary,
     BeaconFilteringOntology,
     BeaconFilteringTermsResponse,
     BeaconFilteringTerms,
@@ -59,10 +58,8 @@ BP_SPECIES_FILTERING_TERM = BeaconFilteringTerm(
 )
 BP_SEX_FILTERING_TERM = BeaconFilteringTerm(
     id="sex",
-    type="controlledVocabulary",
-    controlledVocabulary=BeaconFilteringControlledVocabulary(
-        allowedTerms=["Male", "Female", "Not-known", "Other"]
-    ),
+    type="controlledValue",
+    controlledValues=["Male", "Female", "Not-known", "Other"],
     scopes=BP_BIOLOGICAL_BEING_SCOPE,
     label="Sex",
     description="The sex of the biological being",
@@ -97,7 +94,7 @@ BP_SPECIMEN_TYPE_FILTERING_TERM = BeaconFilteringTerm(
 )
 BP_AGE_AT_EXTRACTION_FILTERING_TERM = BeaconFilteringTerm(
     id="age_at_extraction",
-    type="numberRange",  # TODO: change type and indexing to support duration range
+    type="iso8601Range",
     scopes=BP_SPECIMEN_SCOPE,
     label="Age at extraction",
     description="The age of the biological being at the time point of extraction of the specimen.",

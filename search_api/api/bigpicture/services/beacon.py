@@ -7,7 +7,7 @@ from search_api.services.search import (
     fetch_indexed_keywords,
     build_match_query,
     build_term_query,
-    build_range_query,
+    build_iso8601_range_query,
     or_queries,
 )
 
@@ -74,10 +74,10 @@ def build_opensearch_query(term: BeaconFilteringTerm, value: str) -> dict[str, A
 
     builders = {
         "text": build_match_query,
-        "controlledVocabulary": build_term_query,
+        "controlledValue": build_term_query,
         "ontology": build_term_query,
         "ontologyOrValue": build_term_query,
-        "numberRange": build_range_query,
+        "iso8601Range": build_iso8601_range_query,
     }
 
     builder = builders.get(term.type)

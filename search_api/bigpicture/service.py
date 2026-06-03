@@ -13,7 +13,9 @@ from search_api.bigpicture.models import (
     BigpictureBlockFields,
 )
 from search_api.database.repository import get_cursor
-from search_api.services.search import bp_index_documents
+import isodate  # type: ignore[import-untyped]
+
+from search_api.services.search import bp_index_documents, iso8601_duration_to_days
 
 logging.basicConfig(level=logging.INFO)
 
@@ -277,6 +279,47 @@ async def get_fields(cur: AsyncCursor, image_id: str) -> BigpictureFields | None
     )
 
 
+def _convert_iso8601_range_for_opensearch(range: dict) -> dict | None:
+    """Convert an ISO-8601 duration range dict to days (long) for OpenSearch.
+
+    Returns the converted dict, or ``None`` if either bound is missing or invalid.
+    """
+    if "gte" not in range or "lte" not in range:
+        logging.error(
+            "age_at_extraction range %r is missing 'gte' or 'lte'; skipping field.",
+            range,
+        )
+        return None
+    try:
+        return {
+            "gte": iso8601_duration_to_days(range["gte"]),
+            "lte": iso8601_duration_to_days(range["lte"]),
+        }
+    except isodate.ISO8601Error:
+        logging.error(
+            "Invalid ISO-8601 duration in age_at_extraction %r; skipping field.",
+            range,
+        )
+        return None
+
+
+def _convert_blocks_for_opensearch(blocks: list[dict] | None) -> list[dict] | None:
+    """Convert blocks fields for OpenSearch."""
+    if not blocks:
+        return blocks
+    result = []
+    for block in blocks:
+        age = block.get("age_at_extraction")
+        if age:
+            converted = _convert_iso8601_range_for_opensearch(age)
+            if converted is not None:
+                block = {**block, "age_at_extraction": converted}
+            else:
+                block = {k: v for k, v in block.items() if k != "age_at_extraction"}
+        result.append(block)
+    return result
+
+
 async def sync_fields(cur: AsyncCursor, image_id: str | None = None) -> None:
     """
     Sync database fields to OpenSearch.
@@ -358,7 +401,7 @@ async def sync_fields(cur: AsyncCursor, image_id: str | None = None) -> None:
                 "dataset_short_name": dataset_short_name,
                 "dataset_title": dataset_title,
                 "dataset_description": dataset_description,
-                "blocks": blocks,
+                "blocks": _convert_blocks_for_opensearch(blocks),
                 "stains": stains,
             }
 

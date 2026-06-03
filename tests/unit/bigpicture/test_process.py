@@ -9,6 +9,7 @@ from search_api.bigpicture.models import (
 )
 from search_api.bigpicture.process import (
     extract_fields,
+    _add_iso8601_durations,
     _extract_anatomical_sites,
     _extract_code_attribute_value,
     _extract_code_attribute_values,
@@ -55,7 +56,7 @@ def test_extract_fields():
                     specimen_type=BigpictureCodeAttributeValue(
                         code="4", scheme="Scheme4", meaning="Test4", scheme_version=""
                     ),
-                    age_at_extraction=(40, 41),
+                    age_at_extraction=("P40Y", "P41Y"),
                 )
             }
 
@@ -99,7 +100,7 @@ def test_extract_fields():
                     specimen_type=BigpictureCodeAttributeValue(
                         code="4", scheme="Scheme4", meaning="Test4", scheme_version=""
                     ),
-                    age_at_extraction=(40, 41),
+                    age_at_extraction=("P40Y", "P41Y"),
                 )
             }
 
@@ -162,6 +163,70 @@ def test_process_string_attribute():
     assert value == "Male"
 
 
+def test_extract_age_at_extraction_range_valid():
+    xml = """
+    <ATTRIBUTES>
+        <SET_ATTRIBUTE>
+            <TAG>age_at_extraction</TAG>
+            <VALUE>
+                <STRING_ATTRIBUTE>
+                    <TAG>interval_start</TAG>
+                    <VALUE>P40Y</VALUE>
+                </STRING_ATTRIBUTE>
+                <STRING_ATTRIBUTE>
+                    <TAG>interval_length</TAG>
+                    <VALUE>P1Y</VALUE>
+                </STRING_ATTRIBUTE>
+            </VALUE>
+        </SET_ATTRIBUTE>
+    </ATTRIBUTES>
+    """
+    elem = etree.fromstring(xml)
+
+    result = _extract_age_at_extraction_range(elem)
+
+    assert result == ("P40Y", "P41Y")
+
+
+def test_extract_age_at_extraction_range_invalid(caplog):
+    import logging
+
+    xml = """
+    <ATTRIBUTES>
+        <SET_ATTRIBUTE>
+            <TAG>age_at_extraction</TAG>
+            <VALUE>
+                <STRING_ATTRIBUTE>
+                    <TAG>interval_start</TAG>
+                    <VALUE>NOT_VALID</VALUE>
+                </STRING_ATTRIBUTE>
+                <STRING_ATTRIBUTE>
+                    <TAG>interval_length</TAG>
+                    <VALUE>P1Y</VALUE>
+                </STRING_ATTRIBUTE>
+            </VALUE>
+        </SET_ATTRIBUTE>
+    </ATTRIBUTES>
+    """
+    elem = etree.fromstring(xml)
+
+    with caplog.at_level(logging.ERROR):
+        result = _extract_age_at_extraction_range(elem)
+
+    assert result is None
+    assert "NOT_VALID" in caplog.text
+
+
+def test_add_iso8601_durations():
+    assert _add_iso8601_durations("P40Y", "P1Y") == "P41Y"
+    assert _add_iso8601_durations("P40Y", "PT0S") == "P40Y"
+    assert _add_iso8601_durations("P40Y", "P6M") == "P40Y6M"
+    assert _add_iso8601_durations("P40Y6M", "P6M") == "P41Y"
+    assert _add_iso8601_durations("P1Y", "P11M") == "P1Y11M"
+    assert _add_iso8601_durations("P1Y", "P12M") == "P2Y"
+    assert _add_iso8601_durations("PT0S", "P1Y") == "P1Y"
+
+
 def test_process_age_of_extraction_range():
     xml = """
     <ATTRIBUTES>
@@ -184,10 +249,10 @@ def test_process_age_of_extraction_range():
 
     start, end = _extract_age_at_extraction_range(elem)
 
-    assert start == 40
-    assert end == 41
+    assert start == "P40Y"
+    assert end == "P41Y"
 
-    # PT0S interval length
+    # PT0S interval length — end equals start
     xml = """
      <ATTRIBUTES>
          <SET_ATTRIBUTE>
@@ -209,8 +274,8 @@ def test_process_age_of_extraction_range():
 
     start, end = _extract_age_at_extraction_range(elem)
 
-    assert start == 40
-    assert end == 40
+    assert start == "P40Y"
+    assert end == "P40Y"
 
 
 def test_extract_code_attribute_values_single():

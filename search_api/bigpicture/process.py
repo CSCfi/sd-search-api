@@ -1,11 +1,12 @@
 """Bigpicture data extraction and loading."""
 
-import re
+import logging
 from pathlib import Path
 from typing import Iterator, Literal, cast
 from lxml.etree import _ElementTree as ElementTree  # noqa
 
 import fsspec  # type: ignore
+import isodate  # type: ignore[import-untyped]
 
 from search_api.bigpicture.models import (
     BigpictureFields,
@@ -461,13 +462,21 @@ def _extract_string_attribute_value(
     return values[0]
 
 
-def _extract_age_at_extraction_range(elem: ElementTree) -> tuple[int, int] | None:
-    def _get_year(period: str) -> int | None:
-        if period == "PT0S":
-            return None
-        match = re.match(r"P(?P<years>\d+)Y", period)
-        return int(match.group("years")) if match else None
+def _add_iso8601_durations(start: str, length: str) -> str:
+    """Add an ISO-8601 duration ``length`` to ``start`` and return the ISO-8601 result."""
 
+    result = isodate.parse_duration(start) + isodate.parse_duration(length)
+
+    if isinstance(result, isodate.Duration):
+        # isodate does not normalise month overflow; do it explicitly.
+        extra_years, months = divmod(int(result.months), 12)
+        years = int(result.years) + extra_years
+        result = isodate.Duration(years=years, months=months) + result.tdelta
+
+    return isodate.duration_isoformat(result)
+
+
+def _extract_age_at_extraction_range(elem: ElementTree) -> tuple[str, str] | None:
     nodes = elem.xpath(
         "//ATTRIBUTES/SET_ATTRIBUTE[TAG/text()='age_at_extraction']/VALUE"
     )
@@ -484,10 +493,15 @@ def _extract_age_at_extraction_range(elem: ElementTree) -> tuple[int, int] | Non
     if not start_value or not length_value:
         return None
 
-    start_year = _get_year(start_value[0])
-    length_year = _get_year(length_value[0]) or 0
-
-    if not start_year:
+    start = start_value[0]
+    try:
+        end = _add_iso8601_durations(start, length_value[0])
+    except isodate.ISO8601Error:
+        logging.error(
+            "Invalid ISO-8601 duration in age_at_extraction (start=%r, length=%r); skipping field.",
+            start,
+            length_value[0],
+        )
         return None
 
-    return start_year, start_year + length_year
+    return start, end

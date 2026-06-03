@@ -84,8 +84,8 @@ def get_filtering_terms() -> str:
     """
     lines = []
     for term in BP_FILTERING_TERMS:
-        if term.controlledVocabulary:
-            allowed = " | ".join(term.controlledVocabulary.allowedTerms or [])
+        if term.controlledValues:
+            allowed = " | ".join(term.controlledValues or [])
             lines.append(f"{term.id}: {allowed}")
         else:
             lines.append(term.id)

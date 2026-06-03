@@ -32,7 +32,7 @@ class BigpictureSampleSpecimenFields(BaseModel):
     fixation_type: BigpictureCodeAttributeValue | None = None
     fixation_type_text: str | None = None  # Free text alternative
     specimen_type: BigpictureCodeAttributeValue | None = None
-    age_at_extraction: tuple[int, int] | None = None
+    age_at_extraction: tuple[str, str] | None = None
 
     @field_serializer("anatomical_site")
     def _serialize_anatomical_site(

@@ -10,10 +10,10 @@ SNOMED_ONTOLOGY_ID = "SCTID"
 BeaconQueryGranularity = Literal["boolean", "count", "record"]
 BeaconFilteringTermType = Literal[
     "text",
-    "controlledVocabulary",
+    "controlledValue",
     "ontology",
     "ontologyOrValue",
-    "numberRange",  # TODO: change to date range
+    "iso8601Range",
 ]
 
 
@@ -173,12 +173,6 @@ class BeaconFilteringOntology(BaseModel):
     allowedTerms: list[str] | None = None
 
 
-class BeaconFilteringControlledVocabulary(BaseModel):
-    # Beacon V2 controlled vocabulary filtering extension.
-
-    allowedTerms: list[str] | None = None
-
-
 class BeaconFilteringTerm(BaseModel):
     """Beacon V2 filtering term."""
 
@@ -196,7 +190,7 @@ class BeaconFilteringTerm(BaseModel):
         default=None,
         description="A single ontology concept ID including descendants or a list of concept IDs.",
     )
-    controlledVocabulary: BeaconFilteringControlledVocabulary | None = None
+    controlledValues: list[str] | None = None
 
     @property
     def snomed_ecl(self) -> str | None:
@@ -214,9 +208,9 @@ class BeaconFilteringTerm(BaseModel):
                 "ontology must be provided when type is 'ontology' or 'ontologyOrValue'"
             )
 
-        if self.type == "controlledVocabulary" and self.controlledVocabulary is None:
+        if self.type == "controlledValue" and self.controlledValues is None:
             raise ValueError(
-                "controlledVocabulary must be provided when type is 'controlledVocabulary'"
+                "controlledValues must be provided when type is 'controlledValue'"
             )
 
         return self

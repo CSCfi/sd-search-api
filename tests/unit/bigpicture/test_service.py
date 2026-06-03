@@ -8,7 +8,7 @@ from search_api.bigpicture.models import (
     BigpictureStainingFields,
     BigpictureBlockFields,
 )
-from search_api.bigpicture.service import load_fields, get_fields, sync_fields
+from search_api.bigpicture.service import _convert_blocks_for_opensearch, _convert_iso8601_range_for_opensearch, load_fields, get_fields, sync_fields
 
 from search_api.database.repository import get_connection
 
@@ -17,6 +17,50 @@ TEST_DIR = Path(__file__).resolve().parent.parent.parent / "files" / "bigpicture
 
 def get_code(code: str) -> BigpictureCodeAttributeValue:
     return BigpictureCodeAttributeValue(code=code, meaning=code)
+
+
+def test_convert_iso8601_range_for_opensearch_valid():
+    assert _convert_iso8601_range_for_opensearch({"gte": "P40Y", "lte": "P50Y"}) == {
+        "gte": 14600,
+        "lte": 18250,
+    }
+
+
+def test_convert_iso8601_range_for_opensearch_invalid(caplog):
+    import logging
+
+    with caplog.at_level(logging.ERROR):
+        result = _convert_iso8601_range_for_opensearch({"gte": "NOT_VALID", "lte": "P1Y"})
+
+    assert result is None
+    assert "Invalid ISO-8601 duration in age_at_extraction" in caplog.text
+
+
+def test_convert_iso8601_range_for_opensearch_missing(caplog):
+    import logging
+
+    with caplog.at_level(logging.ERROR):
+        result = _convert_iso8601_range_for_opensearch({"gte": "P40Y"})
+
+    assert result is None
+    assert "is missing" in caplog.text
+
+
+def test_convert_blocks_for_opensearch(caplog):
+    """Invalid duration drops age_at_extraction; valid duration is converted to days."""
+    import logging
+
+    blocks = [
+        {"species": "337915000", "age_at_extraction": {"gte": "NOT_VALID", "lte": "P1Y"}},
+        {"species": "447612001", "age_at_extraction": {"gte": "P40Y", "lte": "P50Y"}},
+    ]
+
+    with caplog.at_level(logging.ERROR):
+        result = _convert_blocks_for_opensearch(blocks)
+
+    assert result[0] == {"species": "337915000"}
+    assert result[1]["age_at_extraction"] == {"gte": 14600, "lte": 18250}
+    assert "Invalid ISO-8601 duration in age_at_extraction" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -47,7 +91,7 @@ async def test_load_fields():
                 fixation_type_text="test_fixation",
                 block_preparation=get_code("4"),
                 specimen_type=get_code("5"),
-                age_at_extraction=(10, 20),
+                age_at_extraction=("P10Y", "P20Y"),
             )
         },
         stains={

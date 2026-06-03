@@ -40,7 +40,6 @@ BP_OPENSEARCH_FIELD: dict[str, str | list[str]] = {
     "specimen_type": "specimen_type",
     "age_at_extraction": "age_at_extraction",
     "block_preparation": "block_preparation",
-    "staining_method": "staining_method",
     "staining_target": "staining_target",
     "staining_procedure": ["staining_procedure", "staining_procedure_text"],
     "staining_compound": ["staining_compound", "staining_compound_text"],
@@ -78,7 +77,6 @@ def build_opensearch_query(term: BeaconFilteringTerm, value: str) -> dict[str, A
         "controlledVocabulary": build_term_query,
         "ontology": build_term_query,
         "ontologyOrValue": build_term_query,
-        "ontologyOrControlledVocabulary": build_term_query,
         "numberRange": build_range_query,
     }
 

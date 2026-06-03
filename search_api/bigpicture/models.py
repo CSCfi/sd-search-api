@@ -60,7 +60,6 @@ class BigpictureStainingFields(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    staining_method: str | None = None
     staining_procedure: BigpictureCodeAttributeValue | None = None
     staining_procedure_text: str | None = None  # Free text alternative
     staining_compound: BigpictureCodeAttributeValue | None = None

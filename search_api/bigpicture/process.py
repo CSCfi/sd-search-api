@@ -335,9 +335,6 @@ def _extract_staining_fields(xml: ElementTree) -> list[BigpictureStainingFields]
         # PROCEDURE_INFORMATION and STAIN(S) are mutually exclusive.
         return [
             BigpictureStainingFields(
-                staining_method=_extract_string_attribute_value(
-                    procedure_xml, "staining_method", is_attributes=False
-                ),
                 staining_procedure=_extract_code_attribute_value(
                     procedure_xml, "staining_procedure", is_attributes=False
                 ),
@@ -363,9 +360,6 @@ def _extract_staining_fields(xml: ElementTree) -> list[BigpictureStainingFields]
 
         fields.append(
             BigpictureStainingFields(
-                staining_method=_extract_string_attribute_value(
-                    stain_xml, "staining_method", is_attributes=False
-                ),
                 staining_procedure=_extract_code_attribute_value(
                     stain_xml, "staining_procedure", is_attributes=False
                 ),

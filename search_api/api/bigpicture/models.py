@@ -35,10 +35,18 @@ BP_BLOCK_SCOPE = [BP_BLOCK_SCHEMA]
 BP_STAINING_SCOPE = [BP_STAINING_SCHEMA]
 
 BP_DATASET_TITLE_FILTERING_TERM = BeaconFilteringTerm(
-    id="dataset_title", type="text", scopes=BP_DATASET_SCOPE
+    id="dataset_title",
+    type="text",
+    scopes=BP_DATASET_SCOPE,
+    label="Dataset title",
+    description="The title of the dataset",
 )
 BP_DATASET_DESCRIPTION_FILTERING_TERM = BeaconFilteringTerm(
-    id="dataset_description", type="text", scopes=BP_DATASET_SCOPE
+    id="dataset_description",
+    type="text",
+    scopes=BP_DATASET_SCOPE,
+    label="Dataset description",
+    description="The description of the dataset",
 )
 BP_SPECIES_FILTERING_TERM = BeaconFilteringTerm(
     id="animal_species",
@@ -46,6 +54,8 @@ BP_SPECIES_FILTERING_TERM = BeaconFilteringTerm(
     ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
     ontologyConcept="410607006",  # Organism (organism)
     scopes=BP_BIOLOGICAL_BEING_SCOPE,
+    label="Biological species",
+    description="Species of the biological being",
 )
 BP_SEX_FILTERING_TERM = BeaconFilteringTerm(
     id="sex",
@@ -54,6 +64,8 @@ BP_SEX_FILTERING_TERM = BeaconFilteringTerm(
         allowedTerms=["Male", "Female", "Not-known", "Other"]
     ),
     scopes=BP_BIOLOGICAL_BEING_SCOPE,
+    label="Sex",
+    description="The sex of the biological being",
 )
 BP_ANATOMICAL_SITE_FILTERING_TERM = BeaconFilteringTerm(
     id="anatomical_site",
@@ -61,6 +73,9 @@ BP_ANATOMICAL_SITE_FILTERING_TERM = BeaconFilteringTerm(
     ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
     ontologyConcept="123037004",  # Body structure (body structure)
     scopes=BP_SPECIMEN_SCOPE,
+    label="Anatomical site",
+    description="The anatomical site from which the specimen originated, typically at the organ level. "
+    "If no organ can be identified, use an equivalent anatomical region.",
 )
 BP_FIXATION_TYPE_FILTERING_TERM = BeaconFilteringTerm(
     id="fixation_type",
@@ -68,6 +83,8 @@ BP_FIXATION_TYPE_FILTERING_TERM = BeaconFilteringTerm(
     ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
     ontologyConcept="1388477003",  # Tissue fixative (product)
     scopes=BP_SPECIMEN_SCOPE,
+    label="Fixation type",
+    description="The type of fixation used in the process of the creation of the specimen.",
 )
 BP_SPECIMEN_TYPE_FILTERING_TERM = BeaconFilteringTerm(
     id="specimen_type",
@@ -75,11 +92,16 @@ BP_SPECIMEN_TYPE_FILTERING_TERM = BeaconFilteringTerm(
     ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
     ontologyConcept="91720002",  # Body substance (substance)
     scopes=BP_SPECIMEN_SCOPE,
+    label="Specimen type",
+    description="The type of the specimen.",
 )
 BP_AGE_AT_EXTRACTION_FILTERING_TERM = BeaconFilteringTerm(
-    id="age_at_extraction", type="numberRange", scopes=BP_SPECIMEN_SCOPE
+    id="age_at_extraction",
+    type="numberRange",  # TODO: change type and indexing to support duration range
+    scopes=BP_SPECIMEN_SCOPE,
+    label="Age at extraction",
+    description="The age of the biological being at the time point of extraction of the specimen.",
 )
-
 BP_BLOCK_PREPARATION_FILTERING_TERM = BeaconFilteringTerm(
     id="block_preparation",
     type="ontology",
@@ -93,17 +115,15 @@ BP_BLOCK_PREPARATION_FILTERING_TERM = BeaconFilteringTerm(
         "261712009",  # Acrylic polymer (substance)
     ],
     scopes=BP_BLOCK_SCOPE,
-)
-BP_STAINING_METHOD_FILTERING_TERM = BeaconFilteringTerm(
-    id="staining_method",
-    type="controlledVocabulary",
-    controlledVocabulary=BeaconFilteringControlledVocabulary(
-        allowedTerms=["chemical", "immunostaining", "in situ hybridization"]
-    ),
-    scopes=BP_STAINING_SCOPE,
+    label="Block preparation",
+    description="The preservation technique used.",
 )
 BP_STAINING_TARGET_FILTERING_TERM = BeaconFilteringTerm(
-    id="staining_target", type="text", scopes=BP_STAINING_SCOPE
+    id="staining_target",
+    type="text",
+    scopes=BP_STAINING_SCOPE,
+    label="Staining target",
+    description="The specific target of the stain",
 )
 BP_STAINING_PROCEDURE_FILTERING_TERM = BeaconFilteringTerm(
     id="staining_procedure",
@@ -111,24 +131,18 @@ BP_STAINING_PROCEDURE_FILTERING_TERM = BeaconFilteringTerm(
     ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
     ontologyConcept="127790008",  # Staining method (procedure)
     scopes=BP_STAINING_SCOPE,
+    label="Staining procedure",
+    description="TThe name of the staining procedure that was performed to stain the slide",
 )
 BP_STAINING_COMPOUND_FILTERING_TERM = BeaconFilteringTerm(
     id="staining_compound",
-    type="ontologyOrControlledVocabulary",
+    type="ontologyOrValue",  # TODO: support value
     ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
     ontologyConcept="397165007",  # Stain
-    controlledVocabulary=BeaconFilteringControlledVocabulary(
-        allowedTerms=[
-            "antibody",
-            "Double-stranded DNA",
-            "Single-stranded DNA",
-            "RNA",
-            "Synthetic oligonucleo",
-        ]
-    ),
     scopes=BP_STAINING_SCOPE,
+    label="Chemical staining compound",
+    description="The chemical staining compound that binds to parts of the tissues of the slide",
 )
-# TODO: targeted staining
 
 BP_FILTERING_TERMS = [
     BP_DATASET_TITLE_FILTERING_TERM,
@@ -140,7 +154,6 @@ BP_FILTERING_TERMS = [
     BP_SPECIMEN_TYPE_FILTERING_TERM,
     BP_AGE_AT_EXTRACTION_FILTERING_TERM,
     BP_BLOCK_PREPARATION_FILTERING_TERM,
-    BP_STAINING_METHOD_FILTERING_TERM,
     BP_STAINING_TARGET_FILTERING_TERM,
     BP_STAINING_PROCEDURE_FILTERING_TERM,
     BP_STAINING_COMPOUND_FILTERING_TERM,

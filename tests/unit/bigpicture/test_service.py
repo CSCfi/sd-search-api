@@ -51,7 +51,6 @@ async def test_load_fields():
         },
         stains={
             BigpictureStainingFields(
-                staining_method="immunostaining",
                 staining_procedure=get_code("11"),
                 staining_procedure_text="test_procedure",
                 staining_compound=get_code("12"),

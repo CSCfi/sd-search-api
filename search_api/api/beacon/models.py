@@ -13,8 +13,7 @@ BeaconFilteringTermType = Literal[
     "controlledVocabulary",
     "ontology",
     "ontologyOrValue",
-    "ontologyOrControlledVocabulary",
-    "numberRange",
+    "numberRange",  # TODO: change to date range
 ]
 
 
@@ -44,7 +43,7 @@ class BeaconQueryFilter(BaseModel):
     id: str
 
     # Used in Beacon V2 AlphanumericFilter.
-    value: Any
+    value: Any  # TODO: support one value OR multiple alternative values
     operator: Literal["="] = "="  # Only equality operator is supported
 
     # Used in Beacon V2 OntologyFilter.
@@ -186,9 +185,9 @@ class BeaconFilteringTerm(BaseModel):
     id: str
     type: BeaconFilteringTermType
     scopes: list[str]
-    label: str | None = None
+    label: str
     # Beacon V2 extension.
-    description: str | None = None
+    description: str
     ontology: BeaconFilteringOntology | None = Field(
         default=None,
         description="The ontology used for the field.",

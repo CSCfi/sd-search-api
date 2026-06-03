@@ -14,7 +14,9 @@ from search_api.bigpicture.process import (
     _extract_age_at_extraction_range,
 )
 
-TEST_DIR = Path(__file__).resolve().parent.parent.parent / "files" / "bigpicture"
+TEST_DIR = (
+    Path(__file__).resolve().parent.parent.parent / "files" / "bigpicture" / "xml"
+)
 
 
 def test_extract_fields():
@@ -49,7 +51,6 @@ def test_extract_fields():
 
             assert fields.stains == {
                 BigpictureStainingFields(
-                    staining_method="chemical",
                     staining_procedure=BigpictureCodeAttributeValue(
                         code="6", scheme="Scheme6", meaning="Test6", scheme_version=""
                     ),
@@ -87,7 +88,6 @@ def test_extract_fields():
 
             assert fields.stains == {
                 BigpictureStainingFields(
-                    staining_method="immunogenic",
                     staining_procedure=BigpictureCodeAttributeValue(
                         code="7", scheme="Scheme7", meaning="Test7", scheme_version=""
                     ),

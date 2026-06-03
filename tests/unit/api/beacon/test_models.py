@@ -10,6 +10,8 @@ SNOMED_ONTOLOGY = BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID)
 def filtering_term(ontology_concept: str | list[str] | None) -> BeaconFilteringTerm:
     return BeaconFilteringTerm(
         id="test_field",
+        label="test",
+        description="test",
         type="ontology",
         scopes=["test"],
         ontology=SNOMED_ONTOLOGY,

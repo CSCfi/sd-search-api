@@ -112,18 +112,6 @@ def _generate_age_at_extraction_range() -> tuple[int, int]:
     return random.choices(ranges, weights=SELECTIVITY, k=1)[0]
 
 
-def _generate_staining_method() -> str:
-    """Generate staining method."""
-
-    values = [
-        "chemical",
-        "immunostaining",
-        "in situ hybridization",
-    ]
-
-    return random.choice(values)
-
-
 def _generate_short_name() -> str:
     """Return a random short name."""
     base = ["Atlas", "Helix", "Astra", "Orion", "Nexus", "Vivo", "Index", "Basis"]
@@ -250,7 +238,6 @@ async def generate_and_load_data(image_cnt: int, dataset_cnt: int) -> None:
                     },
                     stains={
                         BigpictureStainingFields(
-                            staining_method=_generate_staining_method(),
                             staining_procedure=_generate_code_value(),
                             staining_procedure_text=f"{_generate_code_value().code}",
                             staining_compound=_generate_code_value(),

@@ -61,9 +61,6 @@
       "stains": {
         "type": "nested",
         "properties": {
-          "staining_method": {
-            "type": "keyword"
-          },
           "staining_target": {
             "type": "keyword"
           },

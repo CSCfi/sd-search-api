@@ -143,7 +143,6 @@ async def _load_fields(
                         {
                             k: v
                             for k, v in {
-                                "staining_method": stain.staining_method,
                                 "staining_target": stain.staining_target,
                                 "staining_procedure": _extract_code(
                                     stain.staining_procedure

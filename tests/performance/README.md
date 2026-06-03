@@ -335,14 +335,13 @@ SELECT image_id FROM bp_image_extraction WHERE age_at_extraction && int4range(11
 SELECT image_id FROM bp_image_extraction WHERE age_at_extraction && int4range(13, 100) LIMIT 100;
 ```
 
-### Staining search (GIN indexed JSON)
+### Staining target search (GIN indexed JSON)
 
 ```
 SELECT image_id
 FROM bp_image
 WHERE stains @> '[
   {
-    "staining_method": "immunostaining",
     "staining_target": "test_target"
   }
 ]'

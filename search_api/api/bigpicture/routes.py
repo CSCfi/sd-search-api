@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 
 from .models import (
@@ -71,9 +73,18 @@ async def filtering_terms() -> BeaconFilteringTermsResponse:
 async def query_beacon(
     request: BeaconQueryRequest,
     backend: BigpictureBeaconService = Depends(get_beacon_service),
+    snomed_service: SnomedService = Depends(get_snomed_service),
 ) -> BeaconBooleanResponse | BeaconCountResponse | BeaconResultSetsResponse:
+    expanded_filters = list(
+        await asyncio.gather(
+            *[
+                snomed_service.expand_ontology_filter(f, BP_FILTERING_TERMS)
+                for f in request.query.filters
+            ]
+        )
+    )
     response = await backend.query(
-        filters=request.query.filters,
+        filters=expanded_filters,
     )
 
     meta = BeaconResponseMeta(

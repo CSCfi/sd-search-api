@@ -1,11 +1,16 @@
 """SNOMED CT concept lookup via the Snowstorm terminology server."""
 
+import asyncio
+
 import httpx
 from aiocache import cached  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from search_api.conf import common_config
+
+if TYPE_CHECKING:
+    from search_api.api.beacon.models import BeaconFilteringTerm, BeaconQueryFilter
 
 _PAGE_SIZE = 1000
 _CACHE_TTL = 60 * 60 * 24 * 30  # 30 days
@@ -349,3 +354,83 @@ class SnomedService:
                 break
 
         return results
+
+    async def expand_ontology_filter(
+        self,
+        query_filter: "BeaconQueryFilter",
+        filtering_terms: "list[BeaconFilteringTerm]",
+        branch: str = "MAIN",
+    ) -> "BeaconQueryFilter":
+        """Expand an ontology filter to include all descendant concept IDs.
+
+        When ``includeDescendantTerms`` is True, each value in the filter is
+        resolved to a SNOMED CT concept ID. Every resolved concept is then
+        expanded to include all its active descendants. Results from all values
+        are merged into a single de-duplicated list. Values that cannot be
+        resolved, non-ontology filters, and ontology filters with
+        ``includeDescendantTerms=False`` are returned unchanged.
+
+        Args:
+            query_filter: The Beacon query filter to expand.
+            filtering_terms: The full list of known filtering term definitions,
+                used to determine the type of the filter.
+            branch: SNOMED CT branch path to search. Defaults to ``"MAIN"``.
+
+        Returns:
+            The original or expanded filter.
+        """
+        if not query_filter.includeDescendantTerms:
+            return query_filter
+
+        filtering_term = next(
+            (t for t in filtering_terms if t.id == query_filter.id), None
+        )
+        if filtering_term is None or filtering_term.type not in (
+            "ontology",
+            "ontologyOrValue",
+        ):
+            return query_filter
+
+        # Normalise filter values to a list to handle them uniformly.
+        values = (
+            query_filter.value
+            if isinstance(query_filter.value, list)
+            else [query_filter.value]
+        )
+
+        # Step 1: resolve each value to a concept ID.
+        ecl = filtering_term.snomed_ecl
+        resolved_concept_ids = await asyncio.gather(
+            *[self.find_concept(v, ecl=ecl, branch=branch) for v in values]
+        )
+
+        resolved = [
+            (original_value, resolved_concept_id)
+            for original_value, resolved_concept_id in zip(values, resolved_concept_ids)
+            if resolved_concept_id is not None
+        ]
+        unresolved = [
+            original_value
+            for original_value, resolved_concept_id in zip(values, resolved_concept_ids)
+            if resolved_concept_id is None
+        ]
+
+        if not resolved:
+            return query_filter
+
+        # Step 2: expand each resolved concept ID to its descendants concurrently.
+        expansions = await asyncio.gather(
+            *[
+                self.get_descendants(resolved_concept_id, branch)
+                for _, resolved_concept_id in resolved
+            ]
+        )
+
+        # Step 3: merge all concept IDs and descendants, then append unresolved values.
+        expanded: set[str] = set()
+        for (_, resolved_concept_id), descendants in zip(resolved, expansions):
+            expanded.add(resolved_concept_id)
+            expanded.update(d.concept_id for d in descendants)
+
+        all_values: list[str] = list(expanded) + unresolved
+        return query_filter.model_copy(update={"value": all_values})

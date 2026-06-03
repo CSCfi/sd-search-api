@@ -179,6 +179,11 @@ def build_term_query(field_id: str, value: str) -> dict[str, Any]:
     return {"term": {field_id: value}}
 
 
+def build_terms_query(field_id: str, values: list[str]) -> dict[str, Any]:
+    """Build an OpenSearch terms query matching any of the given values."""
+    return {"terms": {field_id: values}}
+
+
 def iso8601_duration_to_days(duration: str) -> int:
     """Convert an ISO-8601 duration string to number of days.
 

@@ -13,7 +13,7 @@ from search_api.conf import bigpicture_config as _bigpicture_config
 
 class AIQueryFilter(BaseModel):
     id: str
-    value: str
+    value: str | list[str]
     allowed_values: list[str] | None = None
     # TODO(improve): support ontology descendants.
     # includeDescendantTerms: bool = True

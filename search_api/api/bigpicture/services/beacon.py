@@ -6,7 +6,7 @@ from opensearchpy import AsyncOpenSearch
 from search_api.services.search import (
     fetch_indexed_keywords,
     build_match_query,
-    build_term_query,
+    build_terms_query,
     build_iso8601_range_query,
     or_queries,
 )
@@ -67,24 +67,28 @@ def get_term(field_id: str) -> BeaconFilteringTerm:
     raise ValueError(f"Unsupported field: {field_id}")
 
 
-def build_opensearch_query(term: BeaconFilteringTerm, value: str) -> dict[str, Any]:
+def build_opensearch_query(
+    term: BeaconFilteringTerm, value: str | list[str]
+) -> dict[str, Any]:
     field_ids = BP_OPENSEARCH_FIELD[term.id]
     if isinstance(field_ids, str):
         field_ids = [field_ids]
 
-    builders = {
-        "text": build_match_query,
-        "controlledValue": build_term_query,
-        "ontology": build_term_query,
-        "ontologyOrValue": build_term_query,
-        "iso8601Range": build_iso8601_range_query,
-    }
+    values = value if isinstance(value, list) else [value]
 
-    builder = builders.get(term.type)
-    if not builder:
-        raise ValueError(f"Unsupported term type {term.type}")
+    if term.type in ("controlledValue", "ontology", "ontologyOrValue"):
+        # Use a single terms query per field for efficient multi-value exact matching.
+        return or_queries([build_terms_query(f, values) for f in field_ids])
 
-    return or_queries([builder(f, value) for f in field_ids])
+    if term.type == "text":
+        return or_queries([build_match_query(f, v) for f in field_ids for v in values])
+
+    if term.type == "iso8601Range":
+        return or_queries(
+            [build_iso8601_range_query(f, v) for f in field_ids for v in values]
+        )
+
+    raise ValueError(f"Unsupported term type {term.type}")
 
 
 class BigpictureBeaconService(ABC):

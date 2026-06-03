@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, model_validator
-from typing import Any, Literal
+from typing import Literal
 
 BEACON_API_VERSION = "v2.0"
 BEACON_ORGANISATION_ID = "fi.csc"
@@ -43,7 +43,7 @@ class BeaconQueryFilter(BaseModel):
     id: str
 
     # Used in Beacon V2 AlphanumericFilter.
-    value: Any  # TODO: support one value OR multiple alternative values
+    value: str | list[str]
     operator: Literal["="] = "="  # Only equality operator is supported
 
     # Used in Beacon V2 OntologyFilter.

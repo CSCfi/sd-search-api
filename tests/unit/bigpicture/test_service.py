@@ -8,7 +8,13 @@ from search_api.bigpicture.models import (
     BigpictureStainingFields,
     BigpictureBlockFields,
 )
-from search_api.bigpicture.service import _convert_blocks_for_opensearch, _convert_iso8601_range_for_opensearch, load_fields, get_fields, sync_fields
+from search_api.bigpicture.service import (
+    _convert_blocks_for_opensearch,
+    _convert_iso8601_range_for_opensearch,
+    load_fields,
+    get_fields,
+    sync_fields,
+)
 
 from search_api.database.repository import get_connection
 
@@ -30,7 +36,9 @@ def test_convert_iso8601_range_for_opensearch_invalid(caplog):
     import logging
 
     with caplog.at_level(logging.ERROR):
-        result = _convert_iso8601_range_for_opensearch({"gte": "NOT_VALID", "lte": "P1Y"})
+        result = _convert_iso8601_range_for_opensearch(
+            {"gte": "NOT_VALID", "lte": "P1Y"}
+        )
 
     assert result is None
     assert "Invalid ISO-8601 duration in age_at_extraction" in caplog.text
@@ -51,7 +59,10 @@ def test_convert_blocks_for_opensearch(caplog):
     import logging
 
     blocks = [
-        {"species": "337915000", "age_at_extraction": {"gte": "NOT_VALID", "lte": "P1Y"}},
+        {
+            "species": "337915000",
+            "age_at_extraction": {"gte": "NOT_VALID", "lte": "P1Y"},
+        },
         {"species": "447612001", "age_at_extraction": {"gte": "P40Y", "lte": "P50Y"}},
     ]
 

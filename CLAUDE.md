@@ -133,12 +133,11 @@ When a filter maps to multiple OpenSearch fields they are combined with `or_quer
 ```
 tests/
 ├── unit/          # run by tox; no external services needed
-├── integration/   # require OpenSearch; conftest.py creates/tears down bp-image-index
+├── integration/   # require OpenSearch; conftest.py creates/tears down a UUID-named test index
 │   └── services/  # SNOMED tests marked @pytest.mark.external (require SNOWSTORM_URL)
 ├── performance/   # locust load tests
 └── files/bigpicture/
-    ├── xml/dataset_1/METADATA/          # XML fixtures for process.py tests
-    └── opensearch/bp-image-docs.json    # 5 documents across 2 datasets for integration tests
+    └── xml/dataset_1/METADATA/          # XML fixtures for process.py tests
 ```
 
-The integration `conftest.py` fixture (`opensearch_index`, session-scoped) drops, recreates, and bulk-loads the index from `bp-image-docs.json`, then drops it after the session.
+The integration `conftest.py` provides three module-scoped fixtures: `opensearch_docs` (override to supply inline documents), `opensearch_index_name` (returns `bp-image-index-test-<uuid>` so each run gets an isolated index), and `opensearch_index` (creates, loads, and tears down the index). Test modules override `opensearch_docs` with their own inline data — no external JSON file is needed.

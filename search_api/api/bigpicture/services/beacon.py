@@ -33,16 +33,16 @@ BP_OPENSEARCH_INDEX = "bp-image-index"
 BP_OPENSEARCH_FIELD: dict[str, str | list[str]] = {
     "dataset_title": "dataset_title",
     "dataset_description": "dataset_description",
-    "animal_species": "species",
-    "sex": "sex",
-    "anatomical_site": "anatomical_site",
-    "fixation_type": ["fixation_type", "fixation_type_text"],
-    "specimen_type": "specimen_type",
-    "age_at_extraction": "age_at_extraction",
-    "block_preparation": "block_preparation",
-    "staining_target": "staining_target",
-    "staining_procedure": ["staining_procedure", "staining_procedure_text"],
-    "staining_compound": ["staining_compound", "staining_compound_text"],
+    "animal_species": "blocks.species",
+    "sex": "blocks.sex",
+    "anatomical_site": "blocks.anatomical_site",
+    "fixation_type": ["blocks.fixation_type", "blocks.fixation_type_text"],
+    "specimen_type": "blocks.specimen_type",
+    "age_at_extraction": "blocks.age_at_extraction",
+    "block_preparation": "blocks.block_preparation",
+    "staining_target": "stains.staining_target",
+    "staining_procedure": ["stains.staining_procedure", "stains.staining_procedure_text"],
+    "staining_compound": ["stains.staining_compound", "stains.staining_compound_text"],
 }
 
 BP_OPENSEARCH_FIELD_PATHS: dict[str, str] = {

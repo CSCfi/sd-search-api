@@ -128,7 +128,7 @@ async def ai_query(
 
 
 @router.get(
-    "/fields/{field_id}/suggestions",
+    "/filtering_terms/{field_id}/suggestions",
     response_model=list[FieldValueSuggestion],
 )
 async def suggestions(
@@ -225,7 +225,7 @@ async def suggestions(
 
 
 @router.get(
-    "/fields/{field_id}/values",
+    "/filtering_terms/{field_id}/values",
     response_model=list[FieldValueCount],
 )
 async def values(

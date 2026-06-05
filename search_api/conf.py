@@ -28,10 +28,8 @@ class CommonConfiguration(BaseSettings):
     OPENSEARCH_PASSWORD: str = Field(
         default="Sd@Search9x!", description="OpenSearch password."
     )  # TODO: remove default value
-    SNOWSTORM_URL: str = Field(
-        # default="https://snowstorm.ihtsdotools.org/snowstorm/snomed-ct",
-        # default="http://snowstorm:8080/snowstorm/snomed-ct",
-        default="",
+    SNOWSTORM_URL: str | None = Field(
+        default=None,
         description="Snowstorm SNOMED CT server base URL.",
     )
 

@@ -1,36 +1,39 @@
 """Integration tests for the SNOMED CT service."""
 
+import os
+
 import pytest
 from search_api.api.bigpicture.models import BP_SPECIES_FILTERING_TERM
 from search_api.services.snomed import SnomedService
 
-_snomed = SnomedService()
-
-skip = pytest.mark.skip(reason="Requires Snowstorm")
+skip = pytest.mark.skipif(
+    not os.environ.get("SNOWSTORM_URL"), reason="SNOWSTORM_URL is not set"
+)
 
 
 @skip
 @pytest.mark.asyncio
 async def test_find_concept():
-    concept_id = await _snomed.find_concept(
-        "human", ecl=BP_SPECIES_FILTERING_TERM.snomed_ecl
-    )
-    assert concept_id is not None
-    assert concept_id == "337915000"  # Homo sapiens (organism)
-    concept_id = await _snomed.find_concept(
-        "337915000", ecl=BP_SPECIES_FILTERING_TERM.snomed_ecl
-    )
-    assert concept_id is not None
-    assert concept_id == "337915000"  # Homo sapiens (organism)
+    service = SnomedService()
+    for term in ("human", "Homo sapiens", "337915000"):
+        concept = await service.find_concept(
+            term, ecl=BP_SPECIES_FILTERING_TERM.snomed_ecl
+        )
+        assert concept is not None
+        assert concept.concept_id == "337915000"
+        assert concept.preferred_term == "Homo sapiens"
+        assert concept.synonyms == ["Human", "Homo sapiens"]
 
 
 @skip
 @pytest.mark.asyncio
-async def test_list_descendants():
-    concept_id = BP_SPECIES_FILTERING_TERM.ontologyConcept  # Organism (organism)
-    concepts = await _snomed.get_descendants(concept_id)
-    concept_ids = {c.concept_id for c in concepts}
-    assert len(concepts) > 1
-    assert concept_id not in concept_ids  # root excluded (strict descendants only)
-    assert "337915000" in concept_ids  # Homo sapiens (organism)
+async def test_find_descendants():
+    service = SnomedService()
+    concept = await service.find_concept("Myocardial infarction")
+    assert concept is not None
+    assert concept.concept_id == "22298006"
+    concepts = await service.find_descendants(concept.concept_id)
+    assert len(concepts) > 0
+    assert "22298006" not in [c.concept_id for c in concepts]
+    assert all(c.concept_id for c in concepts)
     assert all(c.preferred_term for c in concepts)

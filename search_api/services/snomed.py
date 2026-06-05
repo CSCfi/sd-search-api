@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 _PAGE_SIZE = 1000
 _CACHE_TTL = 60 * 60 * 24 * 30  # 30 days
 _SYNONYM_TYPE = "SYNONYM"
-_SYNONYM_BATCH_SIZE = 100
+_SYNONYM_BATCH_SIZE = 50  # limit conceptIds to keep request URL within length limits
 
 
 class SnomedConcept(BaseModel):
@@ -25,9 +25,16 @@ class SnomedConcept(BaseModel):
     synonyms: list[str] = Field(default_factory=list, exclude=True)
 
 
+def _snowstorm_url() -> str:
+    url = common_config().SNOWSTORM_URL
+    if not url:
+        raise RuntimeError("SNOWSTORM_URL environmental variable is not configured.")
+    return url
+
+
 def _client() -> httpx.AsyncClient:
     return httpx.AsyncClient(
-        headers={"User-Agent": "sd-search-api/0.1", "Accept": "application/json"},
+        headers={"User-Agent": "sd-search-api", "Accept": "application/json"},
         follow_redirects=True,
         timeout=30.0,
     )
@@ -53,8 +60,7 @@ async def _fetch_synonyms(
     Returns:
         Mapping of concept ID to list of active synonym terms.
     """
-    cfg = common_config()
-    url = f"{cfg.SNOWSTORM_URL}/{branch}/descriptions"
+    url = f"{_snowstorm_url()}/{branch}/descriptions"
     result: dict[str, list[str]] = {cid: [] for cid in concept_ids}
 
     for i in range(0, len(concept_ids), _SYNONYM_BATCH_SIZE):
@@ -104,8 +110,7 @@ async def _fetch_concepts(
     Returns:
         Active concepts matching term.
     """
-    cfg = common_config()
-    base_url = f"{cfg.SNOWSTORM_URL}/{branch}/concepts"
+    base_url = f"{_snowstorm_url()}/{branch}/concepts"
 
     async with _client() as client:
         if _is_concept_id(term):
@@ -116,26 +121,34 @@ async def _fetch_concepts(
             data = resp.json()
             if not data.get("active"):
                 return []
-            return [
+            concepts = [
                 SnomedConcept(
                     concept_id=data["conceptId"], preferred_term=data["pt"]["term"]
                 )
             ]
+        else:
+            params: dict[str, str | int] = {
+                "term": term,
+                "activeFilter": "true",
+                "limit": limit,
+            }
+            if ecl is not None:
+                params["ecl"] = ecl
+            resp = await client.get(base_url, params=params)
+            resp.raise_for_status()
+            concepts = [
+                SnomedConcept(
+                    concept_id=item["conceptId"], preferred_term=item["pt"]["term"]
+                )
+                for item in resp.json().get("items", [])
+            ]
 
-        params: dict[str, str | int] = {
-            "term": term,
-            "activeFilter": "true",
-            "limit": limit,
-        }
-        if ecl is not None:
-            params["ecl"] = ecl
-        resp = await client.get(base_url, params=params)
-        resp.raise_for_status()
-        items = resp.json().get("items", [])
+        concept_ids = [c.concept_id for c in concepts]
+        synonyms = await _fetch_synonyms(concept_ids, branch, client)
 
     return [
-        SnomedConcept(concept_id=item["conceptId"], preferred_term=item["pt"]["term"])
-        for item in items
+        c.model_copy(update={"synonyms": synonyms.get(c.concept_id, [])})
+        for c in concepts
     ]
 
 
@@ -151,11 +164,10 @@ async def _fetch_all_concepts(ecl: str, branch: str) -> list[SnomedConcept]:
     Returns:
         All active concepts matching the ecl expression.
     """
-    cfg = common_config()
-    url = f"{cfg.SNOWSTORM_URL}/{branch}/concepts"
+    url = f"{_snowstorm_url()}/{branch}/concepts"
 
     concepts: list[dict[str, str]] = []
-    offset = 0
+    search_after: str | None = None
 
     async with _client() as client:
         while True:
@@ -163,8 +175,9 @@ async def _fetch_all_concepts(ecl: str, branch: str) -> list[SnomedConcept]:
                 "ecl": ecl,
                 "activeFilter": "true",
                 "limit": _PAGE_SIZE,
-                "offset": offset,
             }
+            if search_after:
+                params["searchAfter"] = search_after
             resp = await client.get(url, params=params)
             resp.raise_for_status()
             data = resp.json()
@@ -178,8 +191,8 @@ async def _fetch_all_concepts(ecl: str, branch: str) -> list[SnomedConcept]:
                     }
                 )
 
-            offset += len(items)
-            if offset >= data.get("total", 0):
+            search_after = data.get("searchAfter")
+            if not items or not search_after:
                 break
 
         concept_ids = [concept["concept_id"] for concept in concepts]
@@ -206,8 +219,8 @@ class SnomedService:
         term: str,
         ecl: str | None = None,
         branch: str = "MAIN",
-    ) -> str | None:
-        """Return the concept ID for the term, or None if not found.
+    ) -> SnomedConcept | None:
+        """Return the best-matching active concept for the term, or None if not found.
 
         If term is a concept ID it is looked up directly.
 
@@ -218,11 +231,10 @@ class SnomedService:
             branch: SNOMED CT branch path to search. Defaults to ``"MAIN"``
 
         Returns:
-            The concept id of the best-matching active concept, or None if no
-            active concept matches.
+            The best-matching active concept, or None if no active concept matches.
         """
         concepts = await _fetch_concepts(term, ecl, branch, limit=1)
-        return concepts[0].concept_id if concepts else None
+        return concepts[0] if concepts else None
 
     async def search_concepts(
         self,
@@ -247,7 +259,7 @@ class SnomedService:
         return await _fetch_concepts(term, ecl, branch, limit)
 
     @staticmethod
-    async def get_descendants(
+    async def find_descendants(
         concept_id: str,
         branch: str = "MAIN",
     ) -> list[SnomedConcept]:
@@ -377,38 +389,38 @@ class SnomedService:
             else [query_filter.value]
         )
 
-        # Step 1: resolve each value to a concept ID.
+        # Step 1: resolve each value to a concept.
         ecl = filtering_term.snomed_ecl
-        resolved_concept_ids = await asyncio.gather(
+        resolved_concepts = await asyncio.gather(
             *[self.find_concept(v, ecl=ecl, branch=branch) for v in values]
         )
 
         resolved = [
-            (original_value, resolved_concept_id)
-            for original_value, resolved_concept_id in zip(values, resolved_concept_ids)
-            if resolved_concept_id is not None
+            (original_value, concept)
+            for original_value, concept in zip(values, resolved_concepts)
+            if concept is not None
         ]
         unresolved = [
             original_value
-            for original_value, resolved_concept_id in zip(values, resolved_concept_ids)
-            if resolved_concept_id is None
+            for original_value, concept in zip(values, resolved_concepts)
+            if concept is None
         ]
 
         if not resolved:
             return query_filter
 
-        # Step 2: expand each resolved concept ID to its descendants concurrently.
+        # Step 2: expand each resolved concept to its descendants concurrently.
         expansions = await asyncio.gather(
             *[
-                self.get_descendants(resolved_concept_id, branch)
-                for _, resolved_concept_id in resolved
+                self.find_descendants(concept.concept_id, branch)
+                for _, concept in resolved
             ]
         )
 
         # Step 3: merge all concept IDs and descendants, then append unresolved values.
         expanded: set[str] = set()
-        for (_, resolved_concept_id), descendants in zip(resolved, expansions):
-            expanded.add(resolved_concept_id)
+        for (_, concept), descendants in zip(resolved, expansions):
+            expanded.add(concept.concept_id)
             expanded.update(d.concept_id for d in descendants)
 
         all_values: list[str] = list(expanded) + unresolved

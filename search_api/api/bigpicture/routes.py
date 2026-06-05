@@ -134,9 +134,9 @@ async def ai_query(
 async def suggestions(
     field_id: str = Path(description="Filtering term field ID."),
     term: str = Query(description="Partial text to search for."),
-    word_match: bool = Query(
-        default=True,
-        description="Use word-boundary prefix matching instead of substring matching.",
+    substring_match: bool = Query(
+        default=False,
+        description="Use substring matching instead of word-boundary prefix matching.",
     ),
     include_all_controlled_values: bool = Query(
         default=False,
@@ -168,9 +168,9 @@ async def suggestions(
     def _matches(value: str) -> bool:
         value_lower = value.lower()
         term_lower = term.lower()
-        if word_match:
-            return any(word.startswith(term_lower) for word in value_lower.split())
-        return term_lower in value_lower
+        if substring_match:
+            return term_lower in value_lower
+        return any(word.startswith(term_lower) for word in value_lower.split())
 
     if filtering_term.type == "controlledValue":
         if include_all_controlled_values:
@@ -198,13 +198,13 @@ async def suggestions(
         ]
     else:
         # Match against indexed ontology concepts.
-        preferred_terms = await snomed_service.get_preferred_terms(
+        concepts = await snomed_service.get_concepts(
             set(field_counts[0].keys()), filtering_term.snomed_ecl
         )
         matches = sorted(
-            (preferred_term, concept_id)
-            for concept_id, preferred_term in preferred_terms.items()
-            if _matches(preferred_term)
+            (concept.preferred_term, concept_id)
+            for concept_id, concept in concepts.items()
+            if _matches(concept.preferred_term)
         )
         results = [
             FieldValueSuggestion(term=preferred_term, concept_id=concept_id)
@@ -274,20 +274,18 @@ async def values(
         return [FieldValueCount(value=v, count=c) for v, c in sorted_values]
 
     if include_all_ontology_values:
-        preferred_terms = await snomed_service.get_preferred_terms(
-            None, filtering_term.snomed_ecl
-        )
+        concepts = await snomed_service.get_concepts(None, filtering_term.snomed_ecl)
         results: list[tuple[str, int, str | None]] = [
-            (preferred_term, counts.get(concept_id, 0), concept_id)
-            for concept_id, preferred_term in preferred_terms.items()
+            (concept.preferred_term, counts.get(concept_id, 0), concept_id)
+            for concept_id, concept in concepts.items()
         ]
     else:
-        preferred_terms = await snomed_service.get_preferred_terms(
+        concepts = await snomed_service.get_concepts(
             set(counts.keys()), filtering_term.snomed_ecl
         )
         results = [
-            (preferred_terms.get(concept_id, concept_id), count, concept_id)
-            for concept_id, count in counts.items()
+            (concept.preferred_term, counts[concept_id], concept_id)
+            for concept_id, concept in concepts.items()
         ]
 
     if filtering_term.type == "ontologyOrValue" and include_other_ontology_values:

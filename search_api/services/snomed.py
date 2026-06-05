@@ -263,12 +263,12 @@ class SnomedService:
         return await _fetch_all_concepts(f"< {concept_id}", branch)
 
     @staticmethod
-    async def get_preferred_terms(
+    async def get_concepts(
         concept_ids: set[str] | None,
         ecl: str,
         branch: str = "MAIN",
-    ) -> dict[str, str]:
-        """Return a mapping of concept IDs to preferred term.
+    ) -> dict[str, SnomedConcept]:
+        """Return a mapping of concept IDs to SnomedConcept.
 
         Args:
             concept_ids: Concept IDs to map. When None, all concepts in the hierarchy are returned.
@@ -276,16 +276,12 @@ class SnomedService:
             branch: SNOMED CT branch path to search. Defaults to ``"MAIN"``
 
         Returns:
-            Mapping of concept IDs to preferred terms. Concept IDs not found are excluded.
+            Mapping of concept IDs to SnomedConcept. Concept IDs not found are excluded.
         """
         all_concepts = await _fetch_all_concepts(ecl, branch)
         if concept_ids is None:
-            return {c.concept_id: c.preferred_term for c in all_concepts}
-        return {
-            c.concept_id: c.preferred_term
-            for c in all_concepts
-            if c.concept_id in concept_ids
-        }
+            return {c.concept_id: c for c in all_concepts}
+        return {c.concept_id: c for c in all_concepts if c.concept_id in concept_ids}
 
     async def suggest_concepts(
         self,

@@ -1,7 +1,9 @@
+import asyncio
 from abc import ABC, abstractmethod
 from typing import Any, override
 
 from opensearchpy import AsyncOpenSearch
+from pydantic import BaseModel
 
 from search_api.services.search import (
     fetch_indexed_keywords,
@@ -29,30 +31,35 @@ from search_api.api.bigpicture.models import (
 
 BP_OPENSEARCH_INDEX = "bp-image-index"
 
+
+class OpenSearchOntologyOrValue(BaseModel):
+    concept_value_field: str
+    other_value_field: str
+
+
 # Map filter term to OpenSearch field.
-BP_OPENSEARCH_FIELD: dict[str, str | list[str]] = {
+BP_OPENSEARCH_FIELD: dict[str, str | OpenSearchOntologyOrValue] = {
     "dataset_title": "dataset_title",
     "dataset_description": "dataset_description",
     "animal_species": "blocks.species",
     "sex": "blocks.sex",
     "anatomical_site": "blocks.anatomical_site",
-    "fixation_type": ["blocks.fixation_type", "blocks.fixation_type_text"],
+    "fixation_type": OpenSearchOntologyOrValue(
+        concept_value_field="blocks.fixation_type",
+        other_value_field="blocks.fixation_type_text",
+    ),
     "specimen_type": "blocks.specimen_type",
     "age_at_extraction": "blocks.age_at_extraction",
     "block_preparation": "blocks.block_preparation",
     "staining_target": "stains.staining_target",
-    "staining_procedure": ["stains.staining_procedure", "stains.staining_procedure_text"],
-    "staining_compound": ["stains.staining_compound", "stains.staining_compound_text"],
-}
-
-BP_OPENSEARCH_FIELD_PATHS: dict[str, str] = {
-    "animal_species": "blocks.species",
-    "anatomical_site": "blocks.anatomical_site",
-    "fixation_type": "blocks.fixation_type",
-    "specimen_type": "blocks.specimen_type",
-    "block_preparation": "blocks.block_preparation",
-    "staining_procedure": "stains.staining_procedure",
-    "staining_compound": "stains.staining_compound",
+    "staining_procedure": OpenSearchOntologyOrValue(
+        concept_value_field="stains.staining_procedure",
+        other_value_field="stains.staining_procedure_text",
+    ),
+    "staining_compound": OpenSearchOntologyOrValue(
+        concept_value_field="stains.staining_compound",
+        other_value_field="stains.staining_compound_text",
+    ),
 }
 
 # TODO (improve): paginate to avoid limits
@@ -70,22 +77,26 @@ def get_term(field_id: str) -> BeaconFilteringTerm:
 def build_opensearch_query(
     term: BeaconFilteringTerm, value: str | list[str]
 ) -> dict[str, Any]:
-    field_ids = BP_OPENSEARCH_FIELD[term.id]
-    if isinstance(field_ids, str):
-        field_ids = [field_ids]
+    field = BP_OPENSEARCH_FIELD[term.id]
+    if isinstance(field, OpenSearchOntologyOrValue):
+        field_paths = [field.concept_value_field, field.other_value_field]
+    else:
+        field_paths = [field]
 
     values = value if isinstance(value, list) else [value]
 
     if term.type in ("controlledValue", "ontology", "ontologyOrValue"):
         # Use a single terms query per field for efficient multi-value exact matching.
-        return or_queries([build_terms_query(f, values) for f in field_ids])
+        return or_queries([build_terms_query(f, values) for f in field_paths])
 
     if term.type == "text":
-        return or_queries([build_match_query(f, v) for f in field_ids for v in values])
+        return or_queries(
+            [build_match_query(f, v) for f in field_paths for v in values]
+        )
 
     if term.type == "iso8601Range":
         return or_queries(
-            [build_iso8601_range_query(f, v) for f in field_ids for v in values]
+            [build_iso8601_range_query(f, v) for f in field_paths for v in values]
         )
 
     raise ValueError(f"Unsupported term type {term.type}")
@@ -109,13 +120,14 @@ class BigpictureBeaconService(ABC):
         pass
 
     @abstractmethod
-    async def get_indexed_values(self, field_id: str) -> set[str] | None:
-        """Return indexed values or None if unsupported."""
-        pass
+    async def get_indexed_field_value_counts(
+        self, field_id: str
+    ) -> list[dict[str, int]]:
+        """Return value counts for each OpenSearch field mapped to field_id.
 
-    @abstractmethod
-    async def get_indexed_value_counts(self, field_id: str) -> dict[str, int] | None:
-        """Return indexed values with counts, or None if unsupported."""
+        Returns one dict per field in the order defined by BP_OPENSEARCH_FIELD.
+        Raises ValueError if field_id is not in BP_OPENSEARCH_FIELD.
+        """
         pass
 
 
@@ -158,12 +170,15 @@ class MockBigpictureBeaconService(BigpictureBeaconService):
         return True
 
     @override
-    async def get_indexed_values(self, field_id: str) -> set[str] | None:
-        return None
-
-    @override
-    async def get_indexed_value_counts(self, field_id: str) -> dict[str, int] | None:
-        return None
+    async def get_indexed_field_value_counts(
+        self, field_id: str
+    ) -> list[dict[str, int]]:
+        field = BP_OPENSEARCH_FIELD.get(field_id)
+        if field is None:
+            raise ValueError(f"Unknown field: '{field_id}'")
+        if isinstance(field, OpenSearchOntologyOrValue):
+            return [{}, {}]
+        return [{}]
 
 
 class OpenSearchBigpictureBeaconService(BigpictureBeaconService):
@@ -195,16 +210,19 @@ class OpenSearchBigpictureBeaconService(BigpictureBeaconService):
             return False
 
     @override
-    async def get_indexed_values(self, field_id: str) -> set[str] | None:
-        counts = await self.get_indexed_value_counts(field_id)
-        return set(counts.keys()) if counts is not None else None
-
-    @override
-    async def get_indexed_value_counts(self, field_id: str) -> dict[str, int] | None:
-        field_path = BP_OPENSEARCH_FIELD_PATHS.get(field_id)
-        if field_path is None:
-            return None
-        return await fetch_indexed_keywords(self.index_name, field_path)
+    async def get_indexed_field_value_counts(
+        self, field_id: str
+    ) -> list[dict[str, int]]:
+        field = BP_OPENSEARCH_FIELD.get(field_id)
+        if field is None:
+            raise ValueError(f"Unknown field: '{field_id}'")
+        if isinstance(field, OpenSearchOntologyOrValue):
+            concept_field_counts, other_field_counts = await asyncio.gather(
+                fetch_indexed_keywords(self.index_name, field.concept_value_field),
+                fetch_indexed_keywords(self.index_name, field.other_value_field),
+            )
+            return [concept_field_counts, other_field_counts]
+        return [await fetch_indexed_keywords(self.index_name, field)]
 
     @staticmethod
     def get_query(

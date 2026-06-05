@@ -3,11 +3,9 @@
 # TODO(improve): use Snowstorm service
 # TODO(improve): check that SNOMED CT codes assigned to the fields are correct
 
-import socket
 from typing import Any
 
 import pytest
-import pytest_asyncio
 from fastapi.testclient import TestClient
 
 from search_api.api.beacon.models import (
@@ -219,14 +217,18 @@ def client() -> TestClient:
     return TestClient(app)
 
 
-def get_filters(*field_id_value_pairs: tuple[str, str | list[str]]) -> list[BeaconQueryFilter]:
+def get_filters(
+    *field_id_value_pairs: tuple[str, str | list[str]],
+) -> list[BeaconQueryFilter]:
     return [
         BeaconQueryFilter(id=field_id, value=value, includeDescendantTerms=False)
         for field_id, value in field_id_value_pairs
     ]
 
 
-def query(client: TestClient, *field_id_value_pairs: tuple[str, str | list[str]]) -> BeaconResultSetsResponse:
+def query(
+    client: TestClient, *field_id_value_pairs: tuple[str, str | list[str]]
+) -> BeaconResultSetsResponse:
     request = BeaconQueryRequest(
         query=BeaconQuery(
             filters=get_filters(*field_id_value_pairs),
@@ -242,7 +244,9 @@ def get_dataset_ids(response: BeaconResultSetsResponse) -> set[str]:
     return {rs.id for rs in response.response.resultSet}
 
 
-def get_matching_image_count(response: BeaconResultSetsResponse, dataset_id: str) -> int:
+def get_matching_image_count(
+    response: BeaconResultSetsResponse, dataset_id: str
+) -> int:
     for rs in response.response.resultSet:
         if rs.id == dataset_id:
             return rs.results[0].matchingImageCount
@@ -259,6 +263,7 @@ async def test_query_no_filters_returns_all_datasets(bp_opensearch_index, client
 
 # Species
 #
+
 
 @pytest.mark.asyncio
 async def test_query_filter_human_species(bp_opensearch_index, client):
@@ -477,6 +482,7 @@ async def test_query_combined_no_match(bp_opensearch_index, client):
 
 # Response granularity
 #
+
 
 @pytest.mark.asyncio
 async def test_query_boolean_granularity(bp_opensearch_index, client):

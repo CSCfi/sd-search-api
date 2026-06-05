@@ -5,7 +5,7 @@ import asyncio
 import httpx
 from aiocache import cached  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from search_api.conf import common_config
 
@@ -23,10 +23,6 @@ class SnomedConcept(BaseModel):
     preferred_term: str
     matched_term: str | None = None
     synonyms: list[str] = Field(default_factory=list, exclude=True)
-
-
-class IndexedConceptIdProvider(Protocol):
-    async def get_indexed_values(self, field_id: str) -> set[str] | None: ...
 
 
 def _client() -> httpx.AsyncClient:
@@ -202,8 +198,8 @@ async def _fetch_all_concepts(ecl: str, branch: str) -> list[SnomedConcept]:
 class SnomedService:
     """SNOMED CT concept lookup service."""
 
-    def __init__(self, index_provider: IndexedConceptIdProvider | None = None) -> None:
-        self._index_provider = index_provider
+    def __init__(self) -> None:
+        pass
 
     async def find_concept(
         self,
@@ -268,14 +264,14 @@ class SnomedService:
 
     @staticmethod
     async def get_preferred_terms(
-        concept_ids: set[str],
+        concept_ids: set[str] | None,
         ecl: str,
         branch: str = "MAIN",
     ) -> dict[str, str]:
-        """Return a mapping of concept IDs to preferred term for the given concept IDs.
+        """Return a mapping of concept IDs to preferred term.
 
         Args:
-            concept_ids: Concept IDs to map.
+            concept_ids: Concept IDs to map. When None, all concepts in the hierarchy are returned.
             ecl: ECL expression defining the concept hierarchy.
             branch: SNOMED CT branch path to search. Defaults to ``"MAIN"``
 
@@ -283,6 +279,8 @@ class SnomedService:
             Mapping of concept IDs to preferred terms. Concept IDs not found are excluded.
         """
         all_concepts = await _fetch_all_concepts(ecl, branch)
+        if concept_ids is None:
+            return {c.concept_id: c.preferred_term for c in all_concepts}
         return {
             c.concept_id: c.preferred_term
             for c in all_concepts
@@ -292,47 +290,32 @@ class SnomedService:
     async def suggest_concepts(
         self,
         term: str,
-        field_id: str,
         ecl: str,
         branch: str = "MAIN",
         limit: int = 10,
-        prefix_match: bool = True,
+        indexed_concept_ids: set[str] | None = None,
     ) -> list[SnomedConcept]:
         """Return autocomplete suggestions for term within a concept hierarchy.
 
         Filters an in-memory cached list of all concepts limited by the ecl expression.
-        When an index provider is configured, results are restricted to concept IDs
-        present in the index.
 
         Args:
             term: Partial text to match against concept preferred terms and synonyms.
-            field_id: Filtering term field ID, used to look up indexed concept IDs.
             ecl: ECL expression defining the concept hierarchy to search within.
             branch: SNOMED CT branch path to search. Defaults to ``"MAIN"``
             limit: Maximum number of suggestions to return.
-            prefix_match: When True, matches concepts where any word in the preferred
-                          term or a synonym starts with term. When False, matches concepts
-                          where term appears anywhere in the preferred term or a synonym.
+            indexed_concept_ids: When provided, restricts results to these concept IDs.
 
         Returns:
             Matching concepts. matched_term is set to the synonym that caused the
             match when the preferred term did not match. None when the preferred
             term matched.
         """
-        indexed_concept_ids: set[str] | None = None
-        if self._index_provider is not None:
-            indexed_concept_ids = await self._index_provider.get_indexed_values(
-                field_id
-            )
-
         all_concepts = await _fetch_all_concepts(ecl, branch)
         term_lower = term.lower()
 
         def _matches(text: str) -> bool:
-            text_lower = text.lower()
-            if prefix_match:
-                return any(word.startswith(term_lower) for word in text_lower.split())
-            return term_lower in text_lower
+            return any(word.startswith(term_lower) for word in text.lower().split())
 
         results: list[SnomedConcept] = []
         for concept in all_concepts:

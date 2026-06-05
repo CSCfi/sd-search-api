@@ -14,7 +14,7 @@ def test_build_opensearch_query_controlled_value_single():
     result = build_opensearch_query(term, "Male")
     assert result == {
         "bool": {
-            "should": [{"terms": {"sex": ["Male"]}}],
+            "should": [{"terms": {"blocks.sex": ["Male"]}}],
             "minimum_should_match": 1,
         }
     }
@@ -26,7 +26,7 @@ def test_build_opensearch_query_controlled_value_multi():
     result = build_opensearch_query(term, ["Male", "Female"])
     assert result == {
         "bool": {
-            "should": [{"terms": {"sex": ["Male", "Female"]}}],
+            "should": [{"terms": {"blocks.sex": ["Male", "Female"]}}],
             "minimum_should_match": 1,
         }
     }
@@ -38,7 +38,7 @@ def test_build_opensearch_query_ontology_single():
     result = build_opensearch_query(term, "410607006")
     assert result == {
         "bool": {
-            "should": [{"terms": {"species": ["410607006"]}}],
+            "should": [{"terms": {"blocks.species": ["410607006"]}}],
             "minimum_should_match": 1,
         }
     }
@@ -50,7 +50,7 @@ def test_build_opensearch_query_ontology_multi():
     result = build_opensearch_query(term, ["123456789", "987654321"])
     assert result == {
         "bool": {
-            "should": [{"terms": {"species": ["123456789", "987654321"]}}],
+            "should": [{"terms": {"blocks.species": ["123456789", "987654321"]}}],
             "minimum_should_match": 1,
         }
     }
@@ -58,13 +58,15 @@ def test_build_opensearch_query_ontology_multi():
 
 def test_build_opensearch_query_ontology_or_value_multi_field():
     """ontologyOrValue with multiple OpenSearch fields produces one terms query per field."""
-    term = get_term("fixation_type")  # maps to ["fixation_type", "fixation_type_text"]
+    term = get_term(
+        "fixation_type"
+    )  # maps to blocks.fixation_type + blocks.fixation_type_text
     result = build_opensearch_query(term, ["123", "456"])
     assert result == {
         "bool": {
             "should": [
-                {"terms": {"fixation_type": ["123", "456"]}},
-                {"terms": {"fixation_type_text": ["123", "456"]}},
+                {"terms": {"blocks.fixation_type": ["123", "456"]}},
+                {"terms": {"blocks.fixation_type_text": ["123", "456"]}},
             ],
             "minimum_should_match": 1,
         }
@@ -114,7 +116,9 @@ def test_build_opensearch_query_iso8601range_single():
     result = build_opensearch_query(term, "P10Y-P20Y")
     assert result == {
         "bool": {
-            "should": [{"range": {"age_at_extraction": {"gte": 3650, "lte": 7300}}}],
+            "should": [
+                {"range": {"blocks.age_at_extraction": {"gte": 3650, "lte": 7300}}}
+            ],
             "minimum_should_match": 1,
         }
     }
@@ -127,8 +131,8 @@ def test_build_opensearch_query_iso8601range_multi():
     assert result == {
         "bool": {
             "should": [
-                {"range": {"age_at_extraction": {"gte": 3650, "lte": 7300}}},
-                {"range": {"age_at_extraction": {"gte": 10950, "lte": 14600}}},
+                {"range": {"blocks.age_at_extraction": {"gte": 3650, "lte": 7300}}},
+                {"range": {"blocks.age_at_extraction": {"gte": 10950, "lte": 14600}}},
             ],
             "minimum_should_match": 1,
         }

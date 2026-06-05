@@ -1,3 +1,6 @@
+import pytest
+from pydantic import ValidationError
+
 from search_api.api.beacon.models import (
     BeaconFilteringTerm,
     BeaconFilteringOntology,
@@ -24,7 +27,8 @@ def test_snomed_ecl():
     assert term.snomed_ecl == "<< 410607006"
     term = filtering_term(["311731000", "433469005", "61088005"])
     assert term.snomed_ecl == "311731000 OR 433469005 OR 61088005"
-    term = filtering_term(None)
-    assert term.snomed_ecl is None
-    term = filtering_term([])
-    assert term.snomed_ecl is None
+
+
+def test_snomed_ecl_requires_ontology_concept():
+    with pytest.raises(ValidationError):
+        filtering_term(None)

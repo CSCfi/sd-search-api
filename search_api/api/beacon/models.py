@@ -193,20 +193,25 @@ class BeaconFilteringTerm(BaseModel):
     controlledValues: list[str] | None = None
 
     @property
-    def snomed_ecl(self) -> str | None:
+    def snomed_ecl(self) -> str:
         """Build a SNOMED CT ECL expression from ontology concepts."""
-        if self.ontologyConcept is None:
-            return None
         if isinstance(self.ontologyConcept, str):
             return f"<< {self.ontologyConcept}"
-        return " OR ".join(self.ontologyConcept) if self.ontologyConcept else None
+        if self.ontologyConcept:
+            return " OR ".join(self.ontologyConcept)
+        raise ValueError(f"No ontologyConcept configured for field '{self.id}'")
 
     @model_validator(mode="after")
     def validate_filtering_term(self):
-        if self.type in {"ontology", "ontologyOrValue"} and self.ontology is None:
-            raise ValueError(
-                "ontology must be provided when type is 'ontology' or 'ontologyOrValue'"
-            )
+        if self.type in {"ontology", "ontologyOrValue"}:
+            if self.ontology is None:
+                raise ValueError(
+                    "ontology must be provided when type is 'ontology' or 'ontologyOrValue'"
+                )
+            if not self.ontologyConcept:
+                raise ValueError(
+                    "ontologyConcept must be provided when type is 'ontology' or 'ontologyOrValue'"
+                )
 
         if self.type == "controlledValue" and self.controlledValues is None:
             raise ValueError(

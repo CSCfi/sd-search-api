@@ -11,20 +11,20 @@ from opensearchpy import helpers
 from search_api.services.search import bp_search
 
 _BP_INDEX_PATH = (
-        Path(__file__).resolve().parents[2]
-        / "search_api"
-        / "opensearch"
-        / "bigpicture"
-        / "bp-image-index.json"
+    Path(__file__).resolve().parents[2]
+    / "search_api"
+    / "opensearch"
+    / "bigpicture"
+    / "bp-image-index.json"
 )
 
 
 @asynccontextmanager
 async def create_opensearch_index(
-        index_name: str,
-        index: Path,
-        docs: list[dict[str, Any]],
-        id_field: str,
+    index_name: str,
+    index: Path,
+    docs: list[dict[str, Any]],
+    id_field: str,
 ):
     """Create and load an OpenSearch index (delete, create, load docs, yield, delete).
 
@@ -38,11 +38,7 @@ async def create_opensearch_index(
         await bp_search.indices.delete(index=index_name)
     await bp_search.indices.create(index=index_name, body=json.loads(index.read_text()))
     actions = [
-        {
-            "_index": index_name,
-            "_id": doc[id_field],
-            "_source": doc
-        } for doc in docs
+        {"_index": index_name, "_id": doc[id_field], "_source": doc} for doc in docs
     ]
     await helpers.async_bulk(bp_search, actions)
     await bp_search.indices.refresh(index=index_name)
@@ -68,11 +64,14 @@ def bp_opensearch_index_name() -> str:
 
 @pytest_asyncio.fixture(scope="module")
 async def bp_opensearch_index(
-        bp_opensearch_docs: list[dict[str, Any]],
-        bp_opensearch_index_name: str,
+    bp_opensearch_docs: list[dict[str, Any]],
+    bp_opensearch_index_name: str,
 ):
     """Create a Bigpicture test index (create, load docs, yield, delete)."""
     async with create_opensearch_index(
-            bp_opensearch_index_name, index=_BP_INDEX_PATH, docs=bp_opensearch_docs, id_field="image_id"
+        bp_opensearch_index_name,
+        index=_BP_INDEX_PATH,
+        docs=bp_opensearch_docs,
+        id_field="image_id",
     ):
         yield

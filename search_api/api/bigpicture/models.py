@@ -177,6 +177,11 @@ BP_INFO_RESPONSE = BeaconInfoResponse(
 )
 
 
+class FieldValueSuggestion(BaseModel):
+    term: str
+    concept_id: str | None = None
+
+
 class FieldValueCount(BaseModel):
     value: str
     count: int

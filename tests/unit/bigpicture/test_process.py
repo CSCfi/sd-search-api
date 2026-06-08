@@ -111,7 +111,6 @@ def test_extract_fields():
                     ),
                     staining_procedure_text="test7",
                     staining_target="pan Cytokeratin",
-                    staining_substance_text="antibody",
                 )
             }
 

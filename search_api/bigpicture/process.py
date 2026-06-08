@@ -351,16 +351,21 @@ def _extract_staining_fields(xml: ElementTree) -> list[BigpictureStainingFields]
     fields = []
 
     for stain_xml in xml.xpath("STAIN"):
-        staining_target_text = None
-        staining_target = _extract_code_attribute_value(
-            stain_xml, "staining_target", is_attributes=False
+        staining_method = _extract_string_attribute_value(
+            stain_xml, "staining_method", is_attributes=False
         )
-        if staining_target:
-            staining_target_text = staining_target.meaning
-        else:
-            staining_target_text = _extract_string_attribute_value(
+        is_chemical_stain = staining_method == "chemical"
+        staining_target_text = None
+        if not is_chemical_stain:
+            staining_target = _extract_code_attribute_value(
                 stain_xml, "staining_target", is_attributes=False
             )
+            if staining_target:
+                staining_target_text = staining_target.meaning
+            else:
+                staining_target_text = _extract_string_attribute_value(
+                    stain_xml, "staining_target", is_attributes=False
+                )
 
         fields.append(
             BigpictureStainingFields(
@@ -372,10 +377,14 @@ def _extract_staining_fields(xml: ElementTree) -> list[BigpictureStainingFields]
                 ),
                 staining_substance=_extract_code_attribute_value(
                     stain_xml, "staining_compound", is_attributes=False
-                ),
+                )
+                if is_chemical_stain
+                else None,
                 staining_substance_text=_extract_string_attribute_value(
                     stain_xml, "staining_compound", is_attributes=False
-                ),
+                )
+                if is_chemical_stain
+                else None,
                 staining_target=staining_target_text,
             )
         )

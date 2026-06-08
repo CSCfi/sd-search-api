@@ -1,6 +1,5 @@
-# OpenSearch service.
-import asyncio
-import atexit
+"""Generic OpenSearch query builders and indexing helpers."""
+
 import logging
 from datetime import timedelta
 from typing import Any
@@ -14,33 +13,18 @@ from search_api.conf import common_config as _common_config
 
 logging.basicConfig(level=logging.INFO)
 
+_FETCH_INDEXED_KEYWORDS_TTL = 60 * 60 * 4  # 4 hours
 
-def _search(host: str, port: int, user: str, password: str) -> AsyncOpenSearch:
+
+def create_search() -> AsyncOpenSearch:
+    """Create an OpenSearch client from the application configuration."""
+    cfg = _common_config()
     return AsyncOpenSearch(
-        hosts=[{"host": host, "port": port}],
-        http_auth=(user, password),
+        hosts=[{"host": cfg.OPENSEARCH_HOST, "port": cfg.OPENSEARCH_PORT}],
+        http_auth=(cfg.OPENSEARCH_USER, cfg.OPENSEARCH_PASSWORD),
         use_ssl=True,
         verify_certs=False,
     )
-
-
-_cfg = _common_config()
-bp_search = _search(
-    _cfg.OPENSEARCH_HOST,
-    _cfg.OPENSEARCH_PORT,
-    _cfg.OPENSEARCH_USER,
-    _cfg.OPENSEARCH_PASSWORD,
-)
-
-
-def _close_bp_search():
-    try:
-        asyncio.run(bp_search.close())
-    except Exception:
-        pass
-
-
-atexit.register(_close_bp_search)
 
 
 async def index_document(
@@ -49,15 +33,13 @@ async def index_document(
     id: str,
     doc: dict[str, Any],
 ) -> None:
-    """
-    Index a document in OpenSearch.
+    """Index a document in OpenSearch.
 
     :param search: The OpenSearch client.
     :param index: The OpenSearch index name.
     :param id: Document id.
     :param doc: The OpenSearch document to index.
     """
-
     await search.index(
         index=index,
         id=id,
@@ -66,30 +48,19 @@ async def index_document(
     )
 
 
-async def bp_index_document(doc: dict[str, Any]) -> None:
-    """
-    Index BigPicture document in OpenSearch.
-
-    :param doc: the OpenSearch document to index.
-    """
-    await index_document(bp_search, "bp-image-index", doc["image_id"], doc)
-
-
 async def index_documents(
     search: AsyncOpenSearch,
     index: str,
     ids: list[str],
     docs: list[dict[str, Any]],
 ) -> None:
-    """
-    Bulk index documents in OpenSearch.
+    """Bulk index documents in OpenSearch.
 
     :param search: The OpenSearch client.
     :param index: The OpenSearch index name.
     :param ids: Document ids.
     :param docs: The OpenSearch documents to index.
     """
-
     if len(ids) != len(docs):
         raise ValueError("Different number of ids and docs")
 
@@ -110,30 +81,17 @@ async def index_documents(
         logging.error(f"{failed} documents failed to index")
 
 
-async def bp_index_documents(
-    ids: list[str],
-    docs: list[dict[str, Any]],
-) -> None:
-    """
-    Bulk index BigPicture documents in OpenSearch.
-
-    :param ids: Document ids.
-    :param docs: The OpenSearch documents to index.
-    """
-    await index_documents(bp_search, "bp-image-index", ids, docs)
-
-
-_FETCH_INDEXED_KEYWORDS = 60 * 60 * 4  # 4 hours
-
-
-@cached(ttl=_FETCH_INDEXED_KEYWORDS)
-async def fetch_indexed_keywords(index_name: str, field_name: str) -> dict[str, int]:
+@cached(ttl=_FETCH_INDEXED_KEYWORDS_TTL)
+async def fetch_indexed_keywords(
+    search: AsyncOpenSearch, index_name: str, field_name: str
+) -> dict[str, int]:
     """Return all keyword values and their document counts for a keyword field.
 
     For nested fields (e.g. ``"blocks.species"``) a nested aggregation is used
     automatically.
 
     Args:
+        search: OpenSearch client.
         index_name: OpenSearch index to query.
         field_name: Full dotted field path.
 
@@ -154,7 +112,7 @@ async def fetch_indexed_keywords(index_name: str, field_name: str) -> dict[str, 
                 }
             },
         }
-        resp = await bp_search.search(index=index_name, body=body)
+        resp = await search.search(index=index_name, body=body)
         buckets = resp["aggregations"]["nested_values"]["values"]["buckets"]
     else:
         body = {
@@ -163,7 +121,7 @@ async def fetch_indexed_keywords(index_name: str, field_name: str) -> dict[str, 
                 "values": {"terms": {"field": field_name, "size": 10000}},
             },
         }
-        resp = await bp_search.search(index=index_name, body=body)
+        resp = await search.search(index=index_name, body=body)
         buckets = resp["aggregations"]["values"]["buckets"]
 
     return {bucket["key"]: bucket["doc_count"] for bucket in buckets}

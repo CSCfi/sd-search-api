@@ -15,7 +15,14 @@ from search_api.bigpicture.models import (
 from search_api.database.repository import get_cursor
 import isodate  # type: ignore[import-untyped]
 
-from search_api.services.search import bp_index_documents, iso8601_duration_to_days
+from search_api.api.bigpicture.models import BP_OPENSEARCH_INDEX
+from search_api.api.opensearch.services.search import (
+    create_search,
+    index_documents,
+    iso8601_duration_to_days,
+)
+
+_bp_search = create_search()
 
 logging.basicConfig(level=logging.INFO)
 
@@ -361,7 +368,9 @@ async def sync_fields(cur: AsyncCursor, image_id: str | None = None) -> None:
         async def flush_batch():
             # Flush the OpenSearch batch.
             logging.info(f"Syncing {len(docs_batch)} images to OpenSearch.")
-            await bp_index_documents(ids_batch, docs_batch)
+            await index_documents(
+                _bp_search, BP_OPENSEARCH_INDEX, ids_batch, docs_batch
+            )
 
             # Update OpenSearch state in database.
             logging.info("Updating sync status.")

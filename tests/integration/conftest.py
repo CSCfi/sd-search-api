@@ -8,7 +8,9 @@ import pytest
 import pytest_asyncio
 from opensearchpy import helpers
 
-from search_api.services.search import bp_search
+from search_api.api.opensearch.services.search import create_search
+
+bp_search = create_search()
 
 _BP_INDEX_PATH = (
     Path(__file__).resolve().parents[2]

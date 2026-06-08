@@ -16,7 +16,6 @@ from search_api.api.beacon.models import (
 )
 from search_api.api.bigpicture.routes import get_beacon_service, get_snomed_service
 from search_api.api.bigpicture.services.beacon import OpenSearchBigpictureBeaconService
-from search_api.conf import common_config
 from search_api.main import app
 from search_api.services.snomed import SnomedService
 
@@ -191,17 +190,13 @@ def bp_opensearch_docs() -> list[dict[str, Any]]:
 @pytest.fixture(scope="module", autouse=True)
 def _override_dependencies(bp_opensearch_index_name: str):
     """Point get_beacon_service at the UUID test index and swap out SNOMED."""
-    cfg = common_config()
 
     def _beacon_service() -> OpenSearchBigpictureBeaconService:
-        _service = OpenSearchBigpictureBeaconService(
-            cfg.OPENSEARCH_HOST,
-            cfg.OPENSEARCH_PORT,
-            cfg.OPENSEARCH_USER,
-            cfg.OPENSEARCH_PASSWORD,
+        from search_api.api.opensearch.services.search import create_search
+
+        return OpenSearchBigpictureBeaconService(
+            create_search(), bp_opensearch_index_name
         )
-        _service.index_name = bp_opensearch_index_name
-        return _service
 
     saved = dict(app.dependency_overrides)
     app.dependency_overrides.clear()

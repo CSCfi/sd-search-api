@@ -4,7 +4,7 @@ from typing import Any, override
 
 from opensearchpy import AsyncOpenSearch
 
-from search_api.services.search import (
+from search_api.api.opensearch.services.search import (
     fetch_indexed_keywords,
     build_match_query,
     build_terms_query,
@@ -19,6 +19,10 @@ from search_api.api.beacon.models import (
     BeaconResultSet,
     BeaconResultSetResult,
 )
+from search_api.api.opensearch.models import (
+    OpenSearchOntologyOrValue,
+    OpenSearchBeaconFilteringTerm,
+)
 from search_api.api.bigpicture.models import (
     BP_FILTERING_TERMS,
     BP_DATASET_SCOPE,
@@ -26,11 +30,8 @@ from search_api.api.bigpicture.models import (
     BP_SPECIMEN_SCOPE,
     BP_BLOCK_SCOPE,
     BP_STAINING_SCOPE,
-    OpenSearchOntologyOrValue,
-    OpenSearchBeaconFilteringTerm,
 )
-
-BP_OPENSEARCH_INDEX = "bp-image-index"
+from search_api.api.bigpicture.models import BP_OPENSEARCH_INDEX
 
 # TODO (improve): paginate to avoid limits
 DEFAULT_LIMIT = 10000
@@ -157,20 +158,9 @@ class OpenSearchBigpictureBeaconService(BigpictureBeaconService):
     OpenSearch Bigpicture Beacon search.
     """
 
-    def __init__(self, host: str, port: int, user: str, password: str):
-        self.client = self._create_client(host, port, user, password)
-        self.index_name = BP_OPENSEARCH_INDEX
-
-    @staticmethod
-    def _create_client(
-        host: str, port: int, user: str, password: str
-    ) -> AsyncOpenSearch:
-        return AsyncOpenSearch(
-            hosts=[{"host": host, "port": port}],
-            http_auth=(user, password),
-            use_ssl=True,
-            verify_certs=False,
-        )
+    def __init__(self, client: AsyncOpenSearch, index_name: str = BP_OPENSEARCH_INDEX):
+        self.client = client
+        self.index_name = index_name
 
     @override
     async def is_healthy(self) -> bool:
@@ -187,11 +177,15 @@ class OpenSearchBigpictureBeaconService(BigpictureBeaconService):
         field = get_term(field_id).opensearch_field
         if isinstance(field, OpenSearchOntologyOrValue):
             concept_field_counts, other_field_counts = await asyncio.gather(
-                fetch_indexed_keywords(self.index_name, field.concept_value_field),
-                fetch_indexed_keywords(self.index_name, field.other_value_field),
+                fetch_indexed_keywords(
+                    self.client, self.index_name, field.concept_value_field
+                ),
+                fetch_indexed_keywords(
+                    self.client, self.index_name, field.other_value_field
+                ),
             )
             return [concept_field_counts, other_field_counts]
-        return [await fetch_indexed_keywords(self.index_name, field)]
+        return [await fetch_indexed_keywords(self.client, self.index_name, field)]
 
     @staticmethod
     def get_query(

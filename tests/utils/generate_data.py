@@ -9,7 +9,7 @@ import string
 import time
 from pathlib import Path
 
-from search_api.api.bigpicture.services.beacon import BP_OPENSEARCH_INDEX
+from search_api.api.bigpicture.models import BP_OPENSEARCH_INDEX
 from search_api.bigpicture.models import (
     BigpictureFields,
     BigpictureCodeAttributeValue,
@@ -18,7 +18,9 @@ from search_api.bigpicture.models import (
 )
 from search_api.bigpicture.service import load_fields, sync_fields, sync_count
 from search_api.database.repository import get_connection
-from search_api.services.search import bp_search
+from search_api.api.opensearch.services.search import create_search
+
+bp_search = create_search()
 
 _INDEX_MAPPING_PATH = (
     Path(__file__).resolve().parent.parent.parent

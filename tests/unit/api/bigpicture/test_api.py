@@ -15,8 +15,8 @@ from search_api.api.bigpicture.models import (
     BP_FILTERING_TERMS,
     BP_INFO_RESPONSE,
     BP_FILTERING_TERMS_RESPONSE,
-    FieldValueSuggestion,
 )
+from search_api.api.models import FieldValueSuggestion
 from search_api.main import app
 from search_api.api.bigpicture.routes import get_beacon_service, get_snomed_service
 from search_api.api.bigpicture.services.beacon import (

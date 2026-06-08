@@ -1,8 +1,5 @@
-from pydantic import BaseModel, Field, model_validator
-
 from search_api.api.beacon.models import (
     SNOMED_ONTOLOGY_ID,
-    BeaconFilteringTerm,
     BeaconFilteringOntology,
     BeaconFilteringTermsResponse,
     BeaconFilteringTerms,
@@ -11,6 +8,12 @@ from search_api.api.beacon.models import (
     BeaconSchema,
     BeaconInfo,
 )
+from search_api.api.opensearch.models import (
+    OpenSearchOntologyOrValue,
+    OpenSearchBeaconFilteringTerm,
+)
+
+BP_OPENSEARCH_INDEX = "bp-image-index"
 
 BP_BEACON_ID = "fi.csc.bigpicture.beacon.v2"
 BP_BEACON_NAME = "fi.csc.bigpicture.beacon.v2"
@@ -32,41 +35,6 @@ BP_BIOLOGICAL_BEING_SCOPE = [BP_BIOLOGICAL_BEING_SCHEMA]
 BP_SPECIMEN_SCOPE = [BP_SPECIMEN_SCHEMA]
 BP_BLOCK_SCOPE = [BP_BLOCK_SCHEMA]
 BP_STAINING_SCOPE = [BP_STAINING_SCHEMA]
-
-
-class OpenSearchOntologyOrValue(BaseModel):
-    """OpenSearch field mapping for ontologyOrValue filtering terms.
-
-    Concept IDs are routed to ``concept_value_field``
-    while other values are routed to ``other_value_field``.
-    """
-
-    concept_value_field: str
-    other_value_field: str
-
-
-class OpenSearchBeaconFilteringTerm(BeaconFilteringTerm):
-    """Beacon filtering term with an associated OpenSearch field mapping.
-
-    ``opensearch_field`` is excluded from API serialisation so it never
-    appears in ``/filtering_terms`` responses.
-    """
-
-    opensearch_field: str | OpenSearchOntologyOrValue = Field(
-        exclude=True,
-        description="The OpenSearch field(s) to query for this term.",
-    )
-
-    @model_validator(mode="after")
-    def validate_opensearch_field(self) -> "OpenSearchBeaconFilteringTerm":
-        if self.type == "ontologyOrValue" and not isinstance(
-            self.opensearch_field, OpenSearchOntologyOrValue
-        ):
-            raise ValueError(
-                f"Field '{self.id}' has type 'ontologyOrValue' so opensearch_field "
-                f"must be OpenSearchOntologyOrValue."
-            )
-        return self
 
 
 BP_DATASET_TITLE_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
@@ -236,18 +204,3 @@ BP_INFO_RESPONSE = BeaconInfoResponse(
         environment="dev",
     ),
 )
-
-
-class FieldValueSuggestion(BaseModel):
-    term: str
-    concept_id: str | None = None
-
-
-class FieldValueCount(BaseModel):
-    value: str
-    count: int
-    concept_id: str | None = None
-
-
-class AIQueryRequest(BaseModel):
-    query: str

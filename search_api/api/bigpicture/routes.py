@@ -1,6 +1,6 @@
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 
 from .models import (
     BP_BEACON_ID,
@@ -8,10 +8,8 @@ from .models import (
     BP_FILTERING_TERMS_RESPONSE,
     BP_INFO_RESPONSE,
     BP_ONTOLOGY_FILTERING_TERMS,
-    AIQueryRequest,
-    FieldValueCount,
-    FieldValueSuggestion,
 )
+from search_api.api.models import AIQueryRequest, FieldValueCount, FieldValueSuggestion
 from ..beacon.models import (
     BeaconQueryRequest,
     BeaconBooleanResponse,
@@ -25,20 +23,13 @@ from ..beacon.models import (
 )
 from .services.beacon import BigpictureBeaconService, OpenSearchBigpictureBeaconService
 from .services.ai import AISearchResult, ai_search
-from search_api.conf import common_config
 from search_api.services.snomed import SnomedService
 
 router = APIRouter()
 
 
-def get_beacon_service() -> BigpictureBeaconService:
-    cfg = common_config()
-    return OpenSearchBigpictureBeaconService(
-        cfg.OPENSEARCH_HOST,
-        cfg.OPENSEARCH_PORT,
-        cfg.OPENSEARCH_USER,
-        cfg.OPENSEARCH_PASSWORD,
-    )
+def get_beacon_service(request: Request) -> BigpictureBeaconService:
+    return OpenSearchBigpictureBeaconService(request.app.state.bp_search)
 
 
 def get_snomed_service() -> SnomedService:

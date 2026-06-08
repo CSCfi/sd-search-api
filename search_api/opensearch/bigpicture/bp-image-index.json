@@ -73,10 +73,10 @@
           "staining_procedure_text": {
             "type": "keyword"
           },
-          "staining_compound": {
+          "staining_substance": {
             "type": "keyword"
           },
-          "staining_compound_text": {
+          "staining_substance_text": {
             "type": "keyword"
           }
         }

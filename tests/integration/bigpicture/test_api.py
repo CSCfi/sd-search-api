@@ -90,8 +90,8 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
             {
                 "staining_procedure": IHC,
                 "staining_procedure_text": "Immunohistochemical staining",
-                "staining_compound": "antibody",
-                "staining_compound_text": "Antibody",
+                "staining_substance": "antibody",
+                "staining_substance_text": "Antibody",
                 "staining_target": "pan Cytokeratin",
             }
         ],
@@ -168,8 +168,8 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
             {
                 "staining_procedure": ISH,
                 "staining_procedure_text": "In situ hybridization",
-                "staining_compound": "Double-stranded DNA",
-                "staining_compound_text": "Double-stranded DNA",
+                "staining_substance": "Double-stranded DNA",
+                "staining_substance_text": "Double-stranded DNA",
             }
         ],
     },
@@ -396,13 +396,13 @@ async def test_query_filter_staining_he_and_ihc(bp_opensearch_index, client):
     assert get_matching_image_count(result, DATASET_2) == 1  # image_4 (HE)
 
 
-# Staining compound
+# Staining substance
 #
 
 
 @pytest.mark.asyncio
-async def test_query_filter_staining_compound(bp_opensearch_index, client):
-    result = query(client, ("staining_compound", "antibody"))
+async def test_query_filter_staining_substance(bp_opensearch_index, client):
+    result = query(client, ("staining_substance", "antibody"))
     assert get_dataset_ids(result) == {DATASET_1}
     assert get_matching_image_count(result, DATASET_1) == 1  # image_2
 

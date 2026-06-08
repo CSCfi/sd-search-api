@@ -370,10 +370,10 @@ def _extract_staining_fields(xml: ElementTree) -> list[BigpictureStainingFields]
                 staining_procedure_text=_extract_string_attribute_value(
                     stain_xml, "staining_procedure", is_attributes=False
                 ),
-                staining_compound=_extract_code_attribute_value(
+                staining_substance=_extract_code_attribute_value(
                     stain_xml, "staining_compound", is_attributes=False
                 ),
-                staining_compound_text=_extract_string_attribute_value(
+                staining_substance_text=_extract_string_attribute_value(
                     stain_xml, "staining_compound", is_attributes=False
                 ),
                 staining_target=staining_target_text,

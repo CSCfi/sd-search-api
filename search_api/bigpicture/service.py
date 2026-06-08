@@ -158,10 +158,10 @@ async def _load_fields(
                                     stain.staining_procedure
                                 ),
                                 "staining_procedure_text": stain.staining_procedure_text,
-                                "staining_compound": _extract_code(
-                                    stain.staining_compound
+                                "staining_substance": _extract_code(
+                                    stain.staining_substance
                                 ),
-                                "staining_compound_text": stain.staining_compound_text,
+                                "staining_substance_text": stain.staining_substance_text,
                             }.items()
                             if v is not None
                         }
@@ -261,7 +261,7 @@ async def get_fields(cur: AsyncCursor, image_id: str) -> BigpictureFields | None
             **{
                 **stain,
                 **_convert_code("staining_procedure", stain),
-                **_convert_code("staining_compound", stain),
+                **_convert_code("staining_substance", stain),
             }
         )
         for stain in (stains or [])

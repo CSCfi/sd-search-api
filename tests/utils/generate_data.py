@@ -241,8 +241,8 @@ async def generate_and_load_data(image_cnt: int, dataset_cnt: int) -> None:
                         BigpictureStainingFields(
                             staining_procedure=_generate_code_value(),
                             staining_procedure_text=f"{_generate_code_value().code}",
-                            staining_compound=_generate_code_value(),
-                            staining_compound_text=f"{_generate_code_value().code}",
+                            staining_substance=_generate_code_value(),
+                            staining_substance_text=f"{_generate_code_value().code}",
                             staining_target=f"{_generate_code_value().code}",
                         )
                     },

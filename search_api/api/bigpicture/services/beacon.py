@@ -56,9 +56,9 @@ BP_OPENSEARCH_FIELD: dict[str, str | OpenSearchOntologyOrValue] = {
         concept_value_field="stains.staining_procedure",
         other_value_field="stains.staining_procedure_text",
     ),
-    "staining_compound": OpenSearchOntologyOrValue(
-        concept_value_field="stains.staining_compound",
-        other_value_field="stains.staining_compound_text",
+    "staining_substance": OpenSearchOntologyOrValue(
+        concept_value_field="stains.staining_substance",
+        other_value_field="stains.staining_substance_text",
     ),
 }
 

@@ -131,14 +131,14 @@ BP_STAINING_PROCEDURE_FILTERING_TERM = BeaconFilteringTerm(
     label="Staining procedure",
     description="TThe name of the staining procedure that was performed to stain the slide",
 )
-BP_STAINING_COMPOUND_FILTERING_TERM = BeaconFilteringTerm(
-    id="staining_compound",
-    type="ontologyOrValue",  # TODO: support value
+BP_STAINING_SUBSTANCE_FILTERING_TERM = BeaconFilteringTerm(
+    id="staining_substance",
+    type="ontologyOrValue",
     ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
     ontologyConcept="397165007",  # Stain
     scopes=BP_STAINING_SCOPE,
-    label="Chemical staining compound",
-    description="The chemical staining compound that binds to parts of the tissues of the slide",
+    label="Staining substance",
+    description="The staining substance that binds to parts of the tissues of the slide",
 )
 
 BP_FILTERING_TERMS = [
@@ -153,7 +153,7 @@ BP_FILTERING_TERMS = [
     BP_BLOCK_PREPARATION_FILTERING_TERM,
     BP_STAINING_TARGET_FILTERING_TERM,
     BP_STAINING_PROCEDURE_FILTERING_TERM,
-    BP_STAINING_COMPOUND_FILTERING_TERM,
+    BP_STAINING_SUBSTANCE_FILTERING_TERM,
 ]
 
 BP_META_RESPONSE = BeaconInfoMeta(

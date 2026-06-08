@@ -109,8 +109,8 @@ async def test_load_fields():
             BigpictureStainingFields(
                 staining_procedure=get_code("11"),
                 staining_procedure_text="test_procedure",
-                staining_compound=get_code("12"),
-                staining_compound_text="test_compound",
+                staining_substance=get_code("12"),
+                staining_substance_text="test_compound",
                 staining_target="test_target",
             )
         },

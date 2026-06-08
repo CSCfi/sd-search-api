@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 from search_api.api.beacon.models import (
     SNOMED_ONTOLOGY_ID,
@@ -33,21 +33,59 @@ BP_SPECIMEN_SCOPE = [BP_SPECIMEN_SCHEMA]
 BP_BLOCK_SCOPE = [BP_BLOCK_SCHEMA]
 BP_STAINING_SCOPE = [BP_STAINING_SCHEMA]
 
-BP_DATASET_TITLE_FILTERING_TERM = BeaconFilteringTerm(
+
+class OpenSearchOntologyOrValue(BaseModel):
+    """OpenSearch field mapping for ontologyOrValue filtering terms.
+
+    Concept IDs are routed to ``concept_value_field``
+    while other values are routed to ``other_value_field``.
+    """
+
+    concept_value_field: str
+    other_value_field: str
+
+
+class OpenSearchBeaconFilteringTerm(BeaconFilteringTerm):
+    """Beacon filtering term with an associated OpenSearch field mapping.
+
+    ``opensearch_field`` is excluded from API serialisation so it never
+    appears in ``/filtering_terms`` responses.
+    """
+
+    opensearch_field: str | OpenSearchOntologyOrValue = Field(
+        exclude=True,
+        description="The OpenSearch field(s) to query for this term.",
+    )
+
+    @model_validator(mode="after")
+    def validate_opensearch_field(self) -> "OpenSearchBeaconFilteringTerm":
+        if self.type == "ontologyOrValue" and not isinstance(
+            self.opensearch_field, OpenSearchOntologyOrValue
+        ):
+            raise ValueError(
+                f"Field '{self.id}' has type 'ontologyOrValue' so opensearch_field "
+                f"must be OpenSearchOntologyOrValue."
+            )
+        return self
+
+
+BP_DATASET_TITLE_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
     id="dataset_title",
     type="text",
     scopes=BP_DATASET_SCOPE,
     label="Dataset title",
     description="The title of the dataset",
+    opensearch_field="dataset_title",
 )
-BP_DATASET_DESCRIPTION_FILTERING_TERM = BeaconFilteringTerm(
+BP_DATASET_DESCRIPTION_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
     id="dataset_description",
     type="text",
     scopes=BP_DATASET_SCOPE,
     label="Dataset description",
     description="The description of the dataset",
+    opensearch_field="dataset_description",
 )
-BP_SPECIES_FILTERING_TERM = BeaconFilteringTerm(
+BP_SPECIES_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
     id="animal_species",
     type="ontology",
     ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
@@ -55,16 +93,18 @@ BP_SPECIES_FILTERING_TERM = BeaconFilteringTerm(
     scopes=BP_BIOLOGICAL_BEING_SCOPE,
     label="Biological species",
     description="Species of the biological being",
+    opensearch_field="blocks.species",
 )
-BP_SEX_FILTERING_TERM = BeaconFilteringTerm(
+BP_SEX_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
     id="sex",
     type="controlledValue",
     controlledValues=["Male", "Female", "Not-known", "Other"],
     scopes=BP_BIOLOGICAL_BEING_SCOPE,
     label="Sex",
     description="The sex of the biological being",
+    opensearch_field="blocks.sex",
 )
-BP_ANATOMICAL_SITE_FILTERING_TERM = BeaconFilteringTerm(
+BP_ANATOMICAL_SITE_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
     id="anatomical_site",
     type="ontology",
     ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
@@ -73,8 +113,9 @@ BP_ANATOMICAL_SITE_FILTERING_TERM = BeaconFilteringTerm(
     label="Anatomical site",
     description="The anatomical site from which the specimen originated, typically at the organ level. "
     "If no organ can be identified, use an equivalent anatomical region.",
+    opensearch_field="blocks.anatomical_site",
 )
-BP_FIXATION_TYPE_FILTERING_TERM = BeaconFilteringTerm(
+BP_FIXATION_TYPE_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
     id="fixation_type",
     type="ontologyOrValue",
     ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
@@ -82,8 +123,12 @@ BP_FIXATION_TYPE_FILTERING_TERM = BeaconFilteringTerm(
     scopes=BP_SPECIMEN_SCOPE,
     label="Fixation type",
     description="The type of fixation used in the process of the creation of the specimen.",
+    opensearch_field=OpenSearchOntologyOrValue(
+        concept_value_field="blocks.fixation_type",
+        other_value_field="blocks.fixation_type_text",
+    ),
 )
-BP_SPECIMEN_TYPE_FILTERING_TERM = BeaconFilteringTerm(
+BP_SPECIMEN_TYPE_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
     id="specimen_type",
     type="ontology",
     ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
@@ -91,15 +136,17 @@ BP_SPECIMEN_TYPE_FILTERING_TERM = BeaconFilteringTerm(
     scopes=BP_SPECIMEN_SCOPE,
     label="Specimen type",
     description="The type of the specimen.",
+    opensearch_field="blocks.specimen_type",
 )
-BP_AGE_AT_EXTRACTION_FILTERING_TERM = BeaconFilteringTerm(
+BP_AGE_AT_EXTRACTION_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
     id="age_at_extraction",
     type="iso8601Range",
     scopes=BP_SPECIMEN_SCOPE,
     label="Age at extraction",
     description="The age of the biological being at the time point of extraction of the specimen.",
+    opensearch_field="blocks.age_at_extraction",
 )
-BP_BLOCK_PREPARATION_FILTERING_TERM = BeaconFilteringTerm(
+BP_BLOCK_PREPARATION_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
     id="block_preparation",
     type="ontology",
     ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
@@ -114,15 +161,17 @@ BP_BLOCK_PREPARATION_FILTERING_TERM = BeaconFilteringTerm(
     scopes=BP_BLOCK_SCOPE,
     label="Block preparation",
     description="The preservation technique used.",
+    opensearch_field="blocks.block_preparation",
 )
-BP_STAINING_TARGET_FILTERING_TERM = BeaconFilteringTerm(
+BP_STAINING_TARGET_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
     id="staining_target",
     type="text",
     scopes=BP_STAINING_SCOPE,
     label="Staining target",
     description="The specific target of the stain",
+    opensearch_field="stains.staining_target",
 )
-BP_STAINING_PROCEDURE_FILTERING_TERM = BeaconFilteringTerm(
+BP_STAINING_PROCEDURE_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
     id="staining_procedure",
     type="ontologyOrValue",
     ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
@@ -130,8 +179,12 @@ BP_STAINING_PROCEDURE_FILTERING_TERM = BeaconFilteringTerm(
     scopes=BP_STAINING_SCOPE,
     label="Staining procedure",
     description="TThe name of the staining procedure that was performed to stain the slide",
+    opensearch_field=OpenSearchOntologyOrValue(
+        concept_value_field="stains.staining_procedure",
+        other_value_field="stains.staining_procedure_text",
+    ),
 )
-BP_STAINING_SUBSTANCE_FILTERING_TERM = BeaconFilteringTerm(
+BP_STAINING_SUBSTANCE_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
     id="staining_substance",
     type="ontologyOrValue",
     ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
@@ -139,21 +192,29 @@ BP_STAINING_SUBSTANCE_FILTERING_TERM = BeaconFilteringTerm(
     scopes=BP_STAINING_SCOPE,
     label="Staining substance",
     description="The staining substance that binds to parts of the tissues of the slide",
+    opensearch_field=OpenSearchOntologyOrValue(
+        concept_value_field="stains.staining_substance",
+        other_value_field="stains.staining_substance_text",
+    ),
 )
+
+BP_ONTOLOGY_FILTERING_TERMS = [
+    BP_SPECIES_FILTERING_TERM,
+    BP_ANATOMICAL_SITE_FILTERING_TERM,
+    BP_FIXATION_TYPE_FILTERING_TERM,
+    BP_SPECIMEN_TYPE_FILTERING_TERM,
+    BP_BLOCK_PREPARATION_FILTERING_TERM,
+    BP_STAINING_PROCEDURE_FILTERING_TERM,
+    BP_STAINING_SUBSTANCE_FILTERING_TERM,
+]
 
 BP_FILTERING_TERMS = [
     BP_DATASET_TITLE_FILTERING_TERM,
     BP_DATASET_DESCRIPTION_FILTERING_TERM,
-    BP_SPECIES_FILTERING_TERM,
+    *BP_ONTOLOGY_FILTERING_TERMS,
     BP_SEX_FILTERING_TERM,
-    BP_ANATOMICAL_SITE_FILTERING_TERM,
-    BP_FIXATION_TYPE_FILTERING_TERM,
-    BP_SPECIMEN_TYPE_FILTERING_TERM,
     BP_AGE_AT_EXTRACTION_FILTERING_TERM,
-    BP_BLOCK_PREPARATION_FILTERING_TERM,
     BP_STAINING_TARGET_FILTERING_TERM,
-    BP_STAINING_PROCEDURE_FILTERING_TERM,
-    BP_STAINING_SUBSTANCE_FILTERING_TERM,
 ]
 
 BP_META_RESPONSE = BeaconInfoMeta(

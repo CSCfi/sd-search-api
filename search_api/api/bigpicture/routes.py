@@ -7,6 +7,7 @@ from .models import (
     BP_FILTERING_TERMS,
     BP_FILTERING_TERMS_RESPONSE,
     BP_INFO_RESPONSE,
+    BP_ONTOLOGY_FILTERING_TERMS,
     AIQueryRequest,
     FieldValueCount,
     FieldValueSuggestion,
@@ -69,21 +70,25 @@ async def filtering_terms() -> BeaconFilteringTermsResponse:
     ),
     response_model_exclude_none=True,
 )
-async def query_beacon(
+async def query(
     request: BeaconQueryRequest,
-    backend: BigpictureBeaconService = Depends(get_beacon_service),
+    beacon_service: BigpictureBeaconService = Depends(get_beacon_service),
     snomed_service: SnomedService = Depends(get_snomed_service),
 ) -> BeaconBooleanResponse | BeaconCountResponse | BeaconResultSetsResponse:
-    expanded_filters = list(
+    ontology_field_ids = {t.id for t in BP_ONTOLOGY_FILTERING_TERMS}
+    ontology_filters = [f for f in request.query.filters if f.id in ontology_field_ids]
+    other_filters = [f for f in request.query.filters if f.id not in ontology_field_ids]
+    # Resolve ontology filter values to concept IDs, and optionally expand to descendants.
+    filters = other_filters + list(
         await asyncio.gather(
             *[
-                snomed_service.expand_ontology_filter(f, BP_FILTERING_TERMS)
-                for f in request.query.filters
+                snomed_service.prepare_ontology_filter(f, BP_FILTERING_TERMS)
+                for f in ontology_filters
             ]
         )
     )
-    response = await backend.query(
-        filters=expanded_filters,
+    response = await beacon_service.query(
+        filters=filters,
     )
 
     meta = BeaconResponseMeta(

@@ -3,7 +3,6 @@ from abc import ABC, abstractmethod
 from typing import Any, override
 
 from opensearchpy import AsyncOpenSearch
-from pydantic import BaseModel
 
 from search_api.services.search import (
     fetch_indexed_keywords,
@@ -12,13 +11,13 @@ from search_api.services.search import (
     build_iso8601_range_query,
     or_queries,
 )
+from search_api.services.snomed import is_concept_id
 
 from search_api.api.beacon.models import (
     BeaconQueryFilter,
     BeaconResultSets,
     BeaconResultSet,
     BeaconResultSetResult,
-    BeaconFilteringTerm,
 )
 from search_api.api.bigpicture.models import (
     BP_FILTERING_TERMS,
@@ -27,46 +26,17 @@ from search_api.api.bigpicture.models import (
     BP_SPECIMEN_SCOPE,
     BP_BLOCK_SCOPE,
     BP_STAINING_SCOPE,
+    OpenSearchOntologyOrValue,
+    OpenSearchBeaconFilteringTerm,
 )
 
 BP_OPENSEARCH_INDEX = "bp-image-index"
-
-
-class OpenSearchOntologyOrValue(BaseModel):
-    concept_value_field: str
-    other_value_field: str
-
-
-# Map filter term to OpenSearch field.
-BP_OPENSEARCH_FIELD: dict[str, str | OpenSearchOntologyOrValue] = {
-    "dataset_title": "dataset_title",
-    "dataset_description": "dataset_description",
-    "animal_species": "blocks.species",
-    "sex": "blocks.sex",
-    "anatomical_site": "blocks.anatomical_site",
-    "fixation_type": OpenSearchOntologyOrValue(
-        concept_value_field="blocks.fixation_type",
-        other_value_field="blocks.fixation_type_text",
-    ),
-    "specimen_type": "blocks.specimen_type",
-    "age_at_extraction": "blocks.age_at_extraction",
-    "block_preparation": "blocks.block_preparation",
-    "staining_target": "stains.staining_target",
-    "staining_procedure": OpenSearchOntologyOrValue(
-        concept_value_field="stains.staining_procedure",
-        other_value_field="stains.staining_procedure_text",
-    ),
-    "staining_substance": OpenSearchOntologyOrValue(
-        concept_value_field="stains.staining_substance",
-        other_value_field="stains.staining_substance_text",
-    ),
-}
 
 # TODO (improve): paginate to avoid limits
 DEFAULT_LIMIT = 10000
 
 
-def get_term(field_id: str) -> BeaconFilteringTerm:
+def get_term(field_id: str) -> OpenSearchBeaconFilteringTerm:
     for term in BP_FILTERING_TERMS:
         if term.id == field_id:
             return term
@@ -75,29 +45,31 @@ def get_term(field_id: str) -> BeaconFilteringTerm:
 
 
 def build_opensearch_query(
-    term: BeaconFilteringTerm, value: str | list[str]
+    term: OpenSearchBeaconFilteringTerm, value: str | list[str]
 ) -> dict[str, Any]:
-    field = BP_OPENSEARCH_FIELD[term.id]
-    if isinstance(field, OpenSearchOntologyOrValue):
-        field_paths = [field.concept_value_field, field.other_value_field]
-    else:
-        field_paths = [field]
-
+    field = term.opensearch_field
     values = value if isinstance(value, list) else [value]
 
-    if term.type in ("controlledValue", "ontology", "ontologyOrValue"):
-        # Use a single terms query per field for efficient multi-value exact matching.
-        return or_queries([build_terms_query(f, values) for f in field_paths])
+    if isinstance(field, OpenSearchOntologyOrValue):
+        # Search concept IDs and other values in their respective fields.
+        concept_ids = [v for v in values if is_concept_id(v)]
+        other_values = [v for v in values if not is_concept_id(v)]
+        queries = []
+        if concept_ids:
+            queries.append(build_terms_query(field.concept_value_field, concept_ids))
+        if other_values:
+            queries.append(build_terms_query(field.other_value_field, other_values))
+        return or_queries(queries)
+
+    # field is str for all remaining term types.
+    if term.type in ("controlledValue", "ontology"):
+        return or_queries([build_terms_query(field, values)])
 
     if term.type == "text":
-        return or_queries(
-            [build_match_query(f, v) for f in field_paths for v in values]
-        )
+        return or_queries([build_match_query(field, v) for v in values])
 
     if term.type == "iso8601Range":
-        return or_queries(
-            [build_iso8601_range_query(f, v) for f in field_paths for v in values]
-        )
+        return or_queries([build_iso8601_range_query(field, v) for v in values])
 
     raise ValueError(f"Unsupported term type {term.type}")
 
@@ -125,8 +97,9 @@ class BigpictureBeaconService(ABC):
     ) -> list[dict[str, int]]:
         """Return value counts for each OpenSearch field mapped to field_id.
 
-        Returns one dict per field in the order defined by BP_OPENSEARCH_FIELD.
-        Raises ValueError if field_id is not in BP_OPENSEARCH_FIELD.
+        Returns one dict for simple fields and two dicts for ontologyOrValue fields
+        (concept field first, other-value field second).
+        Raises ValueError if field_id is unknown.
         """
         pass
 
@@ -173,10 +146,8 @@ class MockBigpictureBeaconService(BigpictureBeaconService):
     async def get_indexed_field_value_counts(
         self, field_id: str
     ) -> list[dict[str, int]]:
-        field = BP_OPENSEARCH_FIELD.get(field_id)
-        if field is None:
-            raise ValueError(f"Unknown field: '{field_id}'")
-        if isinstance(field, OpenSearchOntologyOrValue):
+        term = get_term(field_id)
+        if isinstance(term.opensearch_field, OpenSearchOntologyOrValue):
             return [{}, {}]
         return [{}]
 
@@ -213,9 +184,7 @@ class OpenSearchBigpictureBeaconService(BigpictureBeaconService):
     async def get_indexed_field_value_counts(
         self, field_id: str
     ) -> list[dict[str, int]]:
-        field = BP_OPENSEARCH_FIELD.get(field_id)
-        if field is None:
-            raise ValueError(f"Unknown field: '{field_id}'")
+        field = get_term(field_id).opensearch_field
         if isinstance(field, OpenSearchOntologyOrValue):
             concept_field_counts, other_field_counts = await asyncio.gather(
                 fetch_indexed_keywords(self.index_name, field.concept_value_field),

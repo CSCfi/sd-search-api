@@ -56,17 +56,47 @@ def test_build_opensearch_query_ontology_multi():
     }
 
 
-def test_build_opensearch_query_ontology_or_value_multi_field():
-    """ontologyOrValue with multiple OpenSearch fields produces one terms query per field."""
+def test_build_opensearch_query_ontology_or_value_concept_ids_only():
+    """ontologyOrValue with concept IDs only."""
     term = get_term(
         "fixation_type"
     )  # maps to blocks.fixation_type + blocks.fixation_type_text
     result = build_opensearch_query(term, ["123", "456"])
     assert result == {
         "bool": {
+            "should": [{"terms": {"blocks.fixation_type": ["123", "456"]}}],
+            "minimum_should_match": 1,
+        }
+    }
+
+
+def test_build_opensearch_query_ontology_or_value_mixed_values():
+    """ontologyOrValue with mixed concept IDs and other values."""
+    term = get_term(
+        "fixation_type"
+    )  # maps to blocks.fixation_type + blocks.fixation_type_text
+    result = build_opensearch_query(term, ["123", "Formalin"])
+    assert result == {
+        "bool": {
             "should": [
-                {"terms": {"blocks.fixation_type": ["123", "456"]}},
-                {"terms": {"blocks.fixation_type_text": ["123", "456"]}},
+                {"terms": {"blocks.fixation_type": ["123"]}},
+                {"terms": {"blocks.fixation_type_text": ["Formalin"]}},
+            ],
+            "minimum_should_match": 1,
+        }
+    }
+
+
+def test_build_opensearch_query_ontology_or_value_free_text_only():
+    """ontologyOrValue with non-concept IDs only."""
+    term = get_term(
+        "fixation_type"
+    )  # maps to blocks.fixation_type + blocks.fixation_type_text
+    result = build_opensearch_query(term, ["Formalin", "Glutaraldehyde"])
+    assert result == {
+        "bool": {
+            "should": [
+                {"terms": {"blocks.fixation_type_text": ["Formalin", "Glutaraldehyde"]}}
             ],
             "minimum_should_match": 1,
         }

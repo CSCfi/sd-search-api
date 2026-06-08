@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, model_validator
-from typing import Literal
+from typing import Literal, Sequence
 
 BEACON_API_VERSION = "v2.0"
 BEACON_ORGANISATION_ID = "fi.csc"
@@ -47,7 +47,6 @@ class BeaconQueryFilter(BaseModel):
     operator: Literal["="] = "="  # Only equality operator is supported
 
     # Used in Beacon V2 OntologyFilter.
-    # TODO(improve): support ontology descendants.
     includeDescendantTerms: bool = True
 
 
@@ -225,7 +224,7 @@ class BeaconFilteringTerm(BaseModel):
 class BeaconFilteringTerms(BaseModel):
     """Beacon V2 filtering terms."""
 
-    filteringTerms: list[BeaconFilteringTerm]
+    filteringTerms: Sequence[BeaconFilteringTerm]
 
 
 # https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/responses/beaconFilteringTermsResponse.json

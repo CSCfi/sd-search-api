@@ -91,7 +91,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
                 "staining_procedure": IHC,
                 "staining_procedure_text": "Immunohistochemical staining",
                 "staining_substance": "antibody",
-                "staining_substance_text": "Antibody",
+                "staining_substance_text": "antibody",
                 "staining_target": "pan Cytokeratin",
             }
         ],
@@ -179,7 +179,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
 class MockSnomedService(SnomedService):
     """SnomedService that skips SNOMED expansion."""
 
-    async def expand_ontology_filter(self, f, filtering_terms, branch="MAIN"):
+    async def prepare_ontology_filter(self, f, filtering_terms, branch="MAIN"):
         return f
 
 

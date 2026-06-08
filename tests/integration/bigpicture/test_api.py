@@ -14,8 +14,9 @@ from search_api.api.beacon.models import (
     BeaconQueryRequest,
     BeaconResultSetsResponse,
 )
+from search_api.api.beacon.services import OpenSearchBeaconService
+from search_api.api.bigpicture.models import BP_FILTERING_TERMS
 from search_api.api.bigpicture.routes import get_beacon_service, get_snomed_service
-from search_api.api.bigpicture.services.beacon import OpenSearchBigpictureBeaconService
 from search_api.main import app
 from search_api.services.snomed import SnomedService
 
@@ -191,11 +192,13 @@ def bp_opensearch_docs() -> list[dict[str, Any]]:
 def _override_dependencies(bp_opensearch_index_name: str):
     """Point get_beacon_service at the UUID test index and swap out SNOMED."""
 
-    def _beacon_service() -> OpenSearchBigpictureBeaconService:
-        from search_api.api.opensearch.services.search import create_search
+    def _beacon_service() -> OpenSearchBeaconService:
+        from search_api.api.opensearch.services import create_search
 
-        return OpenSearchBigpictureBeaconService(
-            create_search(), bp_opensearch_index_name
+        return OpenSearchBeaconService(
+            create_search(),
+            bp_opensearch_index_name,
+            BP_FILTERING_TERMS,
         )
 
     saved = dict(app.dependency_overrides)

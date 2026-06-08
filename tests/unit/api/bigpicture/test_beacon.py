@@ -1,6 +1,21 @@
 import pytest
 
-from search_api.api.bigpicture.services.beacon import build_opensearch_query, get_term
+from search_api.api.beacon.models import BeaconQueryFilter
+from search_api.api.beacon.services import (
+    OpenSearchBeaconService,
+    build_opensearch_query,
+)
+from search_api.api.bigpicture.models import BP_FILTERING_TERMS
+
+
+def get_term(field_id: str):
+    return next(t for t in BP_FILTERING_TERMS if t.id == field_id)
+
+
+def get_query(*id_value_pairs: tuple[str, str]) -> dict:
+    """Build and return the OpenSearch query clause for the given filter pairs."""
+    filters = [BeaconQueryFilter(id=fid, value=val) for fid, val in id_value_pairs]
+    return OpenSearchBeaconService._get_query(filters, BP_FILTERING_TERMS)
 
 
 # ---------------------------------------------------------------------------
@@ -180,3 +195,188 @@ def test_build_opensearch_query_unsupported_type():
     term_bad = term.model_copy(update={"type": "unknown"})  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="Unsupported term type unknown"):
         build_opensearch_query(term_bad, "Male")
+
+
+# ---------------------------------------------------------------------------
+# get_query — nested path routing
+# ---------------------------------------------------------------------------
+
+
+def test_get_query_no_filters():
+    assert get_query() == {"bool": {"must": [{"match_all": {}}]}}
+
+
+def test_get_query_top_level_filter():
+    assert get_query(("dataset_title", "cancer")) == {
+        "bool": {
+            "must": [
+                {
+                    "bool": {
+                        "should": [{"match": {"dataset_title": "cancer"}}],
+                        "minimum_should_match": 1,
+                    }
+                },
+            ]
+        }
+    }
+
+
+def test_get_query_nested_block_filter():
+    assert get_query(("sex", "Female")) == {
+        "bool": {
+            "must": [
+                {
+                    "nested": {
+                        "path": "blocks",
+                        "query": {
+                            "bool": {
+                                "filter": [
+                                    {
+                                        "bool": {
+                                            "should": [
+                                                {"terms": {"blocks.sex": ["Female"]}}
+                                            ],
+                                            "minimum_should_match": 1,
+                                        }
+                                    }
+                                ]
+                            }
+                        },
+                    }
+                }
+            ]
+        }
+    }
+
+
+def test_get_query_nested_stain_filter():
+    assert get_query(("staining_target", "Ki-67")) == {
+        "bool": {
+            "must": [
+                {
+                    "nested": {
+                        "path": "stains",
+                        "query": {
+                            "bool": {
+                                "filter": [
+                                    {
+                                        "bool": {
+                                            "should": [
+                                                {
+                                                    "match": {
+                                                        "stains.staining_target": "Ki-67"
+                                                    }
+                                                }
+                                            ],
+                                            "minimum_should_match": 1,
+                                        }
+                                    }
+                                ]
+                            }
+                        },
+                    }
+                }
+            ]
+        }
+    }
+
+
+def test_get_query_multiple_nested_blocks_filter():
+    assert get_query(("sex", "Female"), ("animal_species", "337915000")) == {
+        "bool": {
+            "must": [
+                {
+                    "nested": {
+                        "path": "blocks",
+                        "query": {
+                            "bool": {
+                                "filter": [
+                                    {
+                                        "bool": {
+                                            "should": [
+                                                {"terms": {"blocks.sex": ["Female"]}}
+                                            ],
+                                            "minimum_should_match": 1,
+                                        }
+                                    },
+                                    {
+                                        "bool": {
+                                            "should": [
+                                                {
+                                                    "terms": {
+                                                        "blocks.species": ["337915000"]
+                                                    }
+                                                }
+                                            ],
+                                            "minimum_should_match": 1,
+                                        }
+                                    },
+                                ]
+                            }
+                        },
+                    }
+                }
+            ]
+        }
+    }
+
+
+def test_get_query_all_filter_scopes():
+    assert get_query(
+        ("dataset_title", "cancer"),  # top-level
+        ("sex", "Female"),  # blocks
+        ("staining_target", "Ki-67"),  # stains
+    ) == {
+        "bool": {
+            "must": [
+                {
+                    "bool": {
+                        "should": [{"match": {"dataset_title": "cancer"}}],
+                        "minimum_should_match": 1,
+                    }
+                },
+                {
+                    "nested": {
+                        "path": "blocks",
+                        "query": {
+                            "bool": {
+                                "filter": [
+                                    {
+                                        "bool": {
+                                            "should": [
+                                                {"terms": {"blocks.sex": ["Female"]}}
+                                            ],
+                                            "minimum_should_match": 1,
+                                        }
+                                    }
+                                ]
+                            }
+                        },
+                    }
+                },
+                {
+                    "nested": {
+                        "path": "stains",
+                        "query": {
+                            "bool": {
+                                "filter": [
+                                    {
+                                        "bool": {
+                                            "should": [
+                                                {
+                                                    "match": {
+                                                        "stains.staining_target": "Ki-67"
+                                                    }
+                                                }
+                                            ],
+                                            "minimum_should_match": 1,
+                                        }
+                                    }
+                                ]
+                            }
+                        },
+                    }
+                },
+            ]
+        }
+    }

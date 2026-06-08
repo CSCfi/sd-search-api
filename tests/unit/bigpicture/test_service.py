@@ -8,7 +8,7 @@ from search_api.bigpicture.models import (
     BigpictureStainingFields,
     BigpictureBlockFields,
 )
-from search_api.bigpicture.service import (
+from search_api.bigpicture.services import (
     _convert_blocks_for_opensearch,
     _convert_iso8601_range_for_opensearch,
     load_fields,

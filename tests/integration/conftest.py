@@ -8,7 +8,7 @@ import pytest
 import pytest_asyncio
 from opensearchpy import helpers
 
-from search_api.api.opensearch.services.search import create_search
+from search_api.api.opensearch.services import create_search
 
 bp_search = create_search()
 

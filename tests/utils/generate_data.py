@@ -16,9 +16,9 @@ from search_api.bigpicture.models import (
     BigpictureStainingFields,
     BigpictureBlockFields,
 )
-from search_api.bigpicture.service import load_fields, sync_fields, sync_count
+from search_api.bigpicture.services import load_fields, sync_fields, sync_count
 from search_api.database.repository import get_connection
-from search_api.api.opensearch.services.search import create_search
+from search_api.api.opensearch.services import create_search
 
 bp_search = create_search()
 

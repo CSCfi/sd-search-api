@@ -1,10 +1,11 @@
 import asyncio
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from typing import Any, override
 
 from opensearchpy import AsyncOpenSearch
 
-from search_api.api.opensearch.services.search import (
+from search_api.api.opensearch.services import (
     fetch_indexed_keywords,
     build_match_query,
     build_terms_query,
@@ -23,26 +24,9 @@ from search_api.api.opensearch.models import (
     OpenSearchOntologyOrValue,
     OpenSearchBeaconFilteringTerm,
 )
-from search_api.api.bigpicture.models import (
-    BP_FILTERING_TERMS,
-    BP_DATASET_SCOPE,
-    BP_BIOLOGICAL_BEING_SCOPE,
-    BP_SPECIMEN_SCOPE,
-    BP_BLOCK_SCOPE,
-    BP_STAINING_SCOPE,
-)
-from search_api.api.bigpicture.models import BP_OPENSEARCH_INDEX
 
 # TODO (improve): paginate to avoid limits
 DEFAULT_LIMIT = 10000
-
-
-def get_term(field_id: str) -> OpenSearchBeaconFilteringTerm:
-    for term in BP_FILTERING_TERMS:
-        if term.id == field_id:
-            return term
-
-    raise ValueError(f"Unsupported field: {field_id}")
 
 
 def build_opensearch_query(
@@ -75,10 +59,17 @@ def build_opensearch_query(
     raise ValueError(f"Unsupported term type {term.type}")
 
 
-class BigpictureBeaconService(ABC):
-    """
-    Abstract Bigpicture Beacon search.
-    """
+class BeaconService(ABC):
+    def __init__(
+        self, filtering_terms: Sequence[OpenSearchBeaconFilteringTerm]
+    ) -> None:
+        self.filtering_terms = filtering_terms
+
+    def get_term(self, field_id: str) -> OpenSearchBeaconFilteringTerm:
+        for term in self.filtering_terms:
+            if term.id == field_id:
+                return term
+        raise ValueError(f"Unsupported field: {field_id}")
 
     @abstractmethod
     async def query(
@@ -107,7 +98,6 @@ class BigpictureBeaconService(ABC):
 
 def get_mock_query_result() -> BeaconResultSets:
     results = BeaconResultSets()
-
     results.resultSet.append(
         BeaconResultSet(
             id="testDataset",
@@ -126,11 +116,7 @@ def get_mock_query_result() -> BeaconResultSets:
     return results
 
 
-class MockBigpictureBeaconService(BigpictureBeaconService):
-    """
-    Mock Bigpicture Beacon search.
-    """
-
+class MockBeaconService(BeaconService):
     @override
     async def query(
         self,
@@ -147,20 +133,33 @@ class MockBigpictureBeaconService(BigpictureBeaconService):
     async def get_indexed_field_value_counts(
         self, field_id: str
     ) -> list[dict[str, int]]:
-        term = get_term(field_id)
+        term = self.get_term(field_id)
         if isinstance(term.opensearch_field, OpenSearchOntologyOrValue):
             return [{}, {}]
         return [{}]
 
 
-class OpenSearchBigpictureBeaconService(BigpictureBeaconService):
-    """
-    OpenSearch Bigpicture Beacon search.
-    """
-
-    def __init__(self, client: AsyncOpenSearch, index_name: str = BP_OPENSEARCH_INDEX):
+class OpenSearchBeaconService(BeaconService):
+    def __init__(
+        self,
+        client: AsyncOpenSearch,
+        index_name: str,
+        filtering_terms: Sequence[OpenSearchBeaconFilteringTerm],
+    ) -> None:
+        super().__init__(filtering_terms)
         self.client = client
         self.index_name = index_name
+
+    @staticmethod
+    def _nested_path(field: str | OpenSearchOntologyOrValue) -> str | None:
+        """Return the OpenSearch nested path for a field, or None for top-level fields."""
+        field_name = (
+            field.concept_value_field
+            if isinstance(field, OpenSearchOntologyOrValue)
+            else field
+        )
+        prefix, _, rest = field_name.partition(".")
+        return prefix if rest else None
 
     @override
     async def is_healthy(self) -> bool:
@@ -174,7 +173,7 @@ class OpenSearchBigpictureBeaconService(BigpictureBeaconService):
     async def get_indexed_field_value_counts(
         self, field_id: str
     ) -> list[dict[str, int]]:
-        field = get_term(field_id).opensearch_field
+        field = self.get_term(field_id).opensearch_field
         if isinstance(field, OpenSearchOntologyOrValue):
             concept_field_counts, other_field_counts = await asyncio.gather(
                 fetch_indexed_keywords(
@@ -188,52 +187,44 @@ class OpenSearchBigpictureBeaconService(BigpictureBeaconService):
         return [await fetch_indexed_keywords(self.client, self.index_name, field)]
 
     @staticmethod
-    def get_query(
-        filters: list[BeaconQueryFilter], limit: int = DEFAULT_LIMIT
+    def _get_query(
+        filters: list[BeaconQueryFilter],
+        filtering_terms: Sequence[OpenSearchBeaconFilteringTerm],
     ) -> dict[str, Any]:
-
-        block_filters = []
-        stain_filters = []
-        must_clauses = []
+        """Build the OpenSearch query clause from a list of Beacon filters."""
+        terms_by_id = {t.id: t for t in filtering_terms}
+        must_clauses: list[dict[str, Any]] = []
+        nested_filters: dict[str, list[dict[str, Any]]] = {}
 
         for f in filters:
-            term = get_term(f.id)
-            value = f.value
+            if f.id not in terms_by_id:
+                raise ValueError(f"Unsupported field: {f.id}")
+            term = terms_by_id[f.id]
+            path = OpenSearchBeaconService._nested_path(term.opensearch_field)
+            q = build_opensearch_query(term, f.value)
+            if path is None:
+                must_clauses.append(q)
+            else:
+                nested_filters.setdefault(path, []).append(q)
 
-            if term.scopes == BP_DATASET_SCOPE:
-                must_clauses.append(build_opensearch_query(term, value))
-            elif term.scopes in (
-                BP_BIOLOGICAL_BEING_SCOPE,
-                BP_SPECIMEN_SCOPE,
-                BP_BLOCK_SCOPE,
-            ):
-                block_filters.append(build_opensearch_query(term, value))
-            elif term.scopes in (BP_STAINING_SCOPE,):
-                stain_filters.append(build_opensearch_query(term, value))
-
-        if block_filters:
+        for path, path_filters in nested_filters.items():
             must_clauses.append(
                 {
                     "nested": {
-                        "path": "blocks",
-                        "query": {"bool": {"filter": block_filters}},
+                        "path": path,
+                        "query": {"bool": {"filter": path_filters}},
                     }
                 }
             )
 
-        if stain_filters:
-            must_clauses.append(
-                {
-                    "nested": {
-                        "path": "stains",
-                        "query": {"bool": {"filter": stain_filters}},
-                    }
-                }
-            )
+        return {"bool": {"must": must_clauses or [{"match_all": {}}]}}
 
+    def get_query(
+        self, filters: list[BeaconQueryFilter], limit: int = DEFAULT_LIMIT
+    ) -> dict[str, Any]:
         return {
             "size": 0,
-            "query": {"bool": {"must": must_clauses or [{"match_all": {}}]}},
+            "query": self._get_query(filters, self.filtering_terms),
             "aggs": {
                 "datasets": {
                     "terms": {"field": "dataset_id", "size": limit},

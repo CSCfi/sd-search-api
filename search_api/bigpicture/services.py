@@ -16,7 +16,7 @@ from search_api.database.repository import get_cursor
 import isodate  # type: ignore[import-untyped]
 
 from search_api.api.bigpicture.models import BP_OPENSEARCH_INDEX
-from search_api.api.opensearch.services.search import (
+from search_api.api.opensearch.services import (
     create_search,
     index_documents,
     iso8601_duration_to_days,

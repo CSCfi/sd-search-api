@@ -8,6 +8,7 @@ from .models import (
     BP_FILTERING_TERMS_RESPONSE,
     BP_INFO_RESPONSE,
     BP_ONTOLOGY_FILTERING_TERMS,
+    BP_OPENSEARCH_INDEX,
 )
 from search_api.api.models import AIQueryRequest, FieldValueCount, FieldValueSuggestion
 from ..beacon.models import (
@@ -21,15 +22,19 @@ from ..beacon.models import (
     BeaconFilteringTermsResponse,
     BeaconInfoResponse,
 )
-from .services.beacon import BigpictureBeaconService, OpenSearchBigpictureBeaconService
+from search_api.api.beacon.services import BeaconService, OpenSearchBeaconService
 from .services.ai import AISearchResult, ai_search
 from search_api.services.snomed import SnomedService
 
 router = APIRouter()
 
 
-def get_beacon_service(request: Request) -> BigpictureBeaconService:
-    return OpenSearchBigpictureBeaconService(request.app.state.bp_search)
+def get_beacon_service(request: Request) -> BeaconService:
+    return OpenSearchBeaconService(
+        request.app.state.bp_search,
+        BP_OPENSEARCH_INDEX,
+        BP_FILTERING_TERMS,
+    )
 
 
 def get_snomed_service() -> SnomedService:
@@ -63,7 +68,7 @@ async def filtering_terms() -> BeaconFilteringTermsResponse:
 )
 async def query(
     request: BeaconQueryRequest,
-    beacon_service: BigpictureBeaconService = Depends(get_beacon_service),
+    beacon_service: BeaconService = Depends(get_beacon_service),
     snomed_service: SnomedService = Depends(get_snomed_service),
 ) -> BeaconBooleanResponse | BeaconCountResponse | BeaconResultSetsResponse:
     ontology_field_ids = {t.id for t in BP_ONTOLOGY_FILTERING_TERMS}
@@ -118,7 +123,7 @@ async def query(
 )
 async def ai_query(
     request: AIQueryRequest,
-    beacon_service: BigpictureBeaconService = Depends(get_beacon_service),
+    beacon_service: BeaconService = Depends(get_beacon_service),
 ) -> AISearchResult:
     return await ai_search(request.query, beacon_service)
 
@@ -147,7 +152,7 @@ async def suggestions(
         default=True,
         description="When True, include free-text ontology field values.",
     ),
-    beacon_service: BigpictureBeaconService = Depends(get_beacon_service),
+    beacon_service: BeaconService = Depends(get_beacon_service),
     snomed_service: SnomedService = Depends(get_snomed_service),
 ) -> list[FieldValueSuggestion]:
     """Return value suggestions for a given field and search term."""
@@ -240,7 +245,7 @@ async def values(
         default=True,
         description="When True, include free-text ontology field values.",
     ),
-    beacon_service: BigpictureBeaconService = Depends(get_beacon_service),
+    beacon_service: BeaconService = Depends(get_beacon_service),
     snomed_service: SnomedService = Depends(get_snomed_service),
 ) -> list[FieldValueCount]:
     """Return the values for a given field, ordered by count."""
@@ -297,7 +302,7 @@ async def values(
 
 
 @router.get("/health")
-async def health(service: BigpictureBeaconService = Depends(get_beacon_service)):
+async def health(service: BeaconService = Depends(get_beacon_service)):
     try:
         if await service.is_healthy():
             return {"status": "ok"}

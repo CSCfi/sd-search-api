@@ -8,14 +8,15 @@ from search_api.api.bigpicture.services.ai import (
     AIDatasetResult,
     AIQueryFilter,
 )
-from search_api.api.bigpicture.services.beacon import MockBigpictureBeaconService
+from search_api.api.beacon.services import MockBeaconService
+from search_api.api.bigpicture.models import BP_FILTERING_TERMS
 from search_api.main import app
 
 skip = pytest.mark.skip(reason="Requires Ollama")
 
 
 def mock_beacon_service():
-    return MockBigpictureBeaconService()
+    return MockBeaconService(BP_FILTERING_TERMS)
 
 
 app.dependency_overrides[get_beacon_service] = mock_beacon_service

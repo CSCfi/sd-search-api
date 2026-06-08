@@ -19,8 +19,8 @@ from search_api.api.bigpicture.models import (
 from search_api.api.models import FieldValueSuggestion
 from search_api.main import app
 from search_api.api.bigpicture.routes import get_beacon_service, get_snomed_service
-from search_api.api.bigpicture.services.beacon import (
-    MockBigpictureBeaconService,
+from search_api.api.beacon.services import (
+    MockBeaconService,
     get_mock_query_result,
 )
 from search_api.services.snomed import SnomedConcept, SnomedService
@@ -55,7 +55,7 @@ SUGGESTIONS_AND_VALUES_INDEXED_COUNTS: dict[str, list[dict[str, int]]] = {
 }
 
 
-class MockSuggestionsAndValuesBeaconService(MockBigpictureBeaconService):
+class MockSuggestionsAndValuesBeaconService(MockBeaconService):
     @override
     async def get_indexed_field_value_counts(
         self, field_id: str
@@ -98,7 +98,9 @@ class MockSuggestionsAndValuesSnomedService(SnomedService):
 @pytest.fixture()
 def client():
     saved = dict(app.dependency_overrides)
-    app.dependency_overrides[get_beacon_service] = MockBigpictureBeaconService
+    app.dependency_overrides[get_beacon_service] = lambda: MockBeaconService(
+        BP_FILTERING_TERMS
+    )
     yield TestClient(app)
     app.dependency_overrides.clear()
     app.dependency_overrides.update(saved)
@@ -145,7 +147,9 @@ def test_filtering_terms(client: TestClient):
 @pytest.fixture()
 def suggestions_values_client():
     saved = dict(app.dependency_overrides)
-    app.dependency_overrides[get_beacon_service] = MockSuggestionsAndValuesBeaconService
+    app.dependency_overrides[get_beacon_service] = lambda: (
+        MockSuggestionsAndValuesBeaconService(BP_FILTERING_TERMS)
+    )
     app.dependency_overrides[get_snomed_service] = MockSuggestionsAndValuesSnomedService
     yield TestClient(app)
     app.dependency_overrides.clear()

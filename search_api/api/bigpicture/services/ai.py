@@ -7,7 +7,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 
 from search_api.api.beacon.models import BeaconQueryFilter
 from search_api.api.bigpicture.models import BP_FILTERING_TERMS
-from search_api.api.bigpicture.services.beacon import BigpictureBeaconService
+from search_api.api.beacon.services import BeaconService
 from search_api.conf import bigpicture_config as _bigpicture_config
 
 
@@ -61,9 +61,9 @@ OpenSearch image index. Follow these steps for every query:
    - datasets: one entry per dataset in the results
 """
 
-agent: Agent[BigpictureBeaconService, AISearchResult] = Agent(
+agent: Agent[BeaconService, AISearchResult] = Agent(
     model=_OLLAMA_MODEL,
-    deps_type=BigpictureBeaconService,  # type: ignore[type-abstract]
+    deps_type=BeaconService,  # type: ignore[type-abstract]
     output_type=AISearchResult,
     system_prompt=_SYSTEM_PROMPT,
     output_retries=3,
@@ -94,7 +94,7 @@ def get_filtering_terms() -> str:
 
 @agent.tool
 async def search_images(
-    ctx: RunContext[BigpictureBeaconService], filters: list[AIQueryFilter]
+    ctx: RunContext[BeaconService], filters: list[AIQueryFilter]
 ) -> str:
     """
     Execute a Bigpicture image search using Beacon V2 filters and return results.
@@ -106,9 +106,7 @@ async def search_images(
     return results.model_dump_json(indent=2)
 
 
-async def ai_search(
-    query: str, beacon_service: BigpictureBeaconService
-) -> AISearchResult:
+async def ai_search(query: str, beacon_service: BeaconService) -> AISearchResult:
     """
     Translate a natural language query into Beacon V2 filters and search the
     Bigpicture OpenSearch index.

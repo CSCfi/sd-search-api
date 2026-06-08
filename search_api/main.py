@@ -4,7 +4,7 @@ from fastapi import FastAPI
 import uvicorn
 
 from search_api.api.bigpicture.routes import router
-from search_api.api.opensearch.services.search import create_search
+from search_api.api.opensearch.services import create_search
 
 # uvicorn search_api.main:app --reload
 

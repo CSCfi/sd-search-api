@@ -6,13 +6,10 @@ services:
       context: .
     image: cscfi/sd-search-api
     command: [ "uv", "run", "sd_search_api" ]
+    env_file: tests/integration/.env
     environment:
       - POSTGRES_HOST=postgres
-      - POSTGRES_DB=postgres
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
       - OPENSEARCH_HOST=opensearch
-      - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD:-Sd@Search9x!}
     depends_on:
       postgres:
         condition: service_healthy
@@ -29,13 +26,14 @@ services:
     image: postgres:18-alpine
     hostname: postgres
     environment:
-      - POSTGRES_DB=postgres
+      - POSTGRES_DB=sd_search
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_PASSWORD=test
+      - PGPORT=5434
     volumes:
       - ./search_api/database/schema/bigpicture/create.sql:/docker-entrypoint-initdb.d/create.sql
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      test: [ "CMD-SHELL", "pg_isready -U postgres -p 5434" ]
       interval: 10s
       timeout: 5s
       retries: 5

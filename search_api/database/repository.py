@@ -4,7 +4,7 @@ from typing import AsyncGenerator
 from psycopg import AsyncConnection, AsyncCursor
 from psycopg.rows import tuple_row
 
-from search_api.conf import common_config
+from search_api.conf import database_config
 
 
 @asynccontextmanager
@@ -14,7 +14,7 @@ async def get_connection() -> AsyncGenerator[AsyncConnection, None]:
 
     :return: a new database connection.
     """
-    cfg = common_config()
+    cfg = database_config()
     conn = await AsyncConnection.connect(
         host=cfg.POSTGRES_HOST,
         port=cfg.POSTGRES_PORT,
@@ -36,7 +36,6 @@ async def get_cursor() -> AsyncGenerator[AsyncCursor, None]:
 
     :return: a new database cursor.
     """
-
     async with get_connection() as con:
         async with con.cursor(row_factory=tuple_row) as cur:
             yield cur

@@ -123,7 +123,7 @@ When a filter maps to multiple OpenSearch fields they are combined with `or_quer
 
 ### Connection details (hardcoded defaults — see `conf.py`)
 
-- Postgres: `localhost:5432`, db `sd_search`, user `postgres`, password `test`
+- Postgres: `localhost:5434`, db `sd_search`, user `postgres`, password `test`
 - OpenSearch: `host.docker.internal:9200`, user `admin`, password `Sd@Search9x!`, SSL on, certs not verified
 - Snowstorm: empty by default; set `SNOWSTORM_URL` env var
 - LLM (Ollama): `http://localhost:11434/v1`, model `qwen2.5:14b`

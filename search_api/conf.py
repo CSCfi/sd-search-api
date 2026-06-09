@@ -2,54 +2,53 @@ from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
-class CommonConfiguration(BaseSettings):
-    """Common configuration shared across the application."""
+class DatabaseConfiguration(BaseSettings):
+    """PostgreSQL connection configuration."""
 
-    POSTGRES_HOST: str = Field(
-        default="localhost", description="PostgreSQL host."
-    )  # TODO: remove default value
+    POSTGRES_HOST: str = Field(description="PostgreSQL host.")
     POSTGRES_PORT: int = Field(default=5432, description="PostgreSQL port.")
-    POSTGRES_DB: str = Field(
-        default="sd_search", description="PostgreSQL database name."
-    )  # TODO: remove default value
-    POSTGRES_USER: str = Field(
-        default="postgres", description="PostgreSQL user."
-    )  # TODO: remove default value
-    POSTGRES_PASSWORD: str = Field(
-        default="test", description="PostgreSQL password."
-    )  # TODO: remove default value
-    OPENSEARCH_HOST: str = Field(
-        default="host.docker.internal", description="OpenSearch host."
-    )  # TODO: remove default value
+    POSTGRES_DB: str = Field(description="PostgreSQL database name.")
+    POSTGRES_USER: str = Field(description="PostgreSQL user.")
+    POSTGRES_PASSWORD: str = Field(description="PostgreSQL password.")
+
+
+class OpenSearchConfiguration(BaseSettings):
+    """OpenSearch connection configuration."""
+
+    OPENSEARCH_HOST: str = Field(description="OpenSearch host.")
     OPENSEARCH_PORT: int = Field(default=9200, description="OpenSearch port.")
-    OPENSEARCH_USER: str = Field(
-        default="admin", description="OpenSearch user."
-    )  # TODO: remove default value
-    OPENSEARCH_PASSWORD: str = Field(
-        default="Sd@Search9x!", description="OpenSearch password."
-    )  # TODO: remove default value
-    SNOWSTORM_URL: str | None = Field(
-        default=None,
-        description="Snowstorm SNOMED CT server base URL.",
-    )
+    OPENSEARCH_USER: str = Field(description="OpenSearch user.")
+    OPENSEARCH_PASSWORD: str = Field(description="OpenSearch password.")
 
 
-class BigpictureConfiguration(BaseSettings):
-    """Bigpicture beacon configuration."""
+class SnowstormConfiguration(BaseSettings):
+    """Snowstorm SNOMED CT server configuration."""
 
-    LLM_BASE_URL: str = Field(
-        default="http://localhost:11434/v1", description="LLM API base URL."
-    )
-    LLM_API_KEY: str = Field(
-        default="ollama", description="LLM API key."
-    )  # TODO: remove default value
+    SNOWSTORM_URL: str = Field(description="Snowstorm SNOMED CT server base URL.")
 
 
-def common_config() -> CommonConfiguration:
-    """Get common configuration."""
-    return CommonConfiguration()
+class AIConfiguration(BaseSettings):
+    """AI/LLM configuration."""
+
+    LLM_BASE_URL: str = Field(description="LLM API base URL.")
+    LLM_API_KEY: str = Field(description="LLM API key.")
 
 
-def bigpicture_config() -> BigpictureConfiguration:
-    """Get Bigpicture configuration."""
-    return BigpictureConfiguration()
+def database_config() -> DatabaseConfiguration:
+    """Get database configuration."""
+    return DatabaseConfiguration()
+
+
+def opensearch_config() -> OpenSearchConfiguration:
+    """Get OpenSearch configuration."""
+    return OpenSearchConfiguration()
+
+
+def snowstorm_config() -> SnowstormConfiguration:
+    """Get Snowstorm configuration."""
+    return SnowstormConfiguration()
+
+
+def ai_config() -> AIConfiguration:
+    """Get AI configuration."""
+    return AIConfiguration()

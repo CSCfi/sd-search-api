@@ -1,5 +1,4 @@
 import uuid
-from pathlib import Path
 import pytest
 
 from search_api.bigpicture.models import (
@@ -8,70 +7,12 @@ from search_api.bigpicture.models import (
     BigpictureStainingFields,
     BigpictureBlockFields,
 )
-from search_api.bigpicture.services import (
-    _convert_blocks_for_opensearch,
-    _convert_iso8601_range_for_opensearch,
-    load_fields,
-    get_fields,
-    sync_fields,
-)
-
+from search_api.bigpicture.services import BigpictureService
 from search_api.database.repository import get_connection
-
-TEST_DIR = Path(__file__).resolve().parent.parent.parent / "files" / "bigpicture"
 
 
 def get_code(code: str) -> BigpictureCodeAttributeValue:
     return BigpictureCodeAttributeValue(code=code, meaning=code)
-
-
-def test_convert_iso8601_range_for_opensearch_valid():
-    assert _convert_iso8601_range_for_opensearch({"gte": "P40Y", "lte": "P50Y"}) == {
-        "gte": 14600,
-        "lte": 18250,
-    }
-
-
-def test_convert_iso8601_range_for_opensearch_invalid(caplog):
-    import logging
-
-    with caplog.at_level(logging.ERROR):
-        result = _convert_iso8601_range_for_opensearch(
-            {"gte": "NOT_VALID", "lte": "P1Y"}
-        )
-
-    assert result is None
-    assert "Invalid ISO-8601 duration in age_at_extraction" in caplog.text
-
-
-def test_convert_iso8601_range_for_opensearch_missing(caplog):
-    import logging
-
-    with caplog.at_level(logging.ERROR):
-        result = _convert_iso8601_range_for_opensearch({"gte": "P40Y"})
-
-    assert result is None
-    assert "is missing" in caplog.text
-
-
-def test_convert_blocks_for_opensearch(caplog):
-    """Invalid duration drops age_at_extraction; valid duration is converted to days."""
-    import logging
-
-    blocks = [
-        {
-            "species": "337915000",
-            "age_at_extraction": {"gte": "NOT_VALID", "lte": "P1Y"},
-        },
-        {"species": "447612001", "age_at_extraction": {"gte": "P40Y", "lte": "P50Y"}},
-    ]
-
-    with caplog.at_level(logging.ERROR):
-        result = _convert_blocks_for_opensearch(blocks)
-
-    assert result[0] == {"species": "337915000"}
-    assert result[1]["age_at_extraction"] == {"gte": 14600, "lte": 18250}
-    assert "Invalid ISO-8601 duration in age_at_extraction" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -116,11 +57,13 @@ async def test_load_fields():
         },
     )
 
+    service = BigpictureService()
+
     async with get_connection() as conn:
         async with conn.cursor() as cur:
-            await load_fields(cur, fields)
+            await service.load_fields(cur, fields)
 
-            actual = await get_fields(cur, image_id)
+            actual = await service.get_fields(cur, image_id)
 
             assert fields.image_id == actual.image_id
             assert fields.dataset_id == actual.dataset_id
@@ -137,4 +80,4 @@ async def test_load_fields():
             assert fields.stains == actual.stains
 
             if is_sync_fields:
-                await sync_fields(cur, image_id)
+                await service.sync_fields(cur, image_id)

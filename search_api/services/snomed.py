@@ -7,7 +7,7 @@ from aiocache import cached  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field
 from typing import TYPE_CHECKING
 
-from search_api.conf import common_config
+from search_api.conf import snowstorm_config as _snowstorm_config
 
 if TYPE_CHECKING:
     from typing import Sequence
@@ -28,10 +28,7 @@ class SnomedConcept(BaseModel):
 
 
 def _snowstorm_url() -> str:
-    url = common_config().SNOWSTORM_URL
-    if not url:
-        raise RuntimeError("SNOWSTORM_URL environmental variable is not configured.")
-    return url
+    return _snowstorm_config().SNOWSTORM_URL
 
 
 def _client() -> httpx.AsyncClient:

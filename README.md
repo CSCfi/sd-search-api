@@ -72,14 +72,69 @@ curl -X POST "http://localhost:8000/ai/query" \
 
 ### Snowstorm
 
-[Snowstorm](https://github.com/IHTSDO/snowstorm) is a SNOMED CT terminology server backed by
-Elasticsearch. SD Search API uses it to resolve and expand SNOMED CT codes used as filter values
-in Bigpicture image search.
+[Snowstorm](https://github.com/IHTSDO/snowstorm) is a SNOMED CT terminology server used by the SD Search API
+to resolve SNOMED CT terms to concepts. A Snowstorm instance is available at `https://snowstorm.rahtiapp.fi`.
+
+#### Data import
+
+This is only needed when importing a new SNOMED CT release into the shared instance. The full procedure is described
+in https://github.com/IHTSDO/snowstorm/blob/master/docs/loading-snomed.md.
+
+#### Create import job
+
+```
+curl -i --location 'https://snowstorm.rahtiapp.fi/imports' \
+  --header 'Content-Type: application/json' \
+  --data '{"type":"SNAPSHOT","branchPath":"MAIN","createCodeSystemVersion":true}'
+```
+
+Example output:
+
+```
+HTTP/1.1 201 
+location: https://snowstorm.rahtiapp.fi/imports/<ID>
+```
+
+Get the import ID (e.g. f0801e81-3740-48bd-bc3e-848c7aa7468e) from the response location header
+and define the IMPORT_ID environmental variable:
+
+```
+export IMPORT_ID=<ID>
+```
+
+#### Import SNOMED release
+
+Upload SNOMED release file (e.g. SnomedCT_InternationalRF2_PRODUCTION_20260601T120000Z.zip):
+
+```
+curl --location -X POST "https://snowstorm.rahtiapp.fi/imports/${IMPORT_ID}/archive" \
+  -F "file=@<SNOMED release file>"
+```
+
+The upload and import can take 1-2 hours. Poll the import status until `status` is `COMPLETED`
+or until the import job is no longer available:
+
+```
+curl --location "https://snowstorm.rahtiapp.fi/imports/${IMPORT_ID}"
+```
+
+Example output while running:
+
+```
+{
+  "status" : "RUNNING",
+  "type" : "SNAPSHOT",
+  "branchPath" : "MAIN",
+  "internalRelease" : false,
+  "moduleIds" : [ ],
+  "createCodeSystemVersion" : true
+}
+```
 
 Verify that the SNOMED CT ontology is loaded:
 
 ```bash
-curl -s "$SNOWSTORM_URL/codesystems" | jq '.[].shortName'
+curl -s "https://snowstorm.rahtiapp.fi/codesystems" | jq '.items[].shortName'
 ```
 
 ## Performance tests

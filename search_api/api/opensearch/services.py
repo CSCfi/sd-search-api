@@ -9,7 +9,7 @@ import isodate  # type: ignore[import-untyped]
 from aiocache import cached  # type: ignore[import-untyped]
 from opensearchpy import AsyncOpenSearch, helpers
 
-from search_api.conf import common_config as _common_config
+from search_api.conf import opensearch_config as _opensearch_config
 
 logging.basicConfig(level=logging.INFO)
 
@@ -18,7 +18,7 @@ _FETCH_INDEXED_KEYWORDS_TTL = 60 * 60 * 4  # 4 hours
 
 def create_search() -> AsyncOpenSearch:
     """Create an OpenSearch client from the application configuration."""
-    cfg = _common_config()
+    cfg = _opensearch_config()
     return AsyncOpenSearch(
         hosts=[{"host": cfg.OPENSEARCH_HOST, "port": cfg.OPENSEARCH_PORT}],
         http_auth=(cfg.OPENSEARCH_USER, cfg.OPENSEARCH_PASSWORD),

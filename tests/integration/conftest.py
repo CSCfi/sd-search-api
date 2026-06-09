@@ -6,9 +6,12 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
+from dotenv import load_dotenv
 from opensearchpy import helpers
 
-from search_api.api.opensearch.services import create_search
+load_dotenv(Path(__file__).parent / ".env")
+
+from search_api.api.opensearch.services import create_search  # noqa: E402
 
 bp_search = create_search()
 

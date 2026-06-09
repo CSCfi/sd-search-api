@@ -23,7 +23,7 @@ from ..beacon.models import (
     BeaconInfoResponse,
 )
 from search_api.api.beacon.services import BeaconService, OpenSearchBeaconService
-from .services.ai import AISearchResult, ai_search
+from search_api.ai.services import AISearchResult, AIService
 from search_api.services.snomed import SnomedService
 
 router = APIRouter()
@@ -35,6 +35,10 @@ def get_beacon_service(request: Request) -> BeaconService:
         BP_OPENSEARCH_INDEX,
         BP_FILTERING_TERMS,
     )
+
+
+def get_ai_service() -> AIService:
+    return AIService(BP_FILTERING_TERMS)
 
 
 def get_snomed_service() -> SnomedService:
@@ -124,8 +128,9 @@ async def query(
 async def ai_query(
     request: AIQueryRequest,
     beacon_service: BeaconService = Depends(get_beacon_service),
+    ai_service: AIService = Depends(get_ai_service),
 ) -> AISearchResult:
-    return await ai_search(request.query, beacon_service)
+    return await ai_service.search(request.query, beacon_service)
 
 
 @router.get(

@@ -16,11 +16,10 @@ from search_api.bigpicture.models import (
     BigpictureStainingFields,
     BigpictureBlockFields,
 )
-from search_api.bigpicture.services import load_fields, sync_fields, sync_count
+from search_api.bigpicture.services import BigpictureService
 from search_api.database.repository import get_connection
-from search_api.api.opensearch.services import create_search
 
-bp_search = create_search()
+bp_service = BigpictureService()
 
 _INDEX_MAPPING_PATH = (
     Path(__file__).resolve().parent.parent.parent
@@ -196,7 +195,7 @@ async def generate_and_load_data(image_cnt: int, dataset_cnt: int) -> None:
                 TRUNCATE TABLE bp_image
             """)
 
-            assert await sync_count(cur) == 0
+            assert await bp_service.sync_count(cur) == 0
 
             # Load data.
             #
@@ -253,20 +252,20 @@ async def generate_and_load_data(image_cnt: int, dataset_cnt: int) -> None:
                 # Load fields to the database for each image.
 
                 logging.info(f"Loading image '{image_id}' to the database")
-                await load_fields(cur, fields)
+                await bp_service.load_fields(cur, fields)
 
             elapsed = time.time() - start_time
             print(
                 f"Data for {generated_cnt} images generated and loaded into database in {elapsed:.2f} seconds."
             )
 
-            assert await sync_count(cur) == generated_cnt
+            assert await bp_service.sync_count(cur) == generated_cnt
 
 
 async def ensure_index() -> None:
     """Create the OpenSearch index from the mapping file if it does not already exist."""
 
-    if await bp_search.indices.exists(index=BP_OPENSEARCH_INDEX):
+    if await bp_service.search.indices.exists(index=BP_OPENSEARCH_INDEX):
         logging.info(
             f"Index '{BP_OPENSEARCH_INDEX}' already exists, skipping creation."
         )
@@ -274,7 +273,7 @@ async def ensure_index() -> None:
 
     index_conf = json.loads(_INDEX_MAPPING_PATH.read_text())
     logging.info(f"Creating index '{BP_OPENSEARCH_INDEX}'")
-    await bp_search.indices.create(index=BP_OPENSEARCH_INDEX, body=index_conf)
+    await bp_service.search.indices.create(index=BP_OPENSEARCH_INDEX, body=index_conf)
     logging.info(f"Index '{BP_OPENSEARCH_INDEX}' created.")
 
 
@@ -287,13 +286,15 @@ async def sync_data() -> None:
 
     async with get_connection() as conn:
         async with conn.cursor() as cur:
-            logging.info(f"Number of images to sync is {await sync_count(cur)}")
-            await sync_fields(cur)
+            logging.info(
+                f"Number of images to sync is {await bp_service.sync_count(cur)}"
+            )
+            await bp_service.sync_fields(cur)
 
             elapsed = time.time() - start_time
             print(f"Images synced to OpenSearch in {elapsed:.2f} seconds.")
 
-            assert await sync_count(cur) == 0
+            assert await bp_service.sync_count(cur) == 0
 
 
 def main() -> None:

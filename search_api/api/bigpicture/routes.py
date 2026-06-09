@@ -150,9 +150,9 @@ async def suggestions(
         description="When True, include all controlled values. When False, only include indexed values.",
     ),
     include_all_ontology_values: bool = Query(
-        default=True,
-        description="When True, search all concepts in the ontology field's hierarchy using text and synonym matching. "
-        "When False, search only indexed concepts. Preferred terms are returned in both cases.",
+        default=False,
+        description="When True, may suggest values with no matching results. "
+        "When False, restrict suggestions to indexed values.",
     ),
     include_other_ontology_values: bool = Query(
         default=True,
@@ -243,9 +243,9 @@ async def values(
         "When False, only include indexed values.",
     ),
     include_all_ontology_values: bool = Query(
-        default=True,
-        description="When True, return all concepts for the ontology field's hierarchy "
-        "When False, return only indexed concepts. Preferred terms are returned in both cases.",
+        default=False,
+        description="When True, may return values with no matching results. "
+        "When False, return only indexed values.",
     ),
     include_other_ontology_values: bool = Query(
         default=True,

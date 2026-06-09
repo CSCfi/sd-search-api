@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 import uvicorn
 
 from search_api.api.bigpicture.routes import router
@@ -21,6 +22,11 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="CSC Bigpicture Beacon", version="1.0", lifespan=lifespan)
 
 app.include_router(router)
+
+
+@app.get("/", include_in_schema=False)
+async def root() -> RedirectResponse:
+    return RedirectResponse(url="/docs")
 
 
 def main():

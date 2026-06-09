@@ -1,4 +1,4 @@
-"""Bigpicture services."""
+"""Bigpicture load service."""
 
 import logging
 from typing import Any
@@ -71,7 +71,7 @@ def _convert_blocks_for_opensearch(blocks: list[dict] | None) -> list[dict] | No
     return result
 
 
-class BigpictureService:
+class BigPictureLoadService:
     def __init__(self) -> None:
         self._search = create_search()
 
@@ -405,8 +405,6 @@ class BigpictureService:
         :param cur: The database cursor.
         :return: The number of images to sync to OpenSearch.
         """
-
-        # Find imaged to sync to OpenSearch.
 
         await cur.execute("""
             SELECT COUNT(1)

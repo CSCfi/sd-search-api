@@ -16,10 +16,10 @@ from search_api.bigpicture.models import (
     BigpictureStainingFields,
     BigpictureBlockFields,
 )
-from search_api.bigpicture.services import BigpictureService
+from search_api.bigpicture.services.load import BigPictureLoadService
 from search_api.database.repository import get_connection
 
-bp_service = BigpictureService()
+bp_service = BigPictureLoadService()
 
 _INDEX_MAPPING_PATH = (
     Path(__file__).resolve().parent.parent.parent

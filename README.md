@@ -10,6 +10,44 @@ Supported configurations:
 
 ## Development
 
+### Setup
+
+Install [uv](https://docs.astral.sh/uv/), then create the virtualenv and install all dependencies:
+
+```bash
+uv sync --dev
+```
+
+### Formatting and linting
+
+```bash
+tox -e ruff
+tox -e mypy
+```
+
+### Unit tests
+
+```bash
+tox -e pytest
+```
+
+### Integration tests
+
+Integration tests require Postgres and OpenSearch to be running. Start
+them with Docker Compose:
+
+```bash
+docker compose --profile dev up --build
+```
+
+Then run:
+
+```bash
+.venv/bin/pytest tests/integration/
+```
+
+Environmental variables are defined in `tests/integration/.env`.
+
 ### Bigpicture
 
 #### Postgres and OpenSearch

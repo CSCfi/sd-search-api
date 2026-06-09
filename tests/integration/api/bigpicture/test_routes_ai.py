@@ -3,7 +3,7 @@
 import pytest
 from fastapi.testclient import TestClient
 from search_api.api.bigpicture.routes import get_beacon_service
-from search_api.ai.services import (
+from search_api.ai.models import (
     AISearchResult,
     AIDatasetResult,
     AIQueryFilter,

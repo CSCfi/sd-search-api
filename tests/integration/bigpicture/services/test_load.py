@@ -7,7 +7,7 @@ from search_api.bigpicture.models import (
     BigpictureStainingFields,
     BigpictureBlockFields,
 )
-from search_api.bigpicture.services import BigpictureService
+from search_api.bigpicture.services.load import BigPictureLoadService
 from search_api.database.repository import get_connection
 
 
@@ -57,7 +57,7 @@ async def test_load_fields():
         },
     )
 
-    service = BigpictureService()
+    service = BigPictureLoadService()
 
     async with get_connection() as conn:
         async with conn.cursor() as cur:

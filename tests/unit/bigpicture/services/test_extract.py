@@ -7,7 +7,7 @@ from search_api.bigpicture.models import (
     BigpictureBlockFields,
     BigpictureStainingFields,
 )
-from search_api.bigpicture.process import (
+from search_api.bigpicture.services.extract import (
     extract_fields,
     _add_iso8601_durations,
     _extract_anatomical_sites,
@@ -19,7 +19,10 @@ from search_api.bigpicture.process import (
 )
 
 TEST_DIR = (
-    Path(__file__).resolve().parent.parent.parent / "files" / "bigpicture" / "xml"
+    Path(__file__).resolve().parent.parent.parent.parent
+    / "files"
+    / "bigpicture"
+    / "xml"
 )
 
 

@@ -1,4 +1,4 @@
-"""Bigpicture data extraction and loading."""
+"""Bigpicture XML extraction service."""
 
 import logging
 from pathlib import Path
@@ -25,7 +25,9 @@ IMAGE_XML_FILE = "METADATA/image.xml"
 SAMPLE_XML_FILE = "METADATA/sample.xml"
 STAINING_XML_FILE = "METADATA/staining.xml"
 
-XML_SCHEMA_DIR = Path(__file__).resolve().parent.parent / "schemas" / "bigpicture"
+XML_SCHEMA_DIR = (
+    Path(__file__).resolve().parent.parent.parent / "schemas" / "bigpicture"
+)
 
 DATASET_XML_SCHEMA_FILE = "BP.dataset.xsd"
 IMAGE_XML_SCHEMA_FILE = "BP.image.xsd"

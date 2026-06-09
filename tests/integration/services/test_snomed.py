@@ -1,14 +1,10 @@
 """Integration tests for the SNOMED CT service."""
 
-import os
-
 import pytest
 from search_api.api.bigpicture.models import BP_SPECIES_FILTERING_TERM
 from search_api.services.snomed import SnomedService
 
-skip = pytest.mark.skipif(
-    not os.environ.get("SNOWSTORM_URL"), reason="SNOWSTORM_URL is not set"
-)
+skip = pytest.mark.skip(reason="Requires Snowstorm")
 
 
 @skip

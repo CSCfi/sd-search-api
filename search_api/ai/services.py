@@ -2,38 +2,14 @@
 
 from collections.abc import Sequence
 
-from pydantic import BaseModel
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
+from search_api.ai.models import AIQueryFilter, AISearchResult
 from search_api.api.beacon.models import BeaconFilteringTerm, BeaconQueryFilter
 from search_api.api.beacon.services import BeaconService
 from search_api.conf import ai_config as _ai_config
-
-
-class AIQueryFilter(BaseModel):
-    id: str
-    value: str | list[str]
-    allowed_values: list[str] | None = None
-    # TODO(improve): support ontology descendants.
-    # includeDescendantTerms: bool = True
-
-
-class AIDatasetResult(BaseModel):
-    dataset_id: str
-    dataset_title: str | None = None
-    matching_image_count: int
-    total_image_count: int
-
-
-class AISearchResult(BaseModel):
-    """Structured result returned by the AI search agent."""
-
-    interpretation: str
-    filters: list[AIQueryFilter]
-    dataset_count: int
-    datasets: list[AIDatasetResult]
 
 
 _SYSTEM_PROMPT = """\

@@ -23,7 +23,8 @@ from ..beacon.models import (
     BeaconInfoResponse,
 )
 from search_api.api.beacon.services import BeaconService, OpenSearchBeaconService
-from search_api.ai.services import AISearchResult, AIService
+from search_api.ai.models import AISearchResult
+from search_api.ai.services import AIService
 from search_api.services.snomed import SnomedService
 
 router = APIRouter()

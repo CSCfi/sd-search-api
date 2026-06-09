@@ -1,8 +1,9 @@
 import asyncio
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 
-from .models import (
+from search_api.api.bigpicture.models import (
     BP_BEACON_ID,
     BP_FILTERING_TERMS,
     BP_FILTERING_TERMS_RESPONSE,
@@ -11,7 +12,7 @@ from .models import (
     BP_OPENSEARCH_INDEX,
 )
 from search_api.api.models import AIQueryRequest, FieldValueCount, FieldValueSuggestion
-from ..beacon.models import (
+from search_api.api.beacon.models import (
     BeaconQueryRequest,
     BeaconBooleanResponse,
     BeaconCountResponse,
@@ -26,6 +27,8 @@ from search_api.api.beacon.services import BeaconService, OpenSearchBeaconServic
 from search_api.ai.models import AISearchResult
 from search_api.ai.services import AIService
 from search_api.services.snomed import SnomedService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -79,46 +82,55 @@ async def query(
     ontology_field_ids = {t.id for t in BP_ONTOLOGY_FILTERING_TERMS}
     ontology_filters = [f for f in request.query.filters if f.id in ontology_field_ids]
     other_filters = [f for f in request.query.filters if f.id not in ontology_field_ids]
+
     # Resolve ontology filter values to concept IDs, and optionally expand to descendants.
-    filters = other_filters + list(
-        await asyncio.gather(
-            *[
-                snomed_service.prepare_ontology_filter(f, BP_FILTERING_TERMS)
-                for f in ontology_filters
-            ]
+    try:
+        resolved_ontology_filters = list(
+            await asyncio.gather(
+                *[
+                    snomed_service.prepare_ontology_filter(f, BP_FILTERING_TERMS)
+                    for f in ontology_filters
+                ]
+            )
         )
-    )
-    response = await beacon_service.query(
-        filters=filters,
-    )
+    except Exception as e:
+        logger.exception("Ontology service error: %s", e)
+        raise HTTPException(status_code=503, detail="Ontology service error.")
 
-    meta = BeaconResponseMeta(
-        returnedGranularity=request.query.requestedGranularity, beaconId=BP_BEACON_ID
-    )
+    filters = other_filters + resolved_ontology_filters
+    response = await beacon_service.query(filters=filters)
 
-    if request.query.requestedGranularity == "boolean":
+    granularity = request.query.requestedGranularity
+    num_results = len(response.resultSet)
+    exists = num_results > 0
+    meta = BeaconResponseMeta(returnedGranularity=granularity, beaconId=BP_BEACON_ID)
+
+    if granularity == "boolean":
         return BeaconBooleanResponse(
             meta=meta,
-            responseSummary=BeaconResultExistsResponseSummary(
-                exists=len(response.resultSet) > 0
-            ),
+            responseSummary=BeaconResultExistsResponseSummary(exists=exists),
         )
 
-    if request.query.requestedGranularity == "count":
+    if granularity == "count":
         return BeaconCountResponse(
             meta=meta,
             responseSummary=BeaconResultCountResponseSummary(
-                exists=len(response.resultSet) > 0,
-                numTotalResults=len(response.resultSet),
+                exists=exists,
+                numTotalResults=num_results,
             ),
         )
 
-    return BeaconResultSetsResponse(
-        meta=meta,
-        responseSummary=BeaconResultCountResponseSummary(
-            exists=len(response.resultSet) > 0, numTotalResults=len(response.resultSet)
-        ),
-        response=response,
+    if granularity == "record":
+        return BeaconResultSetsResponse(
+            meta=meta,
+            responseSummary=BeaconResultCountResponseSummary(
+                exists=exists, numTotalResults=num_results
+            ),
+            response=response,
+        )
+
+    raise HTTPException(
+        status_code=400, detail=f"Unsupported granularity: {granularity!r}"
     )
 
 

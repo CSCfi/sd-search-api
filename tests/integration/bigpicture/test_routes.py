@@ -6,6 +6,7 @@
 from typing import Any
 
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 from search_api.api.beacon.models import (
@@ -192,11 +193,10 @@ def bp_opensearch_docs() -> list[dict[str, Any]]:
 def _override_dependencies(bp_opensearch_index_name: str):
     """Point get_beacon_service at the UUID test index and swap out SNOMED."""
 
-    def _beacon_service() -> OpenSearchBeaconService:
-        from search_api.api.opensearch.services import create_search
-
+    def _beacon_service(request: Request) -> OpenSearchBeaconService:
+        # Reuse the client created by the app lifespan.
         return OpenSearchBeaconService(
-            create_search(),
+            request.app.state.bp_search,
             bp_opensearch_index_name,
             BP_FILTERING_TERMS,
         )
@@ -212,7 +212,8 @@ def _override_dependencies(bp_opensearch_index_name: str):
 
 @pytest.fixture(scope="module")
 def client() -> TestClient:
-    return TestClient(app)
+    with TestClient(app) as c:
+        yield c
 
 
 def get_filters(

@@ -15,6 +15,13 @@ from search_api.api.opensearch.services import create_search  # noqa: E402
 
 bp_search = create_search()
 
+
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def _close_search_client():
+    yield
+    await bp_search.close()
+
+
 _BP_INDEX_PATH = (
     Path(__file__).resolve().parents[2]
     / "search_api"

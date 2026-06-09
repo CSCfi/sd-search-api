@@ -55,7 +55,7 @@ docker compose --profile dev up --build
 Then run:
 
 ```bash
-.venv/bin/pytest tests/integration/
+uv run pytest tests/integration/
 ```
 
 Environmental variables are defined in `tests/integration/.env`.

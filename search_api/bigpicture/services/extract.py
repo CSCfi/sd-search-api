@@ -8,6 +8,8 @@ from lxml.etree import _ElementTree as ElementTree  # noqa
 import fsspec  # type: ignore
 import isodate  # type: ignore[import-untyped]
 
+from search_api.bigpicture.services.load import BigPictureLoadService
+from search_api.database.repository import get_cursor
 from search_api.bigpicture.models import (
     BigpictureFields,
     BigpictureCodeAttributeValue,
@@ -516,3 +518,27 @@ def _extract_age_at_extraction_range(elem: ElementTree) -> tuple[str, str] | Non
         return None
 
     return start, end
+
+
+class BigPictureExtractService:
+    """Service for extracting Bigpicture fields from XML files."""
+
+    @staticmethod
+    def extract_fields(
+        root: str = "/",
+        fs: fsspec.AbstractFileSystem | None = None,
+        use_aliases: bool = False,
+    ) -> Iterator[BigpictureFields]:
+        """Extract search fields from Bigpicture XML directories under the root path."""
+        return extract_fields(root, fs, use_aliases)
+
+    async def extract_and_load_fields(
+        self,
+        root: str = "/",
+        fs: fsspec.AbstractFileSystem | None = None,
+        use_aliases: bool = False,
+    ) -> None:
+        """Extract fields from XML files and load them into the database."""
+        async with get_cursor() as cur:
+            for fields in self.extract_fields(root, fs, use_aliases):
+                await BigPictureLoadService.load_fields(cur, fields)

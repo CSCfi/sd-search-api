@@ -8,6 +8,7 @@ from search_api.bigpicture.models import (
     BigpictureBlockFields,
 )
 from search_api.bigpicture.services.load import BigPictureLoadService
+from search_api.bigpicture.services.sync import BigPictureSyncService
 from search_api.database.repository import get_connection
 
 
@@ -16,9 +17,7 @@ def get_code(code: str) -> BigpictureCodeAttributeValue:
 
 
 @pytest.mark.asyncio
-async def test_load_fields():
-    is_sync_fields = False
-
+async def test_load_and_sync_fields():
     image_id = f"image{uuid.uuid4()}"
     dataset_id = f"dataset{uuid.uuid4()}"
     dataset_image_cnt = 1
@@ -57,13 +56,14 @@ async def test_load_fields():
         },
     )
 
-    service = BigPictureLoadService()
+    load_service = BigPictureLoadService()
+    sync_service = BigPictureSyncService()
 
     async with get_connection() as conn:
         async with conn.cursor() as cur:
-            await service.load_fields(cur, fields)
+            await load_service.load_fields(cur, fields)
 
-            actual = await service.get_fields(cur, image_id)
+            actual = await load_service.get_fields(cur, image_id)
 
             assert fields.image_id == actual.image_id
             assert fields.dataset_id == actual.dataset_id
@@ -79,5 +79,4 @@ async def test_load_fields():
             assert fields.blocks == actual.blocks
             assert fields.stains == actual.stains
 
-            if is_sync_fields:
-                await service.sync_fields(cur, image_id)
+            await sync_service.sync_fields(cur, image_id)

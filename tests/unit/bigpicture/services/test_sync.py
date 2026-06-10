@@ -1,12 +1,9 @@
-from search_api.bigpicture.models import BigpictureCodeAttributeValue
-from search_api.bigpicture.services.load import (
+import logging
+
+from search_api.bigpicture.services.sync import (
     _convert_blocks_for_opensearch,
     _convert_iso8601_range_for_opensearch,
 )
-
-
-def get_code(code: str) -> BigpictureCodeAttributeValue:
-    return BigpictureCodeAttributeValue(code=code, meaning=code)
 
 
 def test_convert_iso8601_range_for_opensearch_valid():
@@ -17,8 +14,6 @@ def test_convert_iso8601_range_for_opensearch_valid():
 
 
 def test_convert_iso8601_range_for_opensearch_invalid(caplog):
-    import logging
-
     with caplog.at_level(logging.ERROR):
         result = _convert_iso8601_range_for_opensearch(
             {"gte": "NOT_VALID", "lte": "P1Y"}
@@ -29,8 +24,6 @@ def test_convert_iso8601_range_for_opensearch_invalid(caplog):
 
 
 def test_convert_iso8601_range_for_opensearch_missing(caplog):
-    import logging
-
     with caplog.at_level(logging.ERROR):
         result = _convert_iso8601_range_for_opensearch({"gte": "P40Y"})
 
@@ -40,8 +33,6 @@ def test_convert_iso8601_range_for_opensearch_missing(caplog):
 
 def test_convert_blocks_for_opensearch(caplog):
     """Invalid duration drops age_at_extraction; valid duration is converted to days."""
-    import logging
-
     blocks = [
         {
             "species": "337915000",

@@ -44,6 +44,7 @@ def extract_fields(
     root: str = "/",
     fs: fsspec.AbstractFileSystem | None = None,
     use_aliases: bool = False,
+    single_dir: bool = False,
 ) -> Iterator[BigpictureFields]:
     """
     Extract search fields from Bigpicture XML directories under the root path.
@@ -51,12 +52,14 @@ def extract_fields(
     :param root: Root directory or bucket path.
     :param fs: Optional fsspec filesystem. If None, a local filesystem is used.
     :param use_aliases: Use XML aliases instead of accessions.
+    :param single_dir: If True, treat root as a single dataset directory instead of
+        a parent directory containing multiple dataset directories.
     """
     if fs is None:
         # Use local filesystem.
         fs = fsspec.filesystem("file")
 
-    dirs = list_directories(root=root, fs=fs)
+    dirs = [root] if single_dir else list_directories(root=root, fs=fs)
 
     for d in dirs:
         try:
@@ -528,17 +531,44 @@ class BigPictureExtractService:
         root: str = "/",
         fs: fsspec.AbstractFileSystem | None = None,
         use_aliases: bool = False,
+        single_dir: bool = False,
     ) -> Iterator[BigpictureFields]:
-        """Extract search fields from Bigpicture XML directories under the root path."""
-        return extract_fields(root, fs, use_aliases)
+        """
+        Extract search fields from Bigpicture XML directories under the root path.
+
+        :param root: Local directory or bucket path containing dataset subdirectories,
+            or a single dataset directory if ``single_dir`` is True.
+        :param fs: Optional fsspec filesystem. If None, a local filesystem is used.
+        :param use_aliases: Use XML aliases instead of accessions.
+        :param single_dir: If True, treat root as a single dataset directory instead of
+            a parent directory containing multiple dataset directories.
+        """
+        return extract_fields(root, fs, use_aliases, single_dir)
 
     async def extract_and_load_fields(
         self,
         root: str = "/",
         fs: fsspec.AbstractFileSystem | None = None,
         use_aliases: bool = False,
+        single_dir: bool = False,
     ) -> None:
-        """Extract fields from XML files and load them into the database."""
+        """
+        Extract fields from XML files and load them into the database.
+
+        :param root: Local directory or bucket path containing dataset subdirectories,
+            or a single dataset directory if ``single_dir`` is True.
+        :param fs: Optional fsspec filesystem. If None, a local filesystem is used.
+        :param use_aliases: Use XML aliases instead of accessions.
+        :param single_dir: If True, treat root as a single dataset directory instead of
+            a parent directory containing multiple dataset directories.
+        """
+        logging.info("Loading fields from %s.", root)
+        count = 0
         async with get_cursor() as cur:
-            for fields in self.extract_fields(root, fs, use_aliases):
+            for fields in self.extract_fields(root, fs, use_aliases, single_dir):
                 await BigPictureLoadService.load_fields(cur, fields)
+                count += 1
+                logging.info(
+                    "Loaded image %s (dataset %s).", fields.image_id, fields.dataset_id
+                )
+        logging.info("Done — loaded %d image(s).", count)

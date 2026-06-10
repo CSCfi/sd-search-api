@@ -128,8 +128,30 @@ Example output while running:
 
 Verify that the SNOMED CT ontology is loaded:
 
+TODO: add verification instructions
+
+## Data loading
+
+### Bigpicture
+
+Load Bigpicture XML data into the database with `load.py`.
+
+Load a single dataset directory (default):
+
 ```bash
-curl -s "https://snowstorm.rahtiapp.fi/codesystems" | jq '.items[].shortName'
+uv run python scripts/bigpicture/load.py /path/to/dataset/
+```
+
+Load from a parent directory containing multiple dataset subdirectories:
+
+```bash
+uv run python scripts/bigpicture/load.py /path/to/datasets/ --multi-dir
+```
+
+To also sync to OpenSearch immediately after loading, add `--sync`:
+
+```bash
+uv run python scripts/bigpicture/load.py /path/to/datasets/ --sync
 ```
 
 ## LLM search

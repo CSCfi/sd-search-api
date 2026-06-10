@@ -1,5 +1,6 @@
 """Bigpicture models."""
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
@@ -98,3 +99,6 @@ class BigpictureFields(
     dataset_short_name: str | None = None
     dataset_title: str | None = None
     dataset_description: str | None = None
+    dataset_files_date: datetime | None = (
+        None  # newest file modification date in the dataset
+    )

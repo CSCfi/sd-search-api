@@ -66,3 +66,7 @@ plugins = ["pydantic.mypy"]
 markers = [
     "external: marks tests that require external network access (deselect with '-m not external')",
 ]
+filterwarnings = [
+    "ignore::UserWarning:opensearchpy",       # SSL verify_certs=False advisory
+    "ignore::DeprecationWarning:aiohttp",     # enable_cleanup_closed no-op on Python 3.14
+]

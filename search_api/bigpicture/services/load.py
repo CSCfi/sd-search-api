@@ -1,5 +1,7 @@
 """Bigpicture load service."""
 
+from datetime import datetime
+
 from psycopg import AsyncCursor
 from psycopg.types.json import Json
 
@@ -43,9 +45,10 @@ class BigPictureLoadService:
                 dataset_title,
                 dataset_description,
                 blocks,
-                stains
+                stains,
+                dataset_files_date
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (image_id) DO UPDATE
             SET
                 dataset_id = EXCLUDED.dataset_id,
@@ -54,7 +57,9 @@ class BigPictureLoadService:
                 dataset_title = EXCLUDED.dataset_title,
                 dataset_description = EXCLUDED.dataset_description,
                 blocks = EXCLUDED.blocks,
-                stains = EXCLUDED.stains
+                stains = EXCLUDED.stains,
+                dataset_files_date = EXCLUDED.dataset_files_date,
+                opensearch_sync_date = NULL
             """,
             (
                 fields.image_id,
@@ -127,8 +132,33 @@ class BigPictureLoadService:
                 )
                 if stains
                 else None,
+                # dataset_files_date
+                fields.dataset_files_date,
             ),
         )
+
+    @staticmethod
+    async def get_dataset_files_date(
+        cur: AsyncCursor, dataset_id: str
+    ) -> datetime | None:
+        """
+        Return the newest dataset_files_date stored for a dataset, or None if not loaded yet.
+
+        :param cur: The database cursor.
+        :param dataset_id: The dataset identifier.
+        :return: The newest file date recorded at last load, or None.
+        """
+        await cur.execute(
+            """
+            SELECT dataset_files_date
+            FROM bp_image
+            WHERE dataset_id = %s
+            LIMIT 1
+            """,
+            (dataset_id,),
+        )
+        row = await cur.fetchone()
+        return row[0] if row else None
 
     @staticmethod
     async def get_fields(cur: AsyncCursor, image_id: str) -> BigpictureFields | None:

@@ -80,3 +80,5 @@ async def test_load_and_sync_fields():
             assert fields.stains == actual.stains
 
             await sync_service.sync_fields(cur, image_id)
+
+    await sync_service.search.close()

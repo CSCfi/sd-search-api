@@ -1,4 +1,9 @@
+import logging
+from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
 
 from lxml import etree
 
@@ -16,6 +21,7 @@ from search_api.bigpicture.services.extract import (
     _extract_fixation_type,
     _extract_string_attribute_value,
     _extract_age_at_extraction_range,
+    _get_last_modification_time,
 )
 
 TEST_DIR = (
@@ -191,7 +197,6 @@ def test_extract_age_at_extraction_range_valid():
 
 
 def test_extract_age_at_extraction_range_invalid(caplog):
-    import logging
 
     xml = """
     <ATTRIBUTES>
@@ -490,3 +495,74 @@ def test_extract_fixation_type_other_scheme():
 
     assert fixation_type is None
     assert fixation_type_text == "Test7"
+
+
+@pytest.fixture
+def mock_fs():
+    def _factory(info_map: dict) -> MagicMock:
+        fs = MagicMock()
+        fs.info.side_effect = lambda path: info_map[path]
+        return fs
+
+    return _factory
+
+
+def test_get_last_modification_time_mtime(mock_fs):
+    """mtime as a UNIX timestamp (float) is converted to a UTC datetime."""
+    ts = 1_700_000_000.0
+    expected = datetime.fromtimestamp(ts, tz=timezone.utc)
+    fs = mock_fs({"/a": {"mtime": ts}})
+
+    result = _get_last_modification_time(fs, ["/a"])
+
+    assert result == expected
+    assert result.tzinfo == timezone.utc
+
+
+def test_get_last_modification_time_last_modified(mock_fs):
+    """last_modified as a tz-aware datetime is returned unchanged."""
+    dt = datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+    fs = mock_fs({"/a": {"last_modified": dt}})
+
+    result = _get_last_modification_time(fs, ["/a"])
+
+    assert result == dt
+
+
+def test_get_last_modification_time_LastModified(mock_fs):
+    """LastModified (S3 key) as a naive datetime gets UTC attached."""
+    naive = datetime(2024, 6, 1, 8, 30, 0)
+    fs = mock_fs({"/a": {"LastModified": naive}})
+
+    result = _get_last_modification_time(fs, ["/a"])
+
+    assert result == naive.replace(tzinfo=timezone.utc)
+    assert result.tzinfo == timezone.utc
+
+
+def test_get_last_modification_time_returns_max(mock_fs):
+    """The newest mtime across multiple paths is returned."""
+    older = datetime(2023, 1, 1, tzinfo=timezone.utc)
+    newer = datetime(2024, 6, 1, tzinfo=timezone.utc)
+    fs = mock_fs({"/a": {"mtime": older}, "/b": {"mtime": newer}})
+
+    result = _get_last_modification_time(fs, ["/a", "/b"])
+
+    assert result == newer
+
+
+def test_get_last_modification_time_no_times(mock_fs):
+    fs = mock_fs({"/a": {"size": 1234}})
+
+    result = _get_last_modification_time(fs, ["/a"])
+
+    assert result is None
+
+
+def test_get_last_modification_time_no_files():
+    fs = MagicMock()
+
+    result = _get_last_modification_time(fs, [])
+
+    assert result is None
+    fs.info.assert_not_called()

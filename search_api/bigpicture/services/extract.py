@@ -1,6 +1,7 @@
 """Bigpicture XML extraction service."""
 
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator, Literal, cast
 from lxml.etree import _ElementTree as ElementTree  # noqa
@@ -37,7 +38,32 @@ SAMPLE_XML_SCHEMA_FILE = "BP.sample.xsd"
 STAINING_XML_SCHEMA_FILE = "BP.staining.xsd"
 
 
-# TODO(improve): do not process directories that have already been processed
+def _get_last_modification_time(
+    fs: fsspec.AbstractFileSystem, file_paths: list[str]
+) -> datetime | None:
+    """Return the last modification time across the given file paths, or None on error."""
+    mtimes: list[datetime] = []
+    for path in file_paths:
+        try:
+            info = fs.info(path)
+            mtime = (
+                info.get("mtime")  # local filesystem (fsspec LocalFileSystem)
+                or info.get(
+                    "last_modified"
+                )  # GCS, HTTP (fsspec GCSFileSystem, HTTPFileSystem)
+                or info.get("LastModified")  # S3 raw boto3 key (fsspec S3FileSystem)
+            )
+            if mtime is None:
+                continue
+            if isinstance(mtime, (int, float)):
+                mtimes.append(datetime.fromtimestamp(mtime, tz=timezone.utc))
+            elif isinstance(mtime, datetime):
+                mtimes.append(
+                    mtime if mtime.tzinfo else mtime.replace(tzinfo=timezone.utc)
+                )
+        except Exception:
+            logging.warning("Could not extract last modification time for %s.", path)
+    return max(mtimes) if mtimes else None
 
 
 def extract_fields(
@@ -76,6 +102,16 @@ def extract_fields(
                 raise ValueError(f"Missing XML file: {SAMPLE_XML_FILE}")
             if not fs.exists(staining_file_path):
                 raise ValueError(f"Missing XML file: {STAINING_XML_FILE}")
+
+            dataset_files_date = _get_last_modification_time(
+                fs,
+                [
+                    dataset_file_path,
+                    image_file_path,
+                    sample_file_path,
+                    staining_file_path,
+                ],
+            )
 
             if use_aliases:
                 id_attribute = "alias"
@@ -260,6 +296,7 @@ def extract_fields(
                     dataset_short_name=dataset_short_name,
                     dataset_title=dataset_title,
                     dataset_description=dataset_description,
+                    dataset_files_date=dataset_files_date,
                 )
 
             # Add block fields.
@@ -563,12 +600,38 @@ class BigPictureExtractService:
             a parent directory containing multiple dataset directories.
         """
         logging.info("Loading fields from %s.", root)
-        count = 0
+        loaded = 0
+        skipped_datasets: set[str] = set()
+        checked_datasets: set[str] = set()
         async with get_cursor() as cur:
             for fields in self.extract_fields(root, fs, use_aliases, single_dir):
+                if fields.dataset_id in skipped_datasets:
+                    continue
+
+                if fields.dataset_id not in checked_datasets:
+                    checked_datasets.add(fields.dataset_id)
+                    existing_date = await BigPictureLoadService.get_dataset_files_date(
+                        cur, fields.dataset_id
+                    )
+                    if (
+                        existing_date is not None
+                        and fields.dataset_files_date is not None
+                        and existing_date >= fields.dataset_files_date
+                    ):
+                        logging.info(
+                            "Skipping dataset %s — no newer files.", fields.dataset_id
+                        )
+                        skipped_datasets.add(fields.dataset_id)
+                        continue
+
                 await BigPictureLoadService.load_fields(cur, fields)
-                count += 1
+                loaded += 1
                 logging.info(
                     "Loaded image %s (dataset %s).", fields.image_id, fields.dataset_id
                 )
-        logging.info("Done — loaded %d image(s).", count)
+
+        logging.info(
+            "Done — loaded %d image(s), skipped %d dataset(s).",
+            loaded,
+            len(skipped_datasets),
+        )

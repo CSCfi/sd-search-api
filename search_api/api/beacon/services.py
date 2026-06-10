@@ -1,6 +1,7 @@
 import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from functools import partial
 from typing import Any, override
 
 from opensearchpy import AsyncOpenSearch
@@ -16,6 +17,7 @@ from search_api.services.snomed import is_concept_id
 
 from search_api.api.beacon.models import (
     BeaconQueryFilter,
+    BeaconQueryGranularity,
     BeaconResultSets,
     BeaconResultSet,
     BeaconResultSetResult,
@@ -75,6 +77,7 @@ class BeaconService(ABC):
     async def query(
         self,
         filters: list[BeaconQueryFilter],
+        granularity: BeaconQueryGranularity = "record",
         limit: int = DEFAULT_LIMIT,
     ) -> BeaconResultSets:
         pass
@@ -121,6 +124,7 @@ class MockBeaconService(BeaconService):
     async def query(
         self,
         filters: list[BeaconQueryFilter],
+        granularity: BeaconQueryGranularity = "record",
         limit: int = DEFAULT_LIMIT,
     ) -> BeaconResultSets:
         return get_mock_query_result()
@@ -219,44 +223,53 @@ class OpenSearchBeaconService(BeaconService):
 
         return {"bool": {"must": must_clauses or [{"match_all": {}}]}}
 
-    def get_query(
-        self, filters: list[BeaconQueryFilter], limit: int = DEFAULT_LIMIT
+    @staticmethod
+    def _get_count_and_record_aggs(
+        limit: int, include_image_ids: bool
     ) -> dict[str, Any]:
+        """Get datasets aggregation, optionally including image IDs."""
         return {
-            "size": 0,
-            "query": self._get_query(filters, self.filtering_terms),
-            "aggs": {
-                "datasets": {
-                    "terms": {"field": "dataset_id", "size": limit},
-                    "aggs": {
-                        "dataset_result": {
-                            "top_hits": {
-                                "size": 1,
-                                "_source": [
-                                    "dataset_title",
-                                    "dataset_description",
-                                    "dataset_image_cnt",
-                                ],
-                            }
-                        },
-                        "image_result": {"terms": {"field": "image_id", "size": limit}},
+            "datasets": {
+                "terms": {"field": "dataset_id", "size": limit},
+                "aggs": {
+                    "dataset_result": {
+                        "top_hits": {
+                            "size": 1,
+                            "_source": [
+                                "dataset_title",
+                                "dataset_description",
+                                "dataset_image_cnt",
+                            ],
+                        }
                     },
-                }
-            },
+                    **(
+                        {
+                            "image_result": {
+                                "terms": {"field": "image_id", "size": limit}
+                            }
+                        }
+                        if include_image_ids
+                        else {}
+                    ),
+                },
+            }
         }
 
-    @override
-    async def query(
-        self,
-        filters: list[BeaconQueryFilter],
-        limit: int = DEFAULT_LIMIT,
-    ) -> BeaconResultSets:
-        _query = self.get_query(filters, limit)
-        resp = await self.client.search(index=self.index_name, body=_query)
-        buckets = resp.get("aggregations", {}).get("datasets", {}).get("buckets", [])
-
+    @staticmethod
+    def _parse_boolean_result(resp: dict[str, Any]) -> BeaconResultSets:
+        """Parse a boolean query response into a BeaconResultSets."""
         results = BeaconResultSets()
+        if resp.get("hits", {}).get("total", {}).get("value", 0) > 0:
+            results.resultSet.append(BeaconResultSet(id="", results=[]))
+        return results
 
+    @staticmethod
+    def _parse_count_and_record_result(
+        resp: dict[str, Any], include_image_ids: bool
+    ) -> BeaconResultSets:
+        """Parse datasets aggregations result."""
+        buckets = resp.get("aggregations", {}).get("datasets", {}).get("buckets", [])
+        results = BeaconResultSets()
         for bucket in buckets:
             dataset_id = bucket["key"]
             matching_image_count = bucket["doc_count"]
@@ -266,8 +279,26 @@ class OpenSearchBeaconService(BeaconService):
 
             dataset_title = hit_source.get("dataset_title")
             dataset_description = hit_source.get("dataset_description")
-            total_image_count = hit_source.get("dataset_image_cnt", 0)
-            image_ids = [b["key"] for b in bucket["image_result"]["buckets"]]
+            total_image_count = hit_source.get("dataset_image_cnt")
+
+            if dataset_title is None:
+                raise ValueError(
+                    f"Dataset '{dataset_id}' is missing field: dataset_title"
+                )
+            if dataset_description is None:
+                raise ValueError(
+                    f"Dataset '{dataset_id}' is missing field: dataset_description"
+                )
+            if total_image_count is None:
+                raise ValueError(
+                    f"Dataset '{dataset_id}' is missing field: dataset_image_cnt"
+                )
+
+            image_ids = (
+                [b["key"] for b in bucket["image_result"]["buckets"]]
+                if include_image_ids
+                else []
+            )
 
             results.resultSet.append(
                 BeaconResultSet(
@@ -284,5 +315,54 @@ class OpenSearchBeaconService(BeaconService):
                     ],
                 )
             )
-
         return results
+
+    def get_boolean_query(self, filters: list[BeaconQueryFilter]) -> dict[str, Any]:
+        return {
+            "size": 0,
+            "query": self._get_query(filters, self.filtering_terms),
+        }
+
+    def get_count_query(
+        self, filters: list[BeaconQueryFilter], limit: int = DEFAULT_LIMIT
+    ) -> dict[str, Any]:
+        return {
+            "size": 0,
+            "query": self._get_query(filters, self.filtering_terms),
+            "aggs": self._get_count_and_record_aggs(limit, include_image_ids=False),
+        }
+
+    def get_record_query(
+        self, filters: list[BeaconQueryFilter], limit: int = DEFAULT_LIMIT
+    ) -> dict[str, Any]:
+        return {
+            "size": 0,
+            "query": self._get_query(filters, self.filtering_terms),
+            "aggs": self._get_count_and_record_aggs(limit, include_image_ids=True),
+        }
+
+    @override
+    async def query(
+        self,
+        filters: list[BeaconQueryFilter],
+        granularity: BeaconQueryGranularity = "record",
+        limit: int = DEFAULT_LIMIT,
+    ) -> BeaconResultSets:
+        if granularity == "boolean":
+            body = self.get_boolean_query(filters)
+            parse = OpenSearchBeaconService._parse_boolean_result
+        elif granularity == "count":
+            body = self.get_count_query(filters, limit)
+            parse = partial(
+                OpenSearchBeaconService._parse_count_and_record_result,
+                include_image_ids=False,
+            )
+        else:  # granularity == "record"
+            body = self.get_record_query(filters, limit)
+            parse = partial(
+                OpenSearchBeaconService._parse_count_and_record_result,
+                include_image_ids=True,
+            )
+
+        resp = await self.client.search(index=self.index_name, body=body)
+        return parse(resp)

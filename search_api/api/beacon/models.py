@@ -113,11 +113,13 @@ class BeaconResultSetResult(BaseModel):
     """Beacon V2 result sets result. Not constrained by a JSON schema."""
 
     datasetId: str
-    datasetTitle: str | None
-    datasetDescription: str | None
+    datasetTitle: str
+    datasetDescription: str
     totalImageCount: int
     matchingImageCount: int
-    imageIds: list[str] = Field(default_factory=list)
+    imageIds: list[str] = Field(
+        default_factory=list
+    )  # Not available for count granularity.
 
 
 # https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/responses/sections/beaconResultsets.json

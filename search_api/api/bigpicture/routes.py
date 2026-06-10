@@ -97,10 +97,9 @@ async def query(
         logger.exception("Ontology service error: %s", e)
         raise HTTPException(status_code=503, detail="Ontology service error.")
 
-    filters = other_filters + resolved_ontology_filters
-    response = await beacon_service.query(filters=filters)
-
     granularity = request.query.requestedGranularity
+    filters = other_filters + resolved_ontology_filters
+    response = await beacon_service.query(filters=filters, granularity=granularity)
     num_results = len(response.resultSet)
     exists = num_results > 0
     meta = BeaconResponseMeta(returnedGranularity=granularity, beaconId=BP_BEACON_ID)

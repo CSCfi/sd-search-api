@@ -8,8 +8,8 @@ from lxml.etree import _ElementTree as ElementTree  # noqa
 
 import fsspec  # type: ignore
 import isodate  # type: ignore[import-untyped]
-
 from search_api.bigpicture.services.load import BigPictureLoadService
+from search_api.services.crypt import load_c4gh_keys, read_file, resolve_path
 from search_api.database.repository import get_cursor
 from search_api.bigpicture.models import (
     BigpictureFields,
@@ -71,6 +71,8 @@ def extract_fields(
     fs: fsspec.AbstractFileSystem | None = None,
     use_aliases: bool = False,
     single_dir: bool = False,
+    c4gh_private_key_file: str | None = None,
+    c4gh_passphrase: str | None = None,
 ) -> Iterator[BigpictureFields]:
     """
     Extract search fields from Bigpicture XML directories under the root path.
@@ -80,28 +82,29 @@ def extract_fields(
     :param use_aliases: Use XML aliases instead of accessions.
     :param single_dir: If True, treat root as a single dataset directory instead of
         a parent directory containing multiple dataset directories.
+    :param c4gh_private_key_file: Path to a Crypt4GH private key file (.sec) for
+        decrypting ``.c4gh`` files. If None, only plain files are accepted.
+    :param c4gh_passphrase: Passphrase protecting the private key, or None for an
+        unprotected key.
     """
     if fs is None:
         # Use local filesystem.
         fs = fsspec.filesystem("file")
 
+    keys = (
+        load_c4gh_keys(c4gh_private_key_file, c4gh_passphrase)
+        if c4gh_private_key_file
+        else None
+    )
+
     dirs = [root] if single_dir else list_directories(root=root, fs=fs)
 
     for d in dirs:
         try:
-            dataset_file_path = f"{d}/{DATASET_XML_FILE}"
-            image_file_path = f"{d}/{IMAGE_XML_FILE}"
-            sample_file_path = f"{d}/{SAMPLE_XML_FILE}"
-            staining_file_path = f"{d}/{STAINING_XML_FILE}"
-
-            if not fs.exists(dataset_file_path):
-                raise ValueError(f"Missing XML file: {DATASET_XML_FILE}")
-            if not fs.exists(image_file_path):
-                raise ValueError(f"Missing XML file: {IMAGE_XML_FILE}")
-            if not fs.exists(sample_file_path):
-                raise ValueError(f"Missing XML file: {SAMPLE_XML_FILE}")
-            if not fs.exists(staining_file_path):
-                raise ValueError(f"Missing XML file: {STAINING_XML_FILE}")
+            dataset_file_path = resolve_path(fs, f"{d}/{DATASET_XML_FILE}")
+            image_file_path = resolve_path(fs, f"{d}/{IMAGE_XML_FILE}")
+            sample_file_path = resolve_path(fs, f"{d}/{SAMPLE_XML_FILE}")
+            staining_file_path = resolve_path(fs, f"{d}/{STAINING_XML_FILE}")
 
             dataset_files_date = _get_last_modification_time(
                 fs,
@@ -168,117 +171,111 @@ def extract_fields(
             # Read dataset XML.
             #
 
-            with fs.open(dataset_file_path, "rb") as f:
-                dataset_xml = parse_xml(f.read())
-                validate_xml(dataset_xml, XML_SCHEMA_DIR, DATASET_XML_SCHEMA_FILE)
-                dataset_id = get_xml_value(
-                    f"/DATASET/@{id_attribute} | /DATASET_SET/DATASET/@{id_attribute}",
-                    dataset_xml,
+            dataset_xml = parse_xml(read_file(fs, dataset_file_path, keys))
+            validate_xml(dataset_xml, XML_SCHEMA_DIR, DATASET_XML_SCHEMA_FILE)
+            dataset_id = get_xml_value(
+                f"/DATASET/@{id_attribute} | /DATASET_SET/DATASET/@{id_attribute}",
+                dataset_xml,
+            )
+            if dataset_id is None:
+                raise ValueError(
+                    f"Failed to extract dataset id from {str(dataset_file_path)}"
                 )
-                if dataset_id is None:
-                    raise ValueError(
-                        f"Failed to extract dataset id from {str(dataset_file_path)}"
-                    )
-                dataset_short_name = get_xml_value(
-                    "/DATASET/DESCRIPTION | /DATASET_SET/DATASET/SHORT_NAME",
-                    dataset_xml,
-                )
-                dataset_title = get_xml_value(
-                    "/DATASET/DESCRIPTION | /DATASET_SET/DATASET/TITLE",
-                    dataset_xml,
-                )
-                dataset_description = get_xml_value(
-                    "/DATASET/DESCRIPTION | /DATASET_SET/DATASET/DESCRIPTION",
-                    dataset_xml,
-                )
+            dataset_short_name = get_xml_value(
+                "/DATASET/DESCRIPTION | /DATASET_SET/DATASET/SHORT_NAME",
+                dataset_xml,
+            )
+            dataset_title = get_xml_value(
+                "/DATASET/DESCRIPTION | /DATASET_SET/DATASET/TITLE",
+                dataset_xml,
+            )
+            dataset_description = get_xml_value(
+                "/DATASET/DESCRIPTION | /DATASET_SET/DATASET/DESCRIPTION",
+                dataset_xml,
+            )
 
             # Read image XML.
             #
 
-            with fs.open(image_file_path, "rb") as f:
-                image_xml = parse_xml(f.read())
-                validate_xml(image_xml, XML_SCHEMA_DIR, IMAGE_XML_SCHEMA_FILE)
+            image_xml = parse_xml(read_file(fs, image_file_path, keys))
+            validate_xml(image_xml, XML_SCHEMA_DIR, IMAGE_XML_SCHEMA_FILE)
 
-                for image_xml in image_xml.xpath("/IMAGE | /IMAGE_SET/IMAGE"):
-                    image_id = image_xml.get(id_attribute)
-                    if image_id is None:
-                        raise ValueError(
-                            f"Failed to extract image id from {str(image_file_path)}"
-                        )
-                    image_ids.append(image_id)
-                    slide_ids = image_xml.xpath(f"./IMAGE_OF/@{id_attribute}")
-                    for slide_id in slide_ids:
-                        add_slide_id_mapping(slide_id, image_id)
+            for image_xml in image_xml.xpath("/IMAGE | /IMAGE_SET/IMAGE"):
+                image_id = image_xml.get(id_attribute)
+                if image_id is None:
+                    raise ValueError(
+                        f"Failed to extract image id from {str(image_file_path)}"
+                    )
+                image_ids.append(image_id)
+                slide_ids = image_xml.xpath(f"./IMAGE_OF/@{id_attribute}")
+                for slide_id in slide_ids:
+                    add_slide_id_mapping(slide_id, image_id)
 
             # Read sample XML.
             #
 
-            with fs.open(sample_file_path, "rb") as f:
-                sample_xml = parse_xml(f.read())
-                validate_xml(sample_xml, XML_SCHEMA_DIR, SAMPLE_XML_SCHEMA_FILE)
+            sample_xml = parse_xml(read_file(fs, sample_file_path, keys))
+            validate_xml(sample_xml, XML_SCHEMA_DIR, SAMPLE_XML_SCHEMA_FILE)
 
-                for xml in sample_xml.xpath("/SLIDE | /SAMPLE_SET/SLIDE"):
-                    slide_id = xml.get(id_attribute)
-                    for block_id in xml.xpath(f"./CREATED_FROM_REF/@{id_attribute}"):
-                        add_block_id_mapping(block_id, slide_id)
-                    for staining_id in xml.xpath(
-                        f"./STAINING_INFORMATION_REF/@{id_attribute}"
-                    ):
-                        add_staining_id_mapping(staining_id, slide_id)
-
-                for xml in sample_xml.xpath("/BLOCK | /SAMPLE_SET/BLOCK"):
-                    block_id = xml.get(id_attribute)
-                    # Extract fields from XML.
-                    map_block_id_to_fields[block_id] = _extract_sample_block_fields(xml)
-                    for specimen_id in xml.xpath(f"./SAMPLED_FROM_REF/@{id_attribute}"):
-                        add_specimen_id_mapping(specimen_id, block_id)
-
-                for xml in sample_xml.xpath("/SPECIMEN | /SAMPLE_SET/SPECIMEN"):
-                    specimen_id = xml.get(id_attribute)
-                    # Extract fields from XML.
-                    map_specimen_id_to_fields[specimen_id] = (
-                        _extract_sample_specimen_fields(xml)
-                    )
-                    for case_id in xml.xpath(f"./PART_OF_CASE_REF/@{id_attribute}"):
-                        add_case_id_mapping(case_id, specimen_id)
-                    for biological_being_id in xml.xpath(
-                        f"./EXTRACTED_FROM_REF/@{id_attribute}"
-                    ):
-                        add_biological_being_id_to_specimen_mapping(
-                            biological_being_id, specimen_id
-                        )
-
-                for xml in sample_xml.xpath("/CASE | /SAMPLE_SET/CASE"):
-                    case_id = xml.get(id_attribute)
-                    for biological_being_id in xml.xpath(
-                        f"./BIOLOGICAL_BEING_REF/@{id_attribute}"
-                    ):
-                        add_biological_being_id_to_case_mapping(
-                            biological_being_id, case_id
-                        )
-
-                for xml in sample_xml.xpath(
-                    "/BIOLOGICAL_BEING | /SAMPLE_SET/BIOLOGICAL_BEING"
+            for xml in sample_xml.xpath("/SLIDE | /SAMPLE_SET/SLIDE"):
+                slide_id = xml.get(id_attribute)
+                for block_id in xml.xpath(f"./CREATED_FROM_REF/@{id_attribute}"):
+                    add_block_id_mapping(block_id, slide_id)
+                for staining_id in xml.xpath(
+                    f"./STAINING_INFORMATION_REF/@{id_attribute}"
                 ):
-                    biological_being_id = xml.get(id_attribute)
-                    # Extract fields from XML.
-                    map_biological_being_id_to_fields[biological_being_id] = (
-                        _extract_sample_biological_being_fields(xml)
+                    add_staining_id_mapping(staining_id, slide_id)
+
+            for xml in sample_xml.xpath("/BLOCK | /SAMPLE_SET/BLOCK"):
+                block_id = xml.get(id_attribute)
+                # Extract fields from XML.
+                map_block_id_to_fields[block_id] = _extract_sample_block_fields(xml)
+                for specimen_id in xml.xpath(f"./SAMPLED_FROM_REF/@{id_attribute}"):
+                    add_specimen_id_mapping(specimen_id, block_id)
+
+            for xml in sample_xml.xpath("/SPECIMEN | /SAMPLE_SET/SPECIMEN"):
+                specimen_id = xml.get(id_attribute)
+                # Extract fields from XML.
+                map_specimen_id_to_fields[specimen_id] = (
+                    _extract_sample_specimen_fields(xml)
+                )
+                for case_id in xml.xpath(f"./PART_OF_CASE_REF/@{id_attribute}"):
+                    add_case_id_mapping(case_id, specimen_id)
+                for biological_being_id in xml.xpath(
+                    f"./EXTRACTED_FROM_REF/@{id_attribute}"
+                ):
+                    add_biological_being_id_to_specimen_mapping(
+                        biological_being_id, specimen_id
                     )
+
+            for xml in sample_xml.xpath("/CASE | /SAMPLE_SET/CASE"):
+                case_id = xml.get(id_attribute)
+                for biological_being_id in xml.xpath(
+                    f"./BIOLOGICAL_BEING_REF/@{id_attribute}"
+                ):
+                    add_biological_being_id_to_case_mapping(
+                        biological_being_id, case_id
+                    )
+
+            for xml in sample_xml.xpath(
+                "/BIOLOGICAL_BEING | /SAMPLE_SET/BIOLOGICAL_BEING"
+            ):
+                biological_being_id = xml.get(id_attribute)
+                # Extract fields from XML.
+                map_biological_being_id_to_fields[biological_being_id] = (
+                    _extract_sample_biological_being_fields(xml)
+                )
 
             # Read staining XML.
             #
 
-            with fs.open(staining_file_path, "rb") as f:
-                staining_xml = parse_xml(f.read())
-                validate_xml(staining_xml, XML_SCHEMA_DIR, STAINING_XML_SCHEMA_FILE)
+            staining_xml = parse_xml(read_file(fs, staining_file_path, keys))
+            validate_xml(staining_xml, XML_SCHEMA_DIR, STAINING_XML_SCHEMA_FILE)
 
-                for xml in staining_xml.xpath("/STAINING | /STAINING_SET/STAINING"):
-                    staining_id = xml.get(id_attribute)
-                    # Extract fields from XML.
-                    map_staining_id_to_fields[staining_id] = _extract_staining_fields(
-                        xml
-                    )
+            for xml in staining_xml.xpath("/STAINING | /STAINING_SET/STAINING"):
+                staining_id = xml.get(id_attribute)
+                # Extract fields from XML.
+                map_staining_id_to_fields[staining_id] = _extract_staining_fields(xml)
 
             # Finished reading XMLs.
 
@@ -569,6 +566,8 @@ class BigPictureExtractService:
         fs: fsspec.AbstractFileSystem | None = None,
         use_aliases: bool = False,
         single_dir: bool = False,
+        c4gh_private_key_file: str | None = None,
+        c4gh_passphrase: str | None = None,
     ) -> Iterator[BigpictureFields]:
         """
         Extract search fields from Bigpicture XML directories under the root path.
@@ -579,8 +578,14 @@ class BigPictureExtractService:
         :param use_aliases: Use XML aliases instead of accessions.
         :param single_dir: If True, treat root as a single dataset directory instead of
             a parent directory containing multiple dataset directories.
+        :param c4gh_private_key_file: Path to a Crypt4GH private key file (.sec) for
+            decrypting ``.c4gh`` XML files. If None, only plain XML files are accepted.
+        :param c4gh_passphrase: Passphrase protecting the private key, or None for an
+            unprotected key.
         """
-        return extract_fields(root, fs, use_aliases, single_dir)
+        return extract_fields(
+            root, fs, use_aliases, single_dir, c4gh_private_key_file, c4gh_passphrase
+        )
 
     async def extract_and_load_fields(
         self,
@@ -588,6 +593,8 @@ class BigPictureExtractService:
         fs: fsspec.AbstractFileSystem | None = None,
         use_aliases: bool = False,
         single_dir: bool = False,
+        c4gh_private_key_file: str | None = None,
+        c4gh_passphrase: str | None = None,
     ) -> None:
         """
         Extract fields from XML files and load them into the database.
@@ -598,13 +605,24 @@ class BigPictureExtractService:
         :param use_aliases: Use XML aliases instead of accessions.
         :param single_dir: If True, treat root as a single dataset directory instead of
             a parent directory containing multiple dataset directories.
+        :param c4gh_private_key_file: Path to a Crypt4GH private key file (.sec) for
+            decrypting ``.c4gh`` files. If None, only plain files are accepted.
+        :param c4gh_passphrase: Passphrase protecting the private key, or None for an
+            unprotected key.
         """
         logging.info("Loading fields from %s.", root)
         loaded = 0
         skipped_datasets: set[str] = set()
         checked_datasets: set[str] = set()
         async with get_cursor() as cur:
-            for fields in self.extract_fields(root, fs, use_aliases, single_dir):
+            for fields in self.extract_fields(
+                root,
+                fs,
+                use_aliases,
+                single_dir,
+                c4gh_private_key_file,
+                c4gh_passphrase,
+            ):
                 if fields.dataset_id in skipped_datasets:
                     continue
 

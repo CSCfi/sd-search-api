@@ -65,6 +65,7 @@ sd_search_api = "search_api.main:main"
 plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
+pythonpath = ["."]
 markers = [
     "external: marks tests that require external network access (deselect with '-m not external')",
 ]

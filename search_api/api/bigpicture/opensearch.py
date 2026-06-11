@@ -12,7 +12,13 @@ _COMPOSITE_PAGE_SIZE = 1000
 
 
 class BigpictureOpenSearchBeaconService(OpenSearchBeaconService):
-    """OpenSearch beacon service with Bigpicture document-specific query logic."""
+    """OpenSearch beacon service for the Bigpicture document schema.
+
+    Bigpicture documents are indexed one per image, with dataset-level fields
+    (dataset_id, dataset_title, dataset_description, dataset_image_cnt) stored
+    on every document, and nested types (blocks, stains) for other data.
+    Results are grouped by dataset_id using composite aggregation.
+    """
 
     @staticmethod
     def _build_composite_body(
@@ -20,7 +26,14 @@ class BigpictureOpenSearchBeaconService(OpenSearchBeaconService):
         include_image_ids: bool,
         after_key: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        """Build an OpenSearch composite aggregation body for one page."""
+        """Build an OpenSearch composite aggregation request body for one page.
+
+        Composite sources are always keyed by dataset_id; image_id is added as
+        a second source for record granularity so each bucket represents a single
+        image. A top_hits sub-aggregation fetches dataset metadata (title,
+        description, total image count) from one document per bucket. Pass
+        after_key from the previous response to advance to the next page.
+        """
         sources: list[dict[str, Any]] = [
             {"dataset_id": {"terms": {"field": "dataset_id"}}}
         ]
@@ -59,7 +72,14 @@ class BigpictureOpenSearchBeaconService(OpenSearchBeaconService):
         query_clause: dict[str, Any],
         granularity: BeaconQueryGranularity,
     ) -> BeaconResultSets:
-        """Return results for the given query and count or record granularity."""
+        """Aggregate matching images by dataset using composite aggregation.
+
+        Pages through all composite buckets via after_key cursors. For count
+        granularity, buckets are keyed by dataset_id and doc_count accumulates
+        the matching image count. For record granularity, image_id is added as
+        a composite source so each bucket represents one image, and image IDs
+        are collected into a list.
+        """
         include_image_ids = granularity == "record"
         result_sets: dict[str, BeaconResultSetResult] = {}
         after_key: dict[str, Any] | None = None

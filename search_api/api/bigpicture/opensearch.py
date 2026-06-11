@@ -54,12 +54,12 @@ class BigpictureOpenSearchBeaconService(OpenSearchBeaconService):
         }
 
     @override
-    async def _collect_pages(
+    async def _get_result(
         self,
         query_clause: dict[str, Any],
         granularity: BeaconQueryGranularity,
     ) -> BeaconResultSets:
-        """Paginate through composite aggregation buckets and collect results."""
+        """Return results for the given query and count or record granularity."""
         include_image_ids = granularity == "record"
         result_sets: dict[str, BeaconResultSetResult] = {}
         after_key: dict[str, Any] | None = None

@@ -94,6 +94,13 @@ class BeaconService(ABC):
 
 
 class OpenSearchBeaconService(BeaconService):
+    """Generic OpenSearch-backed Beacon V2 service.
+
+    Handles query construction, boolean granularity, field value counts, and
+    cluster health. Subclasses implement _get_result to define how count
+    and record queries are made.
+    """
+
     def __init__(
         self,
         client: AsyncOpenSearch,
@@ -117,6 +124,7 @@ class OpenSearchBeaconService(BeaconService):
 
     @override
     async def is_healthy(self) -> bool:
+        """Return True if the OpenSearch cluster status is green or yellow."""
         try:
             resp = await self.client.cluster.health()
             return resp.get("status") in {"green", "yellow"}
@@ -127,6 +135,11 @@ class OpenSearchBeaconService(BeaconService):
     async def get_indexed_field_value_counts(
         self, field_id: str
     ) -> list[dict[str, int]]:
+        """Fetch term counts from the index for the given filtering term field.
+
+        Returns one dict for simple fields and two dicts for ontologyOrValue
+        fields.
+        """
         field = self.get_term(field_id).opensearch_field
         if isinstance(field, OpenSearchOntologyOrValue):
             concept_field_counts, other_field_counts = await asyncio.gather(
@@ -145,7 +158,11 @@ class OpenSearchBeaconService(BeaconService):
         filters: list[BeaconQueryFilter],
         filtering_terms: Sequence[OpenSearchBeaconFilteringTerm],
     ) -> dict[str, Any]:
-        """Build the OpenSearch query clause from a list of Beacon filters."""
+        """Build an OpenSearch bool/must query from Beacon filters.
+
+        Filters on nested fields are grouped by path and wrapped in nested
+        queries. Top-level filters are added as direct must clauses.
+        """
         terms_by_id = {t.id: t for t in filtering_terms}
         must_clauses: list[dict[str, Any]] = []
         nested_filters: dict[str, list[dict[str, Any]]] = {}
@@ -174,23 +191,24 @@ class OpenSearchBeaconService(BeaconService):
         return {"bool": {"must": must_clauses or [{"match_all": {}}]}}
 
     @abstractmethod
-    async def _collect_pages(
+    async def _get_result(
         self,
         query_clause: dict[str, Any],
         granularity: BeaconQueryGranularity,
     ) -> BeaconResultSets:
-        """Paginate through aggregation results and collect into BeaconResultSets."""
+        """Return results for the given query and count or record granularity."""
         pass
 
     @staticmethod
-    def _parse_boolean_result(resp: dict[str, Any]) -> BeaconResultSets:
-        """Parse a boolean query response into a BeaconResultSets."""
+    def _get_boolean_result(resp: dict[str, Any]) -> BeaconResultSets:
+        """Parse result for boolean query granularity."""
         results = BeaconResultSets()
         if resp.get("hits", {}).get("total", {}).get("value", 0) > 0:
             results.resultSet.append(BeaconResultSet(id="", results=[]))
         return results
 
     def get_boolean_query(self, filters: list[BeaconQueryFilter]) -> dict[str, Any]:
+        """Build a query for boolean granularity."""
         return {
             "size": 0,
             "query": self._get_query(filters, self.filtering_terms),
@@ -202,12 +220,14 @@ class OpenSearchBeaconService(BeaconService):
         filters: list[BeaconQueryFilter],
         granularity: BeaconQueryGranularity = "record",
     ) -> BeaconResultSets:
+        """Execute a query. Boolean query granularity is handled here. Count
+        and record granularity is delegated to _get_result."""
         query_clause = self._get_query(filters, self.filtering_terms)
 
         if granularity == "boolean":
             resp = await self.client.search(
                 index=self.index_name, body=self.get_boolean_query(filters)
             )
-            return OpenSearchBeaconService._parse_boolean_result(resp)
+            return OpenSearchBeaconService._get_boolean_result(resp)
 
-        return await self._collect_pages(query_clause, granularity)
+        return await self._get_result(query_clause, granularity)

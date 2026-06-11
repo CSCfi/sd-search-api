@@ -144,9 +144,76 @@ You can monitor the import progress also from the logs:
 oc logs -f deployment/snowstorm
 ```
 
-Finally, verify that the import has been completed:
+Once finished, verify that the import has been completed.
 
-TODO: add verification instructions
+Check the imported versions:
+
+```
+curl -s https://snowstorm.rahtiapp.fi/codesystems/SNOMEDCT/versions | jq '.items[] | {version, branchPath}'
+```
+
+Example output:
+
+```
+{
+  "version": "2026-06-01",
+  "branchPath": "MAIN/2026-06-01"
+}
+```
+
+Check the MAIN branch:
+
+```
+curl -s https://snowstorm.rahtiapp.fi/branches/MAIN                                     
+```
+
+Example output:
+
+```
+{
+  "path" : "MAIN",
+  "state" : "UP_TO_DATE",
+  "containsContent" : true,
+  "locked" : false,
+  "creation" : "2026-06-11T05:12:34.688Z",
+  "base" : "2026-06-11T05:12:34.688Z",
+  "head" : "2026-06-11T05:52:38.457Z",
+  "creationTimestamp" : 1781154754688,
+  "baseTimestamp" : 1781154754688,
+  "headTimestamp" : 1781157158457,
+  ...
+}
+```
+
+Get number of concepts:
+
+```
+curl -s "https://snowstorm.rahtiapp.fi/MAIN/concepts?limit=1&active=true" | jq '{total}'
+```
+
+Example output:
+
+```
+{
+  "total": 532824
+}
+```
+
+Get a concept:
+
+```
+curl -s "https://snowstorm.rahtiapp.fi/MAIN/concepts/337915000" | jq '{conceptId, active, fsn: .fsn.term}'
+```
+
+Example output:
+
+```
+{
+  "conceptId": "337915000",
+  "active": true,
+  "fsn": "Homo sapiens (organism)"
+}
+```
 
 ## Data loading
 

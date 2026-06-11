@@ -1,3 +1,5 @@
+import os
+
 from search_api.api.beacon.models import (
     SNOMED_ONTOLOGY_ID,
     BeaconFilteringOntology,
@@ -146,7 +148,7 @@ BP_STAINING_PROCEDURE_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
     ontologyConcept="127790008",  # Staining method (procedure)
     scopes=BP_STAINING_SCOPE,
     label="Staining procedure",
-    description="TThe name of the staining procedure that was performed to stain the slide",
+    description="The name of the staining procedure that was performed to stain the slide",
     opensearch_field=OpenSearchOntologyOrValue(
         concept_value_field="stains.staining_procedure",
         other_value_field="stains.staining_procedure_text",
@@ -200,7 +202,6 @@ BP_INFO_RESPONSE = BeaconInfoResponse(
     response=BeaconInfo(
         id=BP_BEACON_ID,
         name=BP_BEACON_NAME,
-        # TODO(improve): show actual environment
-        environment="dev",
+        environment=os.getenv("DEPLOYMENT_ENV", "dev"),
     ),
 )

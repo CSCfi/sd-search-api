@@ -10,6 +10,10 @@ class DeploymentConfiguration(BaseSettings):
     DEPLOYMENT_TYPE: Literal["Bigpicture"] = Field(
         description="Deployment type. Determines which router and database are used."
     )
+    DEPLOYMENT_ENV: Literal["prod", "test", "dev", "staging"] = Field(
+        default="dev",
+        description="Deployment environment.",
+    )
 
 
 class DatabaseConfiguration(BaseSettings):

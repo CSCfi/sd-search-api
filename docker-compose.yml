@@ -8,6 +8,7 @@ services:
     command: [ "uv", "run", "sd_search_api" ]
     environment:
       - DEPLOYMENT_TYPE=Bigpicture
+      - DEPLOYMENT_ENV=${DEPLOYMENT_ENV}
       - POSTGRES_HOST=bp-postgres
       - POSTGRES_DB=${BP_POSTGRES_DB}
       - POSTGRES_PORT=${BP_POSTGRES_PORT}

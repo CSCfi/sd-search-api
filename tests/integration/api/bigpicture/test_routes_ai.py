@@ -1,30 +1,26 @@
 """Integration tests for the AI search endpoint. Requires Ollama running locally."""
 
+import httpx
 import pytest
-from fastapi.testclient import TestClient
-from search_api.api.bigpicture.routes import get_beacon_service
+
 from search_api.ai.models import (
-    AISearchResult,
     AIDatasetResult,
     AIQueryFilter,
+    AISearchResult,
 )
-from search_api.api.beacon.services import MockBeaconService
-from search_api.api.bigpicture.models import BP_FILTERING_TERMS
-from search_api.main import app
 
 skip = pytest.mark.skip(reason="Requires Ollama")
 
 
-def mock_beacon_service():
-    return MockBeaconService(BP_FILTERING_TERMS)
-
-
-app.dependency_overrides[get_beacon_service] = mock_beacon_service
+@pytest.fixture(scope="module")
+def client() -> httpx.Client:
+    with httpx.Client(base_url="http://localhost:8000") as c:
+        yield c
 
 
 @skip
-def test_ai_query_returns_result():
-    resp = TestClient(app).post(
+def test_ai_query_returns_result(client: httpx.Client):
+    resp = client.post(
         "/ai/query", json={"query": "images for human females"}, timeout=60.0
     )
     assert resp.status_code == 200
@@ -48,6 +44,6 @@ def test_ai_query_returns_result():
 
 
 @skip
-def test_ai_query_missing_body_returns_422():
-    resp = TestClient(app).post("/ai/query", json={})
+def test_ai_query_missing_body_returns_422(client: httpx.Client):
+    resp = client.post("/ai/query", json={})
     assert resp.status_code == 422

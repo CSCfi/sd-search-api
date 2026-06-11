@@ -1,4 +1,6 @@
+import os
 import uuid
+
 import pytest
 
 from search_api.bigpicture.models import (
@@ -10,6 +12,9 @@ from search_api.bigpicture.models import (
 from search_api.bigpicture.services.load import BigPictureLoadService
 from search_api.bigpicture.services.sync import BigPictureSyncService
 from search_api.database.repository import get_connection
+
+os.environ.setdefault("POSTGRES_DB", os.environ["BP_POSTGRES_DB"])
+os.environ.setdefault("POSTGRES_PORT", os.environ["BP_POSTGRES_PORT"])
 
 
 def get_code(code: str) -> BigpictureCodeAttributeValue:

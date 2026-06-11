@@ -4,12 +4,18 @@ from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 import uvicorn
 
-from search_api.api.bigpicture.routes import router
+from search_api.api.bigpicture.routes import router as bigpicture_router
 from search_api.api.opensearch.services import create_search
+from search_api.conf import deployment_config
 
 # uvicorn search_api.main:app --reload
 
-# TODO(improve): support other than Bigpicture Beacons
+_ROUTERS = {
+    "Bigpicture": bigpicture_router,
+}
+
+_deployment = deployment_config()
+_router = _ROUTERS[_deployment.DEPLOYMENT_TYPE]
 
 
 @asynccontextmanager
@@ -19,9 +25,13 @@ async def lifespan(app: FastAPI):
     await app.state.bp_search.close()
 
 
-app = FastAPI(title="CSC Bigpicture Beacon", version="1.0", lifespan=lifespan)
+app = FastAPI(
+    title=f"CSC {_deployment.DEPLOYMENT_TYPE} Beacon",
+    version="1.0",
+    lifespan=lifespan,
+)
 
-app.include_router(router)
+app.include_router(_router)
 
 
 @app.get("/", include_in_schema=False)

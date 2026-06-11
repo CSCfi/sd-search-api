@@ -1,5 +1,5 @@
 services:
-  sd-search-api:
+  bp-sd-search-api:
     profiles: [ "dev" ]
     build:
       dockerfile: ./dockerfiles/Dockerfile
@@ -8,10 +8,13 @@ services:
     command: [ "uv", "run", "sd_search_api" ]
     env_file: tests/integration/.env
     environment:
-      - POSTGRES_HOST=postgres
+      - DEPLOYMENT_TYPE=Bigpicture
+      - POSTGRES_HOST=bp-postgres
+      - POSTGRES_DB=${BP_POSTGRES_DB}
+      - POSTGRES_PORT=${BP_POSTGRES_PORT}
       - OPENSEARCH_HOST=opensearch
     depends_on:
-      postgres:
+      bp-postgres:
         condition: service_healthy
       opensearch:
         condition: service_healthy
@@ -21,19 +24,18 @@ services:
       timeout: 3s
       retries: 5
       start_period: 10s
-  postgres:
+  bp-postgres:
     profiles: [ "dev" ]
     image: postgres:18-alpine
-    hostname: postgres
+    hostname: bp-postgres
+    env_file: tests/integration/.env
     environment:
-      - POSTGRES_DB=sd_search
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=test
-      - PGPORT=5434
+      - POSTGRES_DB=${BP_POSTGRES_DB}
+      - PGPORT=${BP_POSTGRES_PORT}
     volumes:
-      - ./search_api/database/schema/bigpicture/create.sql:/docker-entrypoint-initdb.d/create.sql
+      - ./search_api/database/schema/bigpicture/create.sql:/docker-entrypoint-initdb.d/10_bigpicture.sql
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U postgres -p 5434" ]
+      test: [ "CMD-SHELL", "pg_isready -U postgres -p ${BP_POSTGRES_PORT}" ]
       interval: 10s
       timeout: 5s
       retries: 5

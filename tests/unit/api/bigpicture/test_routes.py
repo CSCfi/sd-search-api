@@ -2,6 +2,7 @@ import json
 from typing import override
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from search_api.api.beacon.models import (
@@ -11,19 +12,22 @@ from search_api.api.beacon.models import (
     BeaconCountResponse,
     BeaconResultSetsResponse,
 )
+from search_api.api.beacon.services import MockBeaconService, get_mock_query_result
 from search_api.api.bigpicture.models import (
     BP_FILTERING_TERMS,
     BP_INFO_RESPONSE,
     BP_FILTERING_TERMS_RESPONSE,
 )
-from search_api.api.models import FieldValueSuggestion
-from search_api.main import app
-from search_api.api.bigpicture.routes import get_beacon_service, get_snomed_service
-from search_api.api.beacon.services import (
-    MockBeaconService,
-    get_mock_query_result,
+from search_api.api.bigpicture.routes import (
+    get_beacon_service,
+    get_snomed_service,
+    router,
 )
+from search_api.api.models import FieldValueSuggestion
 from search_api.services.snomed import SnomedConcept, SnomedService
+
+app = FastAPI()
+app.include_router(router)
 
 
 def _ecl(field_id: str) -> str:

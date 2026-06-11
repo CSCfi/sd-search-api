@@ -1,4 +1,5 @@
 import io
+import os
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,9 @@ from nacl.public import PrivateKey
 from search_api.bigpicture.services.extract import BigPictureExtractService
 from search_api.bigpicture.services.load import BigPictureLoadService
 from search_api.database.repository import get_connection
+
+os.environ.setdefault("POSTGRES_DB", os.environ["BP_POSTGRES_DB"])
+os.environ.setdefault("POSTGRES_PORT", os.environ["BP_POSTGRES_PORT"])
 
 _XML_DIR = (
     Path(__file__).resolve().parent.parent.parent.parent

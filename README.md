@@ -49,7 +49,7 @@ Integration tests require Postgres and OpenSearch to be running. Start
 them with Docker Compose:
 
 ```bash
-docker compose --profile dev up --build
+docker compose --env-file tests/integration/.env --profile dev up --build
 ```
 
 Then run:
@@ -74,6 +74,18 @@ to resolve SNOMED CT terms to concepts.
 
 This is only needed when importing a new SNOMED CT release into the shared instance. The full procedure is described
 in https://github.com/IHTSDO/snowstorm/blob/master/docs/loading-snomed.md.
+
+First check that the Snowstorm service is healthy:
+
+```
+curl https://snowstorm.rahtiapp.fi/actuator/health
+```
+
+Expected output:
+
+```
+{"status":"UP","groups":["liveness","readiness"]}%       
+```
 
 #### Create import job
 
@@ -106,7 +118,7 @@ curl --location -X POST "https://snowstorm.rahtiapp.fi/imports/${IMPORT_ID}/arch
   -F "file=@<SNOMED release file>"
 ```
 
-The upload and import can take 1-2 hours. Poll the import status until `status` is `COMPLETED`
+The upload and import can take several hours. Poll the import status until `status` is `COMPLETED`
 or until the import job is no longer available:
 
 ```
@@ -126,7 +138,13 @@ Example output while running:
 }
 ```
 
-Verify that the SNOMED CT ontology is loaded:
+You can monitor the import progress also from the logs:
+
+```
+oc logs -f deployment/snowstorm
+```
+
+Finally, verify that the import has been completed:
 
 TODO: add verification instructions
 

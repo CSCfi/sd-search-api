@@ -1,9 +1,9 @@
 services:
   # Allow connections outside the docker network.
-  sd-search-api:
+  bp-sd-search-api:
     ports:
       - "8000:8000"
-  postgres:
+  bp-postgres:
     ports:
       - "5434:5434"
   opensearch:

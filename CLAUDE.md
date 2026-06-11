@@ -22,7 +22,7 @@ uvicorn search_api.main:app --reload
 sd_search_api
 
 # Start Postgres + OpenSearch (required for data loading/sync)
-docker compose --profile dev up --build
+docker compose --env-file tests/integration/.env --profile dev up --build
 ```
 
 Dependencies are managed with `uv`. The virtualenv is at `.venv/`.

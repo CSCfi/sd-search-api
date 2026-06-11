@@ -5,9 +5,8 @@
 
 from typing import Any
 
+import httpx
 import pytest
-from fastapi import Request
-from fastapi.testclient import TestClient
 
 from search_api.api.beacon.models import (
     BeaconQuery,
@@ -15,11 +14,8 @@ from search_api.api.beacon.models import (
     BeaconQueryRequest,
     BeaconResultSetsResponse,
 )
-from search_api.api.beacon.services import OpenSearchBeaconService
-from search_api.api.bigpicture.models import BP_FILTERING_TERMS
-from search_api.api.bigpicture.routes import get_beacon_service, get_snomed_service
-from search_api.main import app
-from search_api.services.snomed import SnomedService
+from search_api.api.bigpicture.models import BP_OPENSEARCH_INDEX
+
 
 DATASET_1 = "dataset_1"
 DATASET_2 = "dataset_2"
@@ -177,42 +173,19 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
 ]
 
 
-class MockSnomedService(SnomedService):
-    """SnomedService that skips SNOMED expansion."""
-
-    async def prepare_ontology_filter(self, f, filtering_terms, branch="MAIN"):
-        return f
-
-
 @pytest.fixture(scope="module")
 def bp_opensearch_docs() -> list[dict[str, Any]]:
     return OPENSEARCH_DOCS
 
 
-@pytest.fixture(scope="module", autouse=True)
-def _override_dependencies(bp_opensearch_index_name: str):
-    """Point get_beacon_service at the UUID test index and swap out SNOMED."""
-
-    def _beacon_service(request: Request) -> OpenSearchBeaconService:
-        # Reuse the client created by the app lifespan.
-        return OpenSearchBeaconService(
-            request.app.state.bp_search,
-            bp_opensearch_index_name,
-            BP_FILTERING_TERMS,
-        )
-
-    saved = dict(app.dependency_overrides)
-    app.dependency_overrides.clear()
-    app.dependency_overrides[get_beacon_service] = _beacon_service
-    app.dependency_overrides[get_snomed_service] = lambda: MockSnomedService()
-    yield
-    app.dependency_overrides.clear()
-    app.dependency_overrides.update(saved)
+@pytest.fixture(scope="module")
+def bp_opensearch_index_name() -> str:
+    return BP_OPENSEARCH_INDEX
 
 
 @pytest.fixture(scope="module")
-def client() -> TestClient:
-    with TestClient(app) as c:
+def client() -> httpx.Client:
+    with httpx.Client(base_url="http://localhost:8000") as c:
         yield c
 
 
@@ -226,7 +199,7 @@ def get_filters(
 
 
 def query(
-    client: TestClient, *field_id_value_pairs: tuple[str, str | list[str]]
+    client: httpx.Client, *field_id_value_pairs: tuple[str, str | list[str]]
 ) -> BeaconResultSetsResponse:
     request = BeaconQueryRequest(
         query=BeaconQuery(

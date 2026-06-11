@@ -1,5 +1,15 @@
+from typing import Literal
+
 from pydantic import Field
 from pydantic_settings import BaseSettings
+
+
+class DeploymentConfiguration(BaseSettings):
+    """Deployment configuration."""
+
+    DEPLOYMENT_TYPE: Literal["Bigpicture"] = Field(
+        description="Deployment type. Determines which router and database are used."
+    )
 
 
 class DatabaseConfiguration(BaseSettings):
@@ -32,6 +42,11 @@ class AIConfiguration(BaseSettings):
 
     LLM_BASE_URL: str = Field(description="LLM API base URL.")
     LLM_API_KEY: str = Field(description="LLM API key.")
+
+
+def deployment_config() -> DeploymentConfiguration:
+    """Get deployment configuration."""
+    return DeploymentConfiguration()
 
 
 def database_config() -> DatabaseConfiguration:

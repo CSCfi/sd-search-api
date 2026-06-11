@@ -6,13 +6,19 @@ services:
       context: .
     image: cscfi/sd-search-api
     command: [ "uv", "run", "sd_search_api" ]
-    env_file: tests/integration/.env
     environment:
       - DEPLOYMENT_TYPE=Bigpicture
       - POSTGRES_HOST=bp-postgres
       - POSTGRES_DB=${BP_POSTGRES_DB}
       - POSTGRES_PORT=${BP_POSTGRES_PORT}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - OPENSEARCH_HOST=opensearch
+      - OPENSEARCH_USER=${OPENSEARCH_USER}
+      - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD}
+      - SNOWSTORM_URL=${SNOWSTORM_URL}
+      - LLM_BASE_URL=${LLM_BASE_URL}
+      - LLM_API_KEY=${LLM_API_KEY}
     depends_on:
       bp-postgres:
         condition: service_healthy
@@ -28,9 +34,10 @@ services:
     profiles: [ "dev" ]
     image: postgres:18-alpine
     hostname: bp-postgres
-    env_file: tests/integration/.env
     environment:
       - POSTGRES_DB=${BP_POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - PGPORT=${BP_POSTGRES_PORT}
     volumes:
       - ./search_api/database/schema/bigpicture/create.sql:/docker-entrypoint-initdb.d/10_bigpicture.sql
@@ -46,14 +53,14 @@ services:
     hostname: opensearch
     environment:
       - discovery.type=single-node
-      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_PASSWORD:-Sd@Search9x!}
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_PASSWORD}
       - plugins.security.disabled=false
     ulimits:
       memlock:
         soft: -1
         hard: -1
     healthcheck:
-      test: [ "CMD-SHELL", "curl -fks https://localhost:9200/_cluster/health -u admin:${OPENSEARCH_PASSWORD:-Sd@Search9x!} | grep -qv '\"status\":\"red\"'" ]
+      test: [ "CMD-SHELL", "curl -fks https://localhost:9200/_cluster/health -u admin:${OPENSEARCH_PASSWORD} | grep -qv '\"status\":\"red\"'" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -66,7 +73,7 @@ services:
     environment:
       - OPENSEARCH_HOSTS=["https://opensearch:9200"]
       - OPENSEARCH_USERNAME=admin
-      - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD:-Sd@Search9x!}
+      - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD}
       - OPENSEARCH_SSL_VERIFICATIONMODE=none
     volumes:
       - ./dockerfiles/opensearch-dashboards-entrypoint.sh:/usr/share/opensearch-dashboards/entrypoint.sh

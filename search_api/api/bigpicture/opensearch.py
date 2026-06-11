@@ -3,15 +3,17 @@ from typing import Any, override
 from search_api.api.beacon.models import (
     BeaconQueryGranularity,
     BeaconResultSet,
-    BeaconResultSetResult,
     BeaconResultSets,
 )
 from search_api.api.beacon.services import OpenSearchBeaconService
+from search_api.api.bigpicture.models import BigpictureBeaconResultSetResult
 
 _COMPOSITE_PAGE_SIZE = 1000
 
 
-class BigpictureOpenSearchBeaconService(OpenSearchBeaconService):
+class BigpictureOpenSearchBeaconService(
+    OpenSearchBeaconService[BigpictureBeaconResultSetResult]
+):
     """OpenSearch beacon service for the Bigpicture document schema.
 
     Bigpicture documents are indexed one per image, with dataset-level fields
@@ -71,7 +73,7 @@ class BigpictureOpenSearchBeaconService(OpenSearchBeaconService):
         self,
         query_clause: dict[str, Any],
         granularity: BeaconQueryGranularity,
-    ) -> BeaconResultSets:
+    ) -> BeaconResultSets[BigpictureBeaconResultSetResult]:
         """Aggregate matching images by dataset using composite aggregation.
 
         Pages through all composite buckets via after_key cursors. For count
@@ -81,7 +83,7 @@ class BigpictureOpenSearchBeaconService(OpenSearchBeaconService):
         are collected into a list.
         """
         include_image_ids = granularity == "record"
-        result_sets: dict[str, BeaconResultSetResult] = {}
+        result_sets: dict[str, BigpictureBeaconResultSetResult] = {}
         after_key: dict[str, Any] | None = None
 
         while True:
@@ -109,7 +111,7 @@ class BigpictureOpenSearchBeaconService(OpenSearchBeaconService):
                     dataset_title = source["dataset_title"]
                     dataset_description = source["dataset_description"]
                     dataset_image_cnt = source["dataset_image_cnt"]
-                    result = BeaconResultSetResult(
+                    result = BigpictureBeaconResultSetResult(
                         datasetId=dataset_id,
                         datasetTitle=dataset_title,
                         datasetDescription=dataset_description,
@@ -131,7 +133,11 @@ class BigpictureOpenSearchBeaconService(OpenSearchBeaconService):
             if not after_key:
                 break
 
-        results = BeaconResultSets()
+        results: BeaconResultSets[BigpictureBeaconResultSetResult] = BeaconResultSets()
         for dataset_id, result in result_sets.items():
-            results.resultSet.append(BeaconResultSet(id=dataset_id, results=[result]))
+            results.resultSet.append(
+                BeaconResultSet[BigpictureBeaconResultSetResult](
+                    id=dataset_id, results=[result]
+                )
+            )
         return results

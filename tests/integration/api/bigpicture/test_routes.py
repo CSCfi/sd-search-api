@@ -12,9 +12,11 @@ from search_api.api.beacon.models import (
     BeaconQuery,
     BeaconQueryFilter,
     BeaconQueryRequest,
-    BeaconResultSetsResponse,
 )
-from search_api.api.bigpicture.models import BP_OPENSEARCH_INDEX
+from search_api.api.bigpicture.models import (
+    BP_OPENSEARCH_INDEX,
+    BigpictureBeaconResultSetsResponse,
+)
 
 
 DATASET_1 = "dataset_1"
@@ -200,7 +202,7 @@ def get_filters(
 
 def query(
     client: httpx.Client, *field_id_value_pairs: tuple[str, str | list[str]]
-) -> BeaconResultSetsResponse:
+) -> BigpictureBeaconResultSetsResponse:
     request = BeaconQueryRequest(
         query=BeaconQuery(
             filters=get_filters(*field_id_value_pairs),
@@ -209,15 +211,15 @@ def query(
     )
     resp = client.post("/query", json=request.model_dump())
     assert resp.status_code == 200
-    return BeaconResultSetsResponse.model_validate(resp.json())
+    return BigpictureBeaconResultSetsResponse.model_validate(resp.json())
 
 
-def get_dataset_ids(response: BeaconResultSetsResponse) -> set[str]:
+def get_dataset_ids(response: BigpictureBeaconResultSetsResponse) -> set[str]:
     return {rs.id for rs in response.response.resultSet}
 
 
 def get_matching_image_count(
-    response: BeaconResultSetsResponse, dataset_id: str
+    response: BigpictureBeaconResultSetsResponse, dataset_id: str
 ) -> int:
     for rs in response.response.resultSet:
         if rs.id == dataset_id:

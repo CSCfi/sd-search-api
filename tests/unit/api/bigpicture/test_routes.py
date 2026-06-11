@@ -11,10 +11,10 @@ from search_api.api.beacon.models import (
     BeaconBooleanResponse,
     BeaconCountResponse,
     BeaconResultSet,
-    BeaconResultSetResult,
     BeaconResultSets,
     BeaconResultSetsResponse,
 )
+from search_api.api.bigpicture.models import BigpictureBeaconResultSetResult
 from search_api.api.beacon.services import BeaconService
 from search_api.api.opensearch.models import (
     OpenSearchBeaconFilteringTerm,
@@ -37,13 +37,13 @@ app = FastAPI()
 app.include_router(router)
 
 
-def get_mock_query_result() -> BeaconResultSets:
-    results = BeaconResultSets()
+def get_mock_query_result() -> BeaconResultSets[BigpictureBeaconResultSetResult]:
+    results: BeaconResultSets[BigpictureBeaconResultSetResult] = BeaconResultSets()
     results.resultSet.append(
-        BeaconResultSet(
+        BeaconResultSet[BigpictureBeaconResultSetResult](
             id="testDataset",
             results=[
-                BeaconResultSetResult(
+                BigpictureBeaconResultSetResult(
                     datasetId="testDataset",
                     datasetTitle="testTitle",
                     datasetDescription="testDescription",
@@ -57,9 +57,13 @@ def get_mock_query_result() -> BeaconResultSets:
     return results
 
 
-class MockBeaconService(BeaconService[OpenSearchBeaconFilteringTerm]):
+class MockBeaconService(
+    BeaconService[OpenSearchBeaconFilteringTerm, BigpictureBeaconResultSetResult]
+):
     @override
-    async def query(self, filters, granularity="record") -> BeaconResultSets:
+    async def query(
+        self, filters, granularity="record"
+    ) -> BeaconResultSets[BigpictureBeaconResultSetResult]:
         return get_mock_query_result()
 
     @override
@@ -175,7 +179,10 @@ def test_query(client: TestClient):
     response = BeaconResultSetsResponse.model_validate(resp.json())
     assert response.responseSummary.exists
     assert response.responseSummary.numTotalResults == 1
-    assert response.response.resultSet == get_mock_query_result().resultSet
+    assert (
+        resp.json()["response"]["resultSet"]
+        == json.loads(get_mock_query_result().model_dump_json())["resultSet"]
+    )
 
 
 def test_info(client: TestClient):

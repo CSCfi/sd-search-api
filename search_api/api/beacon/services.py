@@ -18,8 +18,9 @@ from search_api.api.beacon.models import (
     BeaconFilteringTerm,
     BeaconQueryFilter,
     BeaconQueryGranularity,
-    BeaconResultSets,
     BeaconResultSet,
+    BeaconResultSetResult,
+    BeaconResultSets,
 )
 from search_api.api.opensearch.models import (
     OpenSearchOntologyOrValue,
@@ -27,6 +28,7 @@ from search_api.api.opensearch.models import (
 )
 
 T = TypeVar("T", bound=BeaconFilteringTerm)
+S = TypeVar("S", bound=BeaconResultSetResult)
 
 
 def build_opensearch_query(
@@ -59,7 +61,7 @@ def build_opensearch_query(
     raise ValueError(f"Unsupported term type {term.type}")
 
 
-class BeaconService(ABC, Generic[T]):
+class BeaconService(ABC, Generic[T, S]):
     def __init__(self, filtering_terms: Sequence[T]) -> None:
         self.filtering_terms = filtering_terms
 
@@ -74,7 +76,7 @@ class BeaconService(ABC, Generic[T]):
         self,
         filters: list[BeaconQueryFilter],
         granularity: BeaconQueryGranularity = "record",
-    ) -> BeaconResultSets:
+    ) -> BeaconResultSets[S]:
         pass
 
     @abstractmethod
@@ -94,7 +96,7 @@ class BeaconService(ABC, Generic[T]):
         pass
 
 
-class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm]):
+class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm, S]):
     """Generic OpenSearch-backed Beacon V2 service.
 
     Handles query construction, boolean granularity, field value counts, and
@@ -196,14 +198,14 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm]):
         self,
         query_clause: dict[str, Any],
         granularity: BeaconQueryGranularity,
-    ) -> BeaconResultSets:
+    ) -> BeaconResultSets[S]:
         """Return results for the given query and count or record granularity."""
         pass
 
     @staticmethod
-    def _get_boolean_result(resp: dict[str, Any]) -> BeaconResultSets:
+    def _get_boolean_result(resp: dict[str, Any]) -> BeaconResultSets[Any]:
         """Parse result for boolean query granularity."""
-        results = BeaconResultSets()
+        results: BeaconResultSets[Any] = BeaconResultSets()
         if resp.get("hits", {}).get("total", {}).get("value", 0) > 0:
             results.resultSet.append(BeaconResultSet(id="", results=[]))
         return results
@@ -220,7 +222,7 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm]):
         self,
         filters: list[BeaconQueryFilter],
         granularity: BeaconQueryGranularity = "record",
-    ) -> BeaconResultSets:
+    ) -> BeaconResultSets[S]:
         """Execute a query. Boolean query granularity is handled here. Count
         and record granularity is delegated to _get_result."""
         query_clause = self._get_query(filters, self.filtering_terms)

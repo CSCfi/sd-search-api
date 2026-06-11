@@ -1,5 +1,7 @@
 import os
 
+from pydantic import BaseModel, Field
+
 from search_api.api.beacon.models import (
     SNOMED_ONTOLOGY_ID,
     BeaconFilteringOntology,
@@ -7,6 +9,10 @@ from search_api.api.beacon.models import (
     BeaconFilteringTerms,
     BeaconInfoResponse,
     BeaconInfoMeta,
+    BeaconResponseMeta,
+    BeaconResultCountResponseSummary,
+    BeaconResultSetResult,
+    BeaconResultSets,
     BeaconSchema,
     BeaconInfo,
 )
@@ -14,6 +20,26 @@ from search_api.api.opensearch.models import (
     OpenSearchOntologyOrValue,
     OpenSearchBeaconFilteringTerm,
 )
+
+
+class BigpictureBeaconResultSetResult(BeaconResultSetResult):
+    """Beacon V2 result set result for the Bigpicture document schema."""
+
+    datasetId: str
+    datasetTitle: str
+    datasetDescription: str
+    totalImageCount: int
+    matchingImageCount: int
+    imageIds: list[str] = Field(default_factory=list)
+
+
+class BigpictureBeaconResultSetsResponse(BaseModel):
+    """Beacon V2 result sets response for the Bigpicture document schema."""
+
+    meta: BeaconResponseMeta
+    responseSummary: BeaconResultCountResponseSummary
+    response: BeaconResultSets[BigpictureBeaconResultSetResult]
+
 
 BP_OPENSEARCH_INDEX = "bp-image-index"
 

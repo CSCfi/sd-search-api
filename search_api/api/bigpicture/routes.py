@@ -10,13 +10,13 @@ from search_api.api.bigpicture.models import (
     BP_INFO_RESPONSE,
     BP_ONTOLOGY_FILTERING_TERMS,
     BP_OPENSEARCH_INDEX,
+    BigpictureBeaconResultSetsResponse,
 )
 from search_api.api.models import AIQueryRequest, FieldValueCount, FieldValueSuggestion
 from search_api.api.beacon.models import (
     BeaconQueryRequest,
     BeaconBooleanResponse,
     BeaconCountResponse,
-    BeaconResultSetsResponse,
     BeaconResponseMeta,
     BeaconResultCountResponseSummary,
     BeaconResultExistsResponseSummary,
@@ -71,7 +71,7 @@ async def filtering_terms() -> BeaconFilteringTermsResponse:
 @router.post(
     "/query",
     response_model=(
-        BeaconBooleanResponse | BeaconCountResponse | BeaconResultSetsResponse
+        BeaconBooleanResponse | BeaconCountResponse | BigpictureBeaconResultSetsResponse
     ),
     response_model_exclude_none=True,
 )
@@ -79,7 +79,7 @@ async def query(
     request: BeaconQueryRequest,
     beacon_service: BeaconService = Depends(get_beacon_service),
     snomed_service: SnomedService = Depends(get_snomed_service),
-) -> BeaconBooleanResponse | BeaconCountResponse | BeaconResultSetsResponse:
+) -> BeaconBooleanResponse | BeaconCountResponse | BigpictureBeaconResultSetsResponse:
     ontology_field_ids = {t.id for t in BP_ONTOLOGY_FILTERING_TERMS}
     ontology_filters = [f for f in request.query.filters if f.id in ontology_field_ids]
     other_filters = [f for f in request.query.filters if f.id not in ontology_field_ids]
@@ -121,7 +121,7 @@ async def query(
         )
 
     if granularity == "record":
-        return BeaconResultSetsResponse(
+        return BigpictureBeaconResultSetsResponse(
             meta=meta,
             responseSummary=BeaconResultCountResponseSummary(
                 exists=exists, numTotalResults=num_results

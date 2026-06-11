@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, model_validator
-from typing import Literal, Sequence
+from typing import Generic, Literal, Sequence, TypeVar
 
 BEACON_API_VERSION = "v2.0"
 BEACON_ORGANISATION_ID = "fi.csc"
@@ -110,33 +110,27 @@ class BeaconCountResponse(BaseModel):
 
 
 class BeaconResultSetResult(BaseModel):
-    """Beacon V2 result sets result. Not constrained by a JSON schema."""
+    """Beacon V2 result sets result. Schema is deployment-specific."""
 
-    datasetId: str
-    datasetTitle: str
-    datasetDescription: str
-    totalImageCount: int
-    matchingImageCount: int
-    imageIds: list[str] = Field(
-        default_factory=list
-    )  # Not available for count granularity.
+
+R = TypeVar("R", bound=BeaconResultSetResult)
 
 
 # https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/responses/sections/beaconResultsets.json
-class BeaconResultSet(BaseModel):
-    """Beacon V2 result set."""
+class BeaconResultSet(BaseModel, Generic[R]):
+    """Beacon V2 result set. Parameterise with the deployment-specific result type."""
 
     id: str
     setType: str = "dataset"
     exists: bool = True
-    results: list[BeaconResultSetResult]
+    results: list[R] = Field(default_factory=list)
 
 
 # https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/responses/sections/beaconResultsets.json
-class BeaconResultSets(BaseModel):
-    """Beacon V2 result sets response."""
+class BeaconResultSets(BaseModel, Generic[R]):
+    """Beacon V2 result sets response. Parameterise with the deployment-specific result type."""
 
-    resultSet: list[BeaconResultSet] = Field(default_factory=list)
+    resultSet: list[BeaconResultSet[R]] = Field(default_factory=list)
 
 
 # https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/responses/beaconResultsetsResponse.json

@@ -10,6 +10,7 @@ from search_api.api.bigpicture.models import (
     BP_INFO_RESPONSE,
     BP_ONTOLOGY_FILTERING_TERMS,
     BP_OPENSEARCH_INDEX,
+    BigpictureBeaconResultSetResult,
     BigpictureBeaconResultSetsResponse,
 )
 from search_api.api.models import AIQueryRequest, FieldValueCount, FieldValueSuggestion
@@ -24,6 +25,7 @@ from search_api.api.beacon.models import (
     BeaconInfoResponse,
 )
 from search_api.api.beacon.services import BeaconService
+from search_api.api.opensearch.models import OpenSearchBeaconFilteringTerm
 from search_api.api.bigpicture.opensearch import BigpictureOpenSearchBeaconService
 from search_api.ai.models import AISearchResult
 from search_api.ai.services import AIService
@@ -34,7 +36,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def get_beacon_service(request: Request) -> BeaconService:
+def get_beacon_service(
+    request: Request,
+) -> BeaconService[OpenSearchBeaconFilteringTerm, BigpictureBeaconResultSetResult]:
     return BigpictureOpenSearchBeaconService(
         request.app.state.bp_search,
         BP_OPENSEARCH_INDEX,

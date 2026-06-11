@@ -134,12 +134,12 @@ class BeaconResultSets(BaseModel, Generic[R]):
 
 
 # https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/responses/beaconResultsetsResponse.json
-class BeaconResultSetsResponse(BaseModel):
-    """Beacon V2 result sets response."""
+class BeaconResultSetsResponse(BaseModel, Generic[R]):
+    """Beacon V2 result sets response. Subclass and pin R to the deployment-specific result type."""
 
     meta: BeaconResponseMeta
     responseSummary: BeaconResultCountResponseSummary
-    response: BeaconResultSets
+    response: BeaconResultSets[R]
 
 
 # Beacon V2 filtering terms

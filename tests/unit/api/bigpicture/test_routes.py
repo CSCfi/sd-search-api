@@ -12,9 +12,11 @@ from search_api.api.beacon.models import (
     BeaconCountResponse,
     BeaconResultSet,
     BeaconResultSets,
-    BeaconResultSetsResponse,
 )
-from search_api.api.bigpicture.models import BigpictureBeaconResultSetResult
+from search_api.api.bigpicture.models import (
+    BigpictureBeaconResultSetResult,
+    BigpictureBeaconResultSetsResponse,
+)
 from search_api.api.beacon.services import BeaconService
 from search_api.api.opensearch.models import (
     OpenSearchBeaconFilteringTerm,
@@ -176,13 +178,10 @@ def test_query(client: TestClient):
     request = BeaconQueryRequest(query=BeaconQuery(requestedGranularity="record"))
     resp = client.post("/query", json=request.model_dump())
     assert resp.status_code == 200
-    response = BeaconResultSetsResponse.model_validate(resp.json())
+    response = BigpictureBeaconResultSetsResponse.model_validate(resp.json())
     assert response.responseSummary.exists
     assert response.responseSummary.numTotalResults == 1
-    assert (
-        resp.json()["response"]["resultSet"]
-        == json.loads(get_mock_query_result().model_dump_json())["resultSet"]
-    )
+    assert response.response.resultSet[0].results[0].matchingImageCount == 1
 
 
 def test_info(client: TestClient):

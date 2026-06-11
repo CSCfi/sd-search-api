@@ -23,7 +23,8 @@ from search_api.api.beacon.models import (
     BeaconFilteringTermsResponse,
     BeaconInfoResponse,
 )
-from search_api.api.beacon.services import BeaconService, OpenSearchBeaconService
+from search_api.api.beacon.services import BeaconService
+from search_api.api.bigpicture.opensearch import BigpictureOpenSearchBeaconService
 from search_api.ai.models import AISearchResult
 from search_api.ai.services import AIService
 from search_api.services.snomed import SnomedService
@@ -34,7 +35,7 @@ router = APIRouter()
 
 
 def get_beacon_service(request: Request) -> BeaconService:
-    return OpenSearchBeaconService(
+    return BigpictureOpenSearchBeaconService(
         request.app.state.bp_search,
         BP_OPENSEARCH_INDEX,
         BP_FILTERING_TERMS,

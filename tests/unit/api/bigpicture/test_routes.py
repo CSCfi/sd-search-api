@@ -10,9 +10,13 @@ from search_api.api.beacon.models import (
     BeaconQuery,
     BeaconBooleanResponse,
     BeaconCountResponse,
+    BeaconResultSet,
+    BeaconResultSetResult,
+    BeaconResultSets,
     BeaconResultSetsResponse,
 )
-from search_api.api.beacon.services import MockBeaconService, get_mock_query_result
+from search_api.api.beacon.services import BeaconService
+from search_api.api.opensearch.models import OpenSearchOntologyOrValue
 from search_api.api.bigpicture.models import (
     BP_FILTERING_TERMS,
     BP_INFO_RESPONSE,
@@ -28,6 +32,45 @@ from search_api.services.snomed import SnomedConcept, SnomedService
 
 app = FastAPI()
 app.include_router(router)
+
+
+def get_mock_query_result() -> BeaconResultSets:
+    results = BeaconResultSets()
+    results.resultSet.append(
+        BeaconResultSet(
+            id="testDataset",
+            results=[
+                BeaconResultSetResult(
+                    datasetId="testDataset",
+                    datasetTitle="testTitle",
+                    datasetDescription="testDescription",
+                    totalImageCount=1,
+                    matchingImageCount=1,
+                    imageIds=["testImage"],
+                )
+            ],
+        )
+    )
+    return results
+
+
+class MockBeaconService(BeaconService):
+    @override
+    async def query(self, filters, granularity="record") -> BeaconResultSets:
+        return get_mock_query_result()
+
+    @override
+    async def is_healthy(self) -> bool:
+        return True
+
+    @override
+    async def get_indexed_field_value_counts(
+        self, field_id: str
+    ) -> list[dict[str, int]]:
+        term = self.get_term(field_id)
+        if isinstance(term.opensearch_field, OpenSearchOntologyOrValue):
+            return [{}, {}]
+        return [{}]
 
 
 def _ecl(field_id: str) -> str:

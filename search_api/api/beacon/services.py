@@ -1,7 +1,7 @@
 import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from typing import Any, override
+from typing import Any, Generic, TypeVar, override
 
 from opensearchpy import AsyncOpenSearch
 
@@ -15,6 +15,7 @@ from search_api.api.opensearch.services import (
 from search_api.services.snomed import is_concept_id
 
 from search_api.api.beacon.models import (
+    BeaconFilteringTerm,
     BeaconQueryFilter,
     BeaconQueryGranularity,
     BeaconResultSets,
@@ -24,6 +25,8 @@ from search_api.api.opensearch.models import (
     OpenSearchOntologyOrValue,
     OpenSearchBeaconFilteringTerm,
 )
+
+T = TypeVar("T", bound=BeaconFilteringTerm)
 
 
 def build_opensearch_query(
@@ -56,13 +59,11 @@ def build_opensearch_query(
     raise ValueError(f"Unsupported term type {term.type}")
 
 
-class BeaconService(ABC):
-    def __init__(
-        self, filtering_terms: Sequence[OpenSearchBeaconFilteringTerm]
-    ) -> None:
+class BeaconService(ABC, Generic[T]):
+    def __init__(self, filtering_terms: Sequence[T]) -> None:
         self.filtering_terms = filtering_terms
 
-    def get_term(self, field_id: str) -> OpenSearchBeaconFilteringTerm:
+    def get_term(self, field_id: str) -> T:
         for term in self.filtering_terms:
             if term.id == field_id:
                 return term
@@ -93,7 +94,7 @@ class BeaconService(ABC):
         pass
 
 
-class OpenSearchBeaconService(BeaconService):
+class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm]):
     """Generic OpenSearch-backed Beacon V2 service.
 
     Handles query construction, boolean granularity, field value counts, and

@@ -16,7 +16,10 @@ from search_api.api.beacon.models import (
     BeaconResultSetsResponse,
 )
 from search_api.api.beacon.services import BeaconService
-from search_api.api.opensearch.models import OpenSearchOntologyOrValue
+from search_api.api.opensearch.models import (
+    OpenSearchBeaconFilteringTerm,
+    OpenSearchOntologyOrValue,
+)
 from search_api.api.bigpicture.models import (
     BP_FILTERING_TERMS,
     BP_INFO_RESPONSE,
@@ -54,7 +57,7 @@ def get_mock_query_result() -> BeaconResultSets:
     return results
 
 
-class MockBeaconService(BeaconService):
+class MockBeaconService(BeaconService[OpenSearchBeaconFilteringTerm]):
     @override
     async def query(self, filters, granularity="record") -> BeaconResultSets:
         return get_mock_query_result()

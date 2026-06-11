@@ -4,10 +4,7 @@ import pytest
 from search_api.api.bigpicture.models import BP_SPECIES_FILTERING_TERM
 from search_api.services.snomed import SnomedService
 
-skip = pytest.mark.skip(reason="Requires Snowstorm")
 
-
-@skip
 @pytest.mark.asyncio
 async def test_find_concept():
     service = SnomedService()
@@ -18,10 +15,9 @@ async def test_find_concept():
         assert concept is not None
         assert concept.concept_id == "337915000"
         assert concept.preferred_term == "Homo sapiens"
-        assert concept.synonyms == ["Human", "Homo sapiens"]
+        assert set(concept.synonyms) == set(["Human", "Homo sapiens"])
 
 
-@skip
 @pytest.mark.asyncio
 async def test_find_descendants():
     service = SnomedService()

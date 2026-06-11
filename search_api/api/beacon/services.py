@@ -1,7 +1,6 @@
 import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from functools import partial
 from typing import Any, override
 
 from opensearchpy import AsyncOpenSearch
@@ -27,8 +26,7 @@ from search_api.api.opensearch.models import (
     OpenSearchBeaconFilteringTerm,
 )
 
-# TODO (improve): paginate to avoid limits
-DEFAULT_LIMIT = 10000
+_COMPOSITE_PAGE_SIZE = 1000
 
 
 def build_opensearch_query(
@@ -78,7 +76,6 @@ class BeaconService(ABC):
         self,
         filters: list[BeaconQueryFilter],
         granularity: BeaconQueryGranularity = "record",
-        limit: int = DEFAULT_LIMIT,
     ) -> BeaconResultSets:
         pass
 
@@ -125,7 +122,6 @@ class MockBeaconService(BeaconService):
         self,
         filters: list[BeaconQueryFilter],
         granularity: BeaconQueryGranularity = "record",
-        limit: int = DEFAULT_LIMIT,
     ) -> BeaconResultSets:
         return get_mock_query_result()
 
@@ -224,36 +220,104 @@ class OpenSearchBeaconService(BeaconService):
         return {"bool": {"must": must_clauses or [{"match_all": {}}]}}
 
     @staticmethod
-    def _get_count_and_record_aggs(
-        limit: int, include_image_ids: bool
+    def _build_composite_body(
+        query: dict[str, Any],
+        include_image_ids: bool,
+        after_key: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        """Get datasets aggregation, optionally including image IDs."""
+        """Build an OpenSearch composite aggregation body for one page."""
+        sources: list[dict[str, Any]] = [
+            {"dataset_id": {"terms": {"field": "dataset_id"}}}
+        ]
+        if include_image_ids:
+            sources.append({"image_id": {"terms": {"field": "image_id"}}})
+
+        composite: dict[str, Any] = {"size": _COMPOSITE_PAGE_SIZE, "sources": sources}
+        if after_key:
+            composite["after"] = after_key
+
         return {
-            "datasets": {
-                "terms": {"field": "dataset_id", "size": limit},
-                "aggs": {
-                    "dataset_result": {
-                        "top_hits": {
-                            "size": 1,
-                            "_source": [
-                                "dataset_title",
-                                "dataset_description",
-                                "dataset_image_cnt",
-                            ],
-                        }
-                    },
-                    **(
-                        {
-                            "image_result": {
-                                "terms": {"field": "image_id", "size": limit}
+            "size": 0,
+            "query": query,
+            "aggs": {
+                "pages": {
+                    "composite": composite,
+                    "aggs": {
+                        "dataset_info": {
+                            "top_hits": {
+                                "size": 1,
+                                "_source": [
+                                    "dataset_title",
+                                    "dataset_description",
+                                    "dataset_image_cnt",
+                                ],
                             }
                         }
-                        if include_image_ids
-                        else {}
-                    ),
-                },
-            }
+                    },
+                }
+            },
         }
+
+    async def _collect_pages(
+        self,
+        query_clause: dict[str, Any],
+        include_image_ids: bool,
+    ) -> BeaconResultSets:
+        """Paginate through composite aggregation buckets and collect results."""
+        result_sets: dict[str, BeaconResultSetResult] = {}
+        after_key: dict[str, Any] | None = None
+
+        while True:
+            body = OpenSearchBeaconService._build_composite_body(
+                query_clause, include_image_ids, after_key
+            )
+            resp = await self.client.search(index=self.index_name, body=body)
+            agg = resp["aggregations"]["pages"]
+
+            for bucket in agg["buckets"]:
+                dataset_id = bucket["key"]["dataset_id"]
+
+                if dataset_id not in result_sets:
+                    hits = bucket["dataset_info"]["hits"]["hits"]
+                    source = hits[0]["_source"] if hits else {}
+                    for f in (
+                        "dataset_title",
+                        "dataset_description",
+                        "dataset_image_cnt",
+                    ):
+                        if f not in source:
+                            raise ValueError(
+                                f"Dataset '{dataset_id}' is missing field: {f}"
+                            )
+                    dataset_title = source["dataset_title"]
+                    dataset_description = source["dataset_description"]
+                    dataset_image_cnt = source["dataset_image_cnt"]
+                    result = BeaconResultSetResult(
+                        datasetId=dataset_id,
+                        datasetTitle=dataset_title,
+                        datasetDescription=dataset_description,
+                        totalImageCount=dataset_image_cnt,
+                        matchingImageCount=0,
+                        imageIds=[],
+                    )
+                    result_sets[dataset_id] = result
+                else:
+                    result = result_sets[dataset_id]
+
+                if include_image_ids:
+                    result.imageIds.append(bucket["key"]["image_id"])
+                    result.matchingImageCount += 1
+                else:
+                    result.matchingImageCount += bucket["doc_count"]
+
+            after_key = agg.get("after_key")
+            if not after_key:
+                break
+
+        results = BeaconResultSets()
+        for dataset_id, result in result_sets.items():
+            results.resultSet.append(BeaconResultSet(id=dataset_id, results=[result]))
+        return results
 
     @staticmethod
     def _parse_boolean_result(resp: dict[str, Any]) -> BeaconResultSets:
@@ -263,82 +327,10 @@ class OpenSearchBeaconService(BeaconService):
             results.resultSet.append(BeaconResultSet(id="", results=[]))
         return results
 
-    @staticmethod
-    def _parse_count_and_record_result(
-        resp: dict[str, Any], include_image_ids: bool
-    ) -> BeaconResultSets:
-        """Parse datasets aggregations result."""
-        buckets = resp.get("aggregations", {}).get("datasets", {}).get("buckets", [])
-        results = BeaconResultSets()
-        for bucket in buckets:
-            dataset_id = bucket["key"]
-            matching_image_count = bucket["doc_count"]
-
-            hits = bucket["dataset_result"]["hits"]["hits"]
-            hit_source = hits[0]["_source"] if hits else {}
-
-            dataset_title = hit_source.get("dataset_title")
-            dataset_description = hit_source.get("dataset_description")
-            total_image_count = hit_source.get("dataset_image_cnt")
-
-            if dataset_title is None:
-                raise ValueError(
-                    f"Dataset '{dataset_id}' is missing field: dataset_title"
-                )
-            if dataset_description is None:
-                raise ValueError(
-                    f"Dataset '{dataset_id}' is missing field: dataset_description"
-                )
-            if total_image_count is None:
-                raise ValueError(
-                    f"Dataset '{dataset_id}' is missing field: dataset_image_cnt"
-                )
-
-            image_ids = (
-                [b["key"] for b in bucket["image_result"]["buckets"]]
-                if include_image_ids
-                else []
-            )
-
-            results.resultSet.append(
-                BeaconResultSet(
-                    id=dataset_id,
-                    results=[
-                        BeaconResultSetResult(
-                            datasetId=dataset_id,
-                            datasetTitle=dataset_title,
-                            datasetDescription=dataset_description,
-                            totalImageCount=total_image_count,
-                            matchingImageCount=matching_image_count,
-                            imageIds=image_ids,
-                        )
-                    ],
-                )
-            )
-        return results
-
     def get_boolean_query(self, filters: list[BeaconQueryFilter]) -> dict[str, Any]:
         return {
             "size": 0,
             "query": self._get_query(filters, self.filtering_terms),
-        }
-
-    def get_count_query(
-        self, filters: list[BeaconQueryFilter], limit: int = DEFAULT_LIMIT
-    ) -> dict[str, Any]:
-        return {
-            "size": 0,
-            "query": self._get_query(filters, self.filtering_terms),
-            "aggs": self._get_count_and_record_aggs(limit, include_image_ids=False),
-        }
-
-    def get_record_query(
-        self, filters: list[BeaconQueryFilter], limit: int = DEFAULT_LIMIT
-    ) -> dict[str, Any]:
-        return {
-            "size": 0,
-            "query": self._get_query(filters, self.filtering_terms),
-            "aggs": self._get_count_and_record_aggs(limit, include_image_ids=True),
         }
 
     @override
@@ -346,23 +338,15 @@ class OpenSearchBeaconService(BeaconService):
         self,
         filters: list[BeaconQueryFilter],
         granularity: BeaconQueryGranularity = "record",
-        limit: int = DEFAULT_LIMIT,
     ) -> BeaconResultSets:
-        if granularity == "boolean":
-            body = self.get_boolean_query(filters)
-            parse = OpenSearchBeaconService._parse_boolean_result
-        elif granularity == "count":
-            body = self.get_count_query(filters, limit)
-            parse = partial(
-                OpenSearchBeaconService._parse_count_and_record_result,
-                include_image_ids=False,
-            )
-        else:  # granularity == "record"
-            body = self.get_record_query(filters, limit)
-            parse = partial(
-                OpenSearchBeaconService._parse_count_and_record_result,
-                include_image_ids=True,
-            )
+        query_clause = self._get_query(filters, self.filtering_terms)
 
-        resp = await self.client.search(index=self.index_name, body=body)
-        return parse(resp)
+        if granularity == "boolean":
+            resp = await self.client.search(
+                index=self.index_name, body=self.get_boolean_query(filters)
+            )
+            return OpenSearchBeaconService._parse_boolean_result(resp)
+
+        return await self._collect_pages(
+            query_clause, include_image_ids=(granularity == "record")
+        )

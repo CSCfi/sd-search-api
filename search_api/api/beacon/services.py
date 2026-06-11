@@ -177,7 +177,7 @@ class OpenSearchBeaconService(BeaconService):
     async def _collect_pages(
         self,
         query_clause: dict[str, Any],
-        include_image_ids: bool,
+        granularity: BeaconQueryGranularity,
     ) -> BeaconResultSets:
         """Paginate through aggregation results and collect into BeaconResultSets."""
         pass
@@ -210,6 +210,4 @@ class OpenSearchBeaconService(BeaconService):
             )
             return OpenSearchBeaconService._parse_boolean_result(resp)
 
-        return await self._collect_pages(
-            query_clause, include_image_ids=(granularity == "record")
-        )
+        return await self._collect_pages(query_clause, granularity)

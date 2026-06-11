@@ -1,6 +1,7 @@
 from typing import Any, override
 
 from search_api.api.beacon.models import (
+    BeaconQueryGranularity,
     BeaconResultSet,
     BeaconResultSetResult,
     BeaconResultSets,
@@ -56,9 +57,10 @@ class BigpictureOpenSearchBeaconService(OpenSearchBeaconService):
     async def _collect_pages(
         self,
         query_clause: dict[str, Any],
-        include_image_ids: bool,
+        granularity: BeaconQueryGranularity,
     ) -> BeaconResultSets:
         """Paginate through composite aggregation buckets and collect results."""
+        include_image_ids = granularity == "record"
         result_sets: dict[str, BeaconResultSetResult] = {}
         after_key: dict[str, Any] | None = None
 

@@ -14,9 +14,51 @@ from search_api.bigpicture.models import (
     BigpictureBlockFields,
 )
 from search_api.database.repository import get_cursor
+from search_api.services.snomed import SnomedService, is_concept_id
+from search_api.services.snomed_term import SnomedTermCacheService
+
+logger = logging.getLogger(__name__)
+
+
+def get_concept_ids(fields: BigpictureFields) -> set[str]:
+    """Return all SNOMED CT concept IDs referenced in a BigpictureFields object.
+
+    Iterates all code-valued fields on blocks and stains, collecting values that
+    look like SNOMED CT concept IDs (digit-only strings).  Free-text
+    ``ontologyOrValue`` codes (e.g. ``"Formalin"``) are excluded.
+    """
+    result: set[str] = set()
+
+    for block in fields.blocks:
+        for attr in (
+            block.species,
+            block.block_preparation,
+            block.fixation_type,
+            block.specimen_type,
+        ):
+            if attr is not None and is_concept_id(attr.code):
+                result.add(attr.code)
+        for attr in block.anatomical_site:
+            if is_concept_id(attr.code):
+                result.add(attr.code)
+
+    for stain in fields.stains:
+        for attr in (stain.staining_procedure, stain.staining_substance):
+            if attr is not None and is_concept_id(attr.code):
+                result.add(attr.code)
+
+    return result
 
 
 class BigPictureLoadService:
+    def __init__(
+        self,
+        snomed_term_service: SnomedTermCacheService | None = None,
+        snomed_service: SnomedService | None = None,
+    ) -> None:
+        self._snomed_term_service = snomed_term_service
+        self._snomed_service = snomed_service
+
     @staticmethod
     async def _load_fields(cur: AsyncCursor, fields: BigpictureFields) -> None:
         """
@@ -266,15 +308,21 @@ class BigPictureLoadService:
             stains=stains,
         )
 
-    @staticmethod
-    async def load_fields(fields_iter: Iterator[BigpictureFields]) -> None:
+    async def load_fields(self, fields_iter: Iterator[BigpictureFields]) -> None:
         """
         Write extracted fields to the database, skipping datasets whose files have not
         changed since the last load.
 
+        If a ``SnomedTermCacheService`` and ``SnomedService`` were provided at
+        construction time, preferred terms for all concept IDs in each loaded image
+        are resolved and stored in the SNOMED term cache.
+
         :param fields_iter: Iterator of extracted fields, typically from
             ``BigPictureExtractService.extract_fields``.
         """
+        if self._snomed_term_service:
+            await self._snomed_term_service.load()
+
         loaded = 0
         skipped_datasets: set[str] = set()
         checked_datasets: set[str] = set()
@@ -294,7 +342,7 @@ class BigPictureLoadService:
                         and fields.dataset_files_date is not None
                         and existing_date >= fields.dataset_files_date
                     ):
-                        logging.info(
+                        logger.info(
                             "Skipping dataset %s — no newer files.", fields.dataset_id
                         )
                         skipped_datasets.add(fields.dataset_id)
@@ -302,11 +350,17 @@ class BigPictureLoadService:
 
                 await BigPictureLoadService._load_fields(cur, fields)
                 loaded += 1
-                logging.info(
+                logger.info(
                     "Loaded image %s (dataset %s).", fields.image_id, fields.dataset_id
                 )
 
-        logging.info(
+                if self._snomed_term_service and self._snomed_service:
+                    concept_ids = get_concept_ids(fields)
+                    await self._snomed_term_service.cache_preferred_terms(
+                        concept_ids, self._snomed_service
+                    )
+
+        logger.info(
             "Done — loaded %d image(s), skipped %d dataset(s).",
             loaded,
             len(skipped_datasets),

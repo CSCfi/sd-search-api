@@ -41,6 +41,18 @@ class SnowstormConfiguration(BaseSettings):
     SNOWSTORM_URL: str = Field(description="Snowstorm SNOMED CT server base URL.")
 
 
+class SnomedTermCacheConfiguration(BaseSettings):
+    """SNOMED preferred term in-memory cache configuration."""
+
+    SNOMED_TERM_CACHE_REFRESH_INTERVAL: int = Field(
+        default=300,
+        description=(
+            "How often (in seconds) the in-memory SNOMED preferred term cache is "
+            "reloaded from the database. Defaults to 300 (5 minutes)."
+        ),
+    )
+
+
 class AIConfiguration(BaseSettings):
     """AI/LLM configuration."""
 
@@ -66,6 +78,11 @@ def opensearch_config() -> OpenSearchConfiguration:
 def snowstorm_config() -> SnowstormConfiguration:
     """Get Snowstorm configuration."""
     return SnowstormConfiguration()
+
+
+def snomed_term_cache_config() -> SnomedTermCacheConfiguration:
+    """Get SNOMED term cache configuration."""
+    return SnomedTermCacheConfiguration()
 
 
 def ai_config() -> AIConfiguration:

@@ -1,8 +1,5 @@
 """Integration tests for the API."""
 
-# TODO(improve): use Snowstorm service
-# TODO(improve): check that SNOMED CT codes assigned to the fields are correct
-
 from typing import Any
 
 import httpx

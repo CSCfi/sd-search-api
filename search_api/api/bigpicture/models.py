@@ -37,6 +37,8 @@ class BigpictureBeaconResultSetsResponse(
     """Beacon V2 result sets response for the Bigpicture document schema."""
 
 
+BP_SNOMED_TABLE = "bp_snomed"
+
 BP_OPENSEARCH_INDEX = "bp-image-index"
 
 BP_BEACON_ID = "fi.csc.bigpicture.beacon.v2"

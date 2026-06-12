@@ -29,11 +29,11 @@ from search_api.api.bigpicture.models import (
 )
 from search_api.api.bigpicture.routes import (
     get_beacon_service,
-    get_snomed_service,
+    get_snomed_term_service,
     router,
 )
 from search_api.api.models import FieldValueSuggestion
-from search_api.services.snomed import SnomedConcept, SnomedService
+from search_api.services.snomed_term import SnomedTermCacheService
 
 app = FastAPI()
 app.include_router(router)
@@ -82,33 +82,37 @@ class MockBeaconService(
         return [{}]
 
 
-def _ecl(field_id: str) -> str:
-    return next(t for t in BP_FILTERING_TERMS if t.id == field_id).snomed_ecl
-
-
-# Concepts keyed by ecl expression.
-SUGGESTIONS_AND_VALUES_CONCEPTS: dict[str, dict[str, SnomedConcept]] = {
-    _ecl("animal_species"): {
-        "410607006": SnomedConcept(
-            concept_id="410607006", preferred_term="Homo sapiens"
-        ),
-        "388480002": SnomedConcept(concept_id="388480002", preferred_term="Sus scrofa"),
-        "hominin_001": SnomedConcept(
-            concept_id="hominin_001", preferred_term="Homo heidelbergensis"
-        ),
-    },
-    _ecl("fixation_type"): {
-        "1388477003": SnomedConcept(
-            concept_id="1388477003", preferred_term="Tissue fixative"
-        ),
-    },
-}
-
 SUGGESTIONS_AND_VALUES_INDEXED_COUNTS: dict[str, list[dict[str, int]]] = {
     "sex": [{"Male": 10, "Female": 8}],
     "animal_species": [{"410607006": 5, "388480002": 3}],
     "fixation_type": [{"1388477003": 4}, {"Formalin": 2, "Custom fix": 1}],
 }
+
+PREFERRED_TERMS: dict[str, str] = {
+    "410607006": "Homo sapiens",
+    "388480002": "Sus scrofa",
+    "1388477003": "Tissue fixative",
+}
+
+
+class MockSnomedTermCacheService(SnomedTermCacheService):
+    @override
+    async def load(self) -> None:
+        pass
+
+    @override
+    async def get_preferred_terms(self, concept_ids: set[str]) -> dict[str, str]:
+        return {
+            cid: PREFERRED_TERMS[cid] for cid in concept_ids if cid in PREFERRED_TERMS
+        }
+
+    @override
+    async def cache_preferred_terms(self, concept_ids, snomed) -> None:
+        pass
+
+    @override
+    async def refresh(self, snomed) -> None:
+        pass
 
 
 class MockSuggestionsAndValuesBeaconService(MockBeaconService):
@@ -119,36 +123,6 @@ class MockSuggestionsAndValuesBeaconService(MockBeaconService):
         if field_id in SUGGESTIONS_AND_VALUES_INDEXED_COUNTS:
             return SUGGESTIONS_AND_VALUES_INDEXED_COUNTS[field_id]
         raise ValueError(f"Unsupported field: '{field_id}'")
-
-
-class MockSuggestionsAndValuesSnomedService(SnomedService):
-    @override
-    async def suggest_concepts(
-        self,
-        term: str,
-        ecl: str,
-        branch: str = "MAIN",
-        limit: int = 10,
-        indexed_concept_ids: set[str] | None = None,
-    ) -> list[SnomedConcept]:
-        return [
-            concept
-            for concept in SUGGESTIONS_AND_VALUES_CONCEPTS.get(ecl, {}).values()
-            if concept.preferred_term.lower().startswith(term.lower())
-        ]
-
-    @override
-    async def get_concepts(
-        self,
-        concept_ids: set[str] | None,
-        ecl: str,
-        branch: str = "MAIN",
-    ) -> dict[str, SnomedConcept]:
-        return {
-            k: v
-            for k, v in SUGGESTIONS_AND_VALUES_CONCEPTS.get(ecl, {}).items()
-            if concept_ids is None or k in concept_ids
-        }
 
 
 @pytest.fixture()
@@ -206,7 +180,7 @@ def suggestions_values_client():
     app.dependency_overrides[get_beacon_service] = lambda: (
         MockSuggestionsAndValuesBeaconService(BP_FILTERING_TERMS)
     )
-    app.dependency_overrides[get_snomed_service] = MockSuggestionsAndValuesSnomedService
+    app.dependency_overrides[get_snomed_term_service] = MockSnomedTermCacheService
     yield TestClient(app)
     app.dependency_overrides.clear()
     app.dependency_overrides.update(saved)
@@ -293,26 +267,6 @@ def test_filtering_term_suggestions_controlled_value_substring_match(
     ]
 
 
-def test_filtering_term_suggestions_ontology_include_all(suggestions_values_client):
-    resp = suggestions_values_client.get(
-        "/filtering_terms/animal_species/suggestions",
-        params={"term": "Homo", "include_all_ontology_values": True},
-    )
-    assert resp.status_code == 200
-    assert [FieldValueSuggestion.model_validate(r).term for r in resp.json()] == [
-        "Homo sapiens",
-        "Homo heidelbergensis",
-    ]
-    resp = suggestions_values_client.get(
-        "/filtering_terms/animal_species/suggestions",
-        params={"term": "Homo", "include_all_ontology_values": False},
-    )
-    assert resp.status_code == 200
-    assert [FieldValueSuggestion.model_validate(r).term for r in resp.json()] == [
-        "Homo sapiens"
-    ]
-
-
 def test_filtering_term_suggestions_ontology_include_other(suggestions_values_client):
     resp = suggestions_values_client.get(
         "/filtering_terms/fixation_type/suggestions",
@@ -369,22 +323,8 @@ def test_filtering_term_values_controlled_include_all(suggestions_values_client)
     }
 
 
-def test_filtering_term_values_ontology_include_all(suggestions_values_client):
-    resp = suggestions_values_client.get(
-        "/filtering_terms/animal_species/values",
-        params={"include_all_ontology_values": True},
-    )
-    assert resp.status_code == 200
-    assert {r["value"]: r["count"] for r in resp.json()} == {
-        "Homo sapiens": 5,
-        "Sus scrofa": 3,
-        "Homo heidelbergensis": 0,  # in SNOMED hierarchy, not indexed
-    }
-
-    resp = suggestions_values_client.get(
-        "/filtering_terms/animal_species/values",
-        params={"include_all_ontology_values": False},
-    )
+def test_filtering_term_values_ontology_indexed(suggestions_values_client):
+    resp = suggestions_values_client.get("/filtering_terms/animal_species/values")
     assert resp.status_code == 200
     assert {r["value"]: r["count"] for r in resp.json()} == {
         "Homo sapiens": 5,

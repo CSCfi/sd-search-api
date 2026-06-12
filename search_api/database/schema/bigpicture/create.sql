@@ -1,3 +1,9 @@
+CREATE TABLE bp_snomed (
+    concept_id     TEXT        PRIMARY KEY,
+    preferred_term TEXT        NOT NULL,
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE bp_image (
     image_id TEXT PRIMARY KEY,
     dataset_id TEXT NOT NULL,

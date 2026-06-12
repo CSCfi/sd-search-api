@@ -274,6 +274,40 @@ class SnomedService:
         return await _fetch_all_concepts(f"< {concept_id}", branch)
 
     @staticmethod
+    async def get_preferred_terms(
+        concept_ids: set[str],
+        branch: str = "MAIN",
+    ) -> dict[str, str]:
+        """Return preferred terms for a set of known concept IDs.
+
+        Args:
+            concept_ids: SNOMED CT concept IDs to look up.
+            branch: SNOMED CT branch path. Defaults to ``"MAIN"``.
+
+        Returns:
+            Mapping of concept ID to preferred term. IDs not found in
+            Snowstorm are omitted.
+        """
+        if not concept_ids:
+            return {}
+        url = f"{_snowstorm_url()}/{branch}/concepts"
+        result: dict[str, str] = {}
+        ids_list = sorted(concept_ids)
+        async with _client() as client:
+            for i in range(0, len(ids_list), _SYNONYM_BATCH_SIZE):
+                batch = ids_list[i : i + _SYNONYM_BATCH_SIZE]
+                params: dict[str, str | int] = {
+                    "conceptIds": ",".join(batch),
+                    "activeFilter": "true",
+                    "limit": len(batch),
+                }
+                resp = await client.get(url, params=params)
+                resp.raise_for_status()
+                for item in resp.json().get("items", []):
+                    result[item["conceptId"]] = item["pt"]["term"]
+        return result
+
+    @staticmethod
     async def get_concepts(
         concept_ids: set[str] | None,
         ecl: str,

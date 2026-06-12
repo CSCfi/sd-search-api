@@ -3,14 +3,18 @@
 import argparse
 import asyncio
 import logging
+import os
 import warnings
 
 from dotenv import load_dotenv
 
+from search_api.api.bigpicture.models import BP_SNOMED_TABLE
 from search_api.bigpicture.services.extract import BigPictureExtractService
 from search_api.bigpicture.services.load import BigPictureLoadService
 from search_api.bigpicture.services.sync import BigPictureSyncService
 from search_api.database.repository import get_cursor
+from search_api.services.snomed import SnomedService
+from search_api.services.snomed_term import PostgresSnomedTermCacheService
 
 
 async def main(
@@ -41,8 +45,19 @@ async def main(
         logging.info("%d image(s) extracted without loading them.", count)
         return
 
+    # Resolve SNOMED preferred terms during load if Snowstorm is available.
+    snomed_term_service = None
+    snomed_service = None
+    if os.environ.get("SNOWSTORM_URL"):
+        snomed_term_service = PostgresSnomedTermCacheService(BP_SNOMED_TABLE)
+        snomed_service = SnomedService()
+
     logging.info("Loading fields from %s.", directory)
-    await BigPictureLoadService.load_fields(fields_iter)
+    load_service = BigPictureLoadService(
+        snomed_term_service=snomed_term_service,
+        snomed_service=snomed_service,
+    )
+    await load_service.load_fields(fields_iter)
 
     if sync:
         sync_service = BigPictureSyncService()

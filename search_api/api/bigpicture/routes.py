@@ -30,6 +30,7 @@ from search_api.api.bigpicture.opensearch import BigpictureOpenSearchBeaconServi
 from search_api.ai.models import AISearchResult
 from search_api.ai.services import AIService
 from search_api.services.snomed import SnomedService
+from search_api.services.snomed_term import SnomedTermCacheService
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,10 @@ def get_ai_service() -> AIService:
 
 def get_snomed_service() -> SnomedService:
     return SnomedService()
+
+
+def get_snomed_term_service(request: Request) -> SnomedTermCacheService:
+    return request.app.state.snomed_term_service
 
 
 @router.get(
@@ -165,17 +170,12 @@ async def suggestions(
         default=False,
         description="When True, include all controlled values. When False, only include indexed values.",
     ),
-    include_all_ontology_values: bool = Query(
-        default=False,
-        description="When True, may suggest values with no matching results. "
-        "When False, restrict suggestions to indexed values.",
-    ),
     include_other_ontology_values: bool = Query(
         default=True,
         description="When True, include free-text ontology field values.",
     ),
     beacon_service: BeaconService = Depends(get_beacon_service),
-    snomed_service: SnomedService = Depends(get_snomed_service),
+    snomed_term_service: SnomedTermCacheService = Depends(get_snomed_term_service),
 ) -> list[FieldValueSuggestion]:
     """Return value suggestions for a given field and search term."""
     filtering_term = next((t for t in BP_FILTERING_TERMS if t.id == field_id), None)
@@ -197,48 +197,32 @@ async def suggestions(
 
     if filtering_term.type == "controlledValue":
         if include_all_controlled_values:
-            # Match against all controlled values.
             candidates = filtering_term.controlledValues or []
         else:
-            # Match against indexed controlled values.
             field_counts = await beacon_service.get_indexed_field_value_counts(field_id)
             candidates = list(field_counts[0].keys())
-        matched = sorted(v for v in candidates if _matches(v))
-        return [FieldValueSuggestion(term=v) for v in matched]
+        return [
+            FieldValueSuggestion(term=v)
+            for v in sorted(v for v in candidates if _matches(v))
+        ]
 
     field_counts = await beacon_service.get_indexed_field_value_counts(field_id)
-
-    if include_all_ontology_values:
-        # Match against all ontology concepts.
-        snomed_results = await snomed_service.suggest_concepts(
-            term=term,
-            ecl=filtering_term.snomed_ecl,
+    preferred_terms = await snomed_term_service.get_preferred_terms(
+        set(field_counts[0].keys())
+    )
+    results = [
+        FieldValueSuggestion(term=preferred_term, concept_id=concept_id)
+        for preferred_term, concept_id in sorted(
+            (preferred_term, concept_id)
+            for concept_id, preferred_term in preferred_terms.items()
+            if _matches(preferred_term)
         )
-        results = [
-            FieldValueSuggestion(term=s.preferred_term, concept_id=s.concept_id)
-            for s in snomed_results
-            if _matches(s.preferred_term)
-        ]
-    else:
-        # Match against indexed ontology concepts.
-        concepts = await snomed_service.get_concepts(
-            set(field_counts[0].keys()), filtering_term.snomed_ecl
-        )
-        matches = sorted(
-            (concept.preferred_term, concept_id)
-            for concept_id, concept in concepts.items()
-            if _matches(concept.preferred_term)
-        )
-        results = [
-            FieldValueSuggestion(term=preferred_term, concept_id=concept_id)
-            for preferred_term, concept_id in matches
-        ]
+    ]
 
     if filtering_term.type == "ontology":
         return results
 
     if filtering_term.type == "ontologyOrValue" and include_other_ontology_values:
-        # Match against free-text ontology values.
         existing = {s.term for s in results}
         for text_value in sorted(field_counts[1]):
             if _matches(text_value) and text_value not in existing:
@@ -258,17 +242,12 @@ async def values(
         description="When True, include all controlled values with count 0 for unindexed values. "
         "When False, only include indexed values.",
     ),
-    include_all_ontology_values: bool = Query(
-        default=False,
-        description="When True, may return values with no matching results. "
-        "When False, return only indexed values.",
-    ),
     include_other_ontology_values: bool = Query(
         default=True,
         description="When True, include free-text ontology field values.",
     ),
     beacon_service: BeaconService = Depends(get_beacon_service),
-    snomed_service: SnomedService = Depends(get_snomed_service),
+    snomed_term_service: SnomedTermCacheService = Depends(get_snomed_term_service),
 ) -> list[FieldValueCount]:
     """Return the values for a given field, ordered by count."""
     filtering_term = next((t for t in BP_FILTERING_TERMS if t.id == field_id), None)
@@ -296,20 +275,11 @@ async def values(
             sorted_values = sorted(counts.items(), key=lambda x: x[1], reverse=True)
         return [FieldValueCount(value=v, count=c) for v, c in sorted_values]
 
-    if include_all_ontology_values:
-        concepts = await snomed_service.get_concepts(None, filtering_term.snomed_ecl)
-        results: list[tuple[str, int, str | None]] = [
-            (concept.preferred_term, counts.get(concept_id, 0), concept_id)
-            for concept_id, concept in concepts.items()
-        ]
-    else:
-        concepts = await snomed_service.get_concepts(
-            set(counts.keys()), filtering_term.snomed_ecl
-        )
-        results = [
-            (concept.preferred_term, counts[concept_id], concept_id)
-            for concept_id, concept in concepts.items()
-        ]
+    preferred_terms = await snomed_term_service.get_preferred_terms(set(counts.keys()))
+    results: list[tuple[str, int, str | None]] = [
+        (preferred_term, counts[concept_id], concept_id)
+        for concept_id, preferred_term in preferred_terms.items()
+    ]
 
     if filtering_term.type == "ontologyOrValue" and include_other_ontology_values:
         results += [

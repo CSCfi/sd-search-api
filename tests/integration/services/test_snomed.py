@@ -19,6 +19,28 @@ async def test_find_concept():
 
 
 @pytest.mark.asyncio
+async def test_get_preferred_terms():
+    service = SnomedService()
+    result = await service.get_preferred_terms({"337915000", "80248007"})
+    assert result["337915000"] == "Homo sapiens"
+    assert result["80248007"] == "Left breast structure"
+
+
+@pytest.mark.asyncio
+async def test_get_preferred_terms_unknown_id_omitted():
+    service = SnomedService()
+    result = await service.get_preferred_terms({"337915000", "000000000"})
+    assert "337915000" in result
+    assert "000000000" not in result
+
+
+@pytest.mark.asyncio
+async def test_get_preferred_terms_empty():
+    service = SnomedService()
+    assert await service.get_preferred_terms(set()) == {}
+
+
+@pytest.mark.asyncio
 async def test_find_descendants():
     service = SnomedService()
     concept = await service.find_concept("Myocardial infarction")

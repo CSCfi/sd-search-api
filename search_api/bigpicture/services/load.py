@@ -4,6 +4,7 @@ import logging
 from collections.abc import Iterator
 from datetime import datetime
 
+from pydantic import BaseModel
 from psycopg import AsyncCursor
 from psycopg.types.json import Json
 
@@ -20,33 +21,28 @@ from search_api.services.snomed_term import SnomedTermCacheService
 logger = logging.getLogger(__name__)
 
 
+def _iter_concept_ids(model: BaseModel) -> Iterator[str]:
+    """Yield all concept IDs found in any BigpictureCodeAttributeValue field of model."""
+    for field_name in type(model).model_fields:
+        value = getattr(model, field_name)
+        if isinstance(value, BigpictureCodeAttributeValue):
+            if is_concept_id(value.code):
+                yield value.code
+        elif isinstance(value, frozenset):
+            for item in value:
+                if isinstance(item, BigpictureCodeAttributeValue) and is_concept_id(
+                    item.code
+                ):
+                    yield item.code
+
+
 def get_concept_ids(fields: BigpictureFields) -> set[str]:
-    """Return all SNOMED CT concept IDs referenced in a BigpictureFields object.
-
-    Iterates all code-valued fields on blocks and stains, collecting values that
-    look like SNOMED CT concept IDs (digit-only strings).  Free-text
-    ``ontologyOrValue`` codes (e.g. ``"Formalin"``) are excluded.
-    """
+    """Return all SNOMED CT concept IDs referenced in a BigpictureFields object."""
     result: set[str] = set()
-
     for block in fields.blocks:
-        for attr in (
-            block.species,
-            block.block_preparation,
-            block.fixation_type,
-            block.specimen_type,
-        ):
-            if attr is not None and is_concept_id(attr.code):
-                result.add(attr.code)
-        for attr in block.anatomical_site:
-            if is_concept_id(attr.code):
-                result.add(attr.code)
-
+        result.update(_iter_concept_ids(block))
     for stain in fields.stains:
-        for attr in (stain.staining_procedure, stain.staining_substance):
-            if attr is not None and is_concept_id(attr.code):
-                result.add(attr.code)
-
+        result.update(_iter_concept_ids(stain))
     return result
 
 

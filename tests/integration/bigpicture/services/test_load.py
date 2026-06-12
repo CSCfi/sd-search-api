@@ -66,7 +66,7 @@ async def test_load_and_sync_fields():
 
     async with get_connection() as conn:
         async with conn.cursor() as cur:
-            await load_service.load_fields(cur, fields)
+            await load_service._load_fields(cur, fields)
 
             actual = await load_service.get_fields(cur, image_id)
 

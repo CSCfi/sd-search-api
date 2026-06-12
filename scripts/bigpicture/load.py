@@ -8,23 +8,41 @@ import warnings
 from dotenv import load_dotenv
 
 from search_api.bigpicture.services.extract import BigPictureExtractService
+from search_api.bigpicture.services.load import BigPictureLoadService
 from search_api.bigpicture.services.sync import BigPictureSyncService
 from search_api.database.repository import get_cursor
 
 
 async def main(
-    directory: str,
-    multi_dir: bool,
-    sync: bool,
-    c4gh_private_key_file: str | None,
-    c4gh_passphrase: str | None,
+        directory: str,
+        multi_dir: bool,
+        load: bool,
+        sync: bool,
+        c4gh_private_key_file: str | None,
+        c4gh_passphrase: str | None,
 ) -> None:
-    await BigPictureExtractService().extract_and_load_fields(
+    fields_iter = BigPictureExtractService.extract_fields(
         root=directory,
         single_dir=not multi_dir,
         c4gh_private_key_file=c4gh_private_key_file,
         c4gh_passphrase=c4gh_passphrase,
     )
+
+    if not load:
+        logging.info(
+            "Extracting from %s without writing to the database.", directory
+        )
+        count = 0
+        for fields in fields_iter:
+            logging.info(
+                "Would load image %s (dataset %s).", fields.image_id, fields.dataset_id
+            )
+            count += 1
+        logging.info("%d image(s) extracted without loading them.", count)
+        return
+
+    logging.info("Loading fields from %s.", directory)
+    await BigPictureLoadService.load_fields(fields_iter)
 
     if sync:
         sync_service = BigPictureSyncService()
@@ -50,6 +68,15 @@ if __name__ == "__main__":
         help=(
             "Treat directory as a parent directory containing multiple dataset "
             "subdirectories, instead of a single dataset directory."
+        ),
+    )
+    parser.add_argument(
+        "--load",
+        action="store_true",
+        default=False,
+        help=(
+            "Write extracted data to the database. Without this flag XMLs are "
+            "parsed and validated but nothing is loaded to the database."
         ),
     )
     parser.add_argument(
@@ -88,6 +115,7 @@ if __name__ == "__main__":
         main(
             args.directory,
             args.multi_dir,
+            args.load,
             args.sync,
             args.c4gh_key_file,
             args.c4gh_passphrase,

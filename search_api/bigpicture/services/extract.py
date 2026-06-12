@@ -8,9 +8,7 @@ from lxml.etree import _ElementTree as ElementTree  # noqa
 
 import fsspec  # type: ignore
 import isodate  # type: ignore[import-untyped]
-from search_api.bigpicture.services.load import BigPictureLoadService
 from search_api.services.crypt import load_c4gh_keys, read_file, resolve_path
-from search_api.database.repository import get_cursor
 from search_api.bigpicture.models import (
     BigpictureFields,
     BigpictureCodeAttributeValue,
@@ -585,71 +583,4 @@ class BigPictureExtractService:
         """
         return extract_fields(
             root, fs, use_aliases, single_dir, c4gh_private_key_file, c4gh_passphrase
-        )
-
-    async def extract_and_load_fields(
-        self,
-        root: str = "/",
-        fs: fsspec.AbstractFileSystem | None = None,
-        use_aliases: bool = False,
-        single_dir: bool = False,
-        c4gh_private_key_file: str | None = None,
-        c4gh_passphrase: str | None = None,
-    ) -> None:
-        """
-        Extract fields from XML files and load them into the database.
-
-        :param root: Local directory or bucket path containing dataset subdirectories,
-            or a single dataset directory if ``single_dir`` is True.
-        :param fs: Optional fsspec filesystem. If None, a local filesystem is used.
-        :param use_aliases: Use XML aliases instead of accessions.
-        :param single_dir: If True, treat root as a single dataset directory instead of
-            a parent directory containing multiple dataset directories.
-        :param c4gh_private_key_file: Path to a Crypt4GH private key file (.sec) for
-            decrypting ``.c4gh`` files. If None, only plain files are accepted.
-        :param c4gh_passphrase: Passphrase protecting the private key, or None for an
-            unprotected key.
-        """
-        logging.info("Loading fields from %s.", root)
-        loaded = 0
-        skipped_datasets: set[str] = set()
-        checked_datasets: set[str] = set()
-        async with get_cursor() as cur:
-            for fields in self.extract_fields(
-                root,
-                fs,
-                use_aliases,
-                single_dir,
-                c4gh_private_key_file,
-                c4gh_passphrase,
-            ):
-                if fields.dataset_id in skipped_datasets:
-                    continue
-
-                if fields.dataset_id not in checked_datasets:
-                    checked_datasets.add(fields.dataset_id)
-                    existing_date = await BigPictureLoadService.get_dataset_files_date(
-                        cur, fields.dataset_id
-                    )
-                    if (
-                        existing_date is not None
-                        and fields.dataset_files_date is not None
-                        and existing_date >= fields.dataset_files_date
-                    ):
-                        logging.info(
-                            "Skipping dataset %s — no newer files.", fields.dataset_id
-                        )
-                        skipped_datasets.add(fields.dataset_id)
-                        continue
-
-                await BigPictureLoadService.load_fields(cur, fields)
-                loaded += 1
-                logging.info(
-                    "Loaded image %s (dataset %s).", fields.image_id, fields.dataset_id
-                )
-
-        logging.info(
-            "Done — loaded %d image(s), skipped %d dataset(s).",
-            loaded,
-            len(skipped_datasets),
         )

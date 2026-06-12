@@ -254,7 +254,7 @@ async def generate_and_load_data(image_cnt: int, dataset_cnt: int) -> None:
                 # Load fields to the database for each image.
 
                 logging.info(f"Loading image '{image_id}' to the database")
-                await bp_load_service.load_fields(cur, fields)
+                await bp_load_service._load_fields(cur, fields)
 
             elapsed = time.time() - start_time
             print(

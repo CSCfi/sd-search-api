@@ -1,6 +1,7 @@
 import io
 import os
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
@@ -50,11 +51,36 @@ async def delete_images():
 
 
 @pytest.mark.asyncio
-async def test_load_plain():
+async def test_extract_only():
+    with patch.object(
+        BigPictureLoadService, "_load_fields", new_callable=AsyncMock
+    ) as load_spy:
+        await main(
+            directory=str(_XML_DIR),
+            multi_dir=True,
+            load=False,
+            sync=False,
+            c4gh_private_key_file=None,
+            c4gh_passphrase=None,
+        )
+        load_spy.assert_not_called()
+
+    async with get_connection() as conn:
+        async with conn.cursor() as cur:
+            for image_id in _IMAGE_IDS:
+                fields = await BigPictureLoadService.get_fields(cur, image_id)
+                assert fields is None, (
+                    f"{image_id!r} was unexpectedly written during dry-run"
+                )
+
+
+@pytest.mark.asyncio
+async def test_load_plain_files():
     """The load script processes plain XML files and inserts them into the database."""
     await main(
         directory=str(_XML_DIR),
         multi_dir=True,
+        load=True,
         sync=False,
         c4gh_private_key_file=None,
         c4gh_passphrase=None,
@@ -70,7 +96,7 @@ async def test_load_plain():
 
 
 @pytest.mark.asyncio
-async def test_load_c4gh(tmp_path):
+async def test_load_c4gh_files(tmp_path):
     """The load script decrypts Crypt4GH-encrypted XML files and inserts them into the database."""
     # Generate a recipient key pair.
     seckey_path = tmp_path / "key.sec"
@@ -96,6 +122,7 @@ async def test_load_c4gh(tmp_path):
     await main(
         directory=str(tmp_path),
         multi_dir=True,
+        load=True,
         sync=False,
         c4gh_private_key_file=str(seckey_path),
         c4gh_passphrase=None,

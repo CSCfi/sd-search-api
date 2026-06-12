@@ -1,5 +1,7 @@
 """Bigpicture load service."""
 
+import logging
+from collections.abc import Iterator
 from datetime import datetime
 
 from psycopg import AsyncCursor
@@ -11,11 +13,12 @@ from search_api.bigpicture.models import (
     BigpictureStainingFields,
     BigpictureBlockFields,
 )
+from search_api.database.repository import get_cursor
 
 
 class BigPictureLoadService:
     @staticmethod
-    async def load_fields(cur: AsyncCursor, fields: BigpictureFields) -> None:
+    async def _load_fields(cur: AsyncCursor, fields: BigpictureFields) -> None:
         """
         Load Bigpicture fields for one image into the database.
 
@@ -261,4 +264,50 @@ class BigPictureLoadService:
             dataset_description=dataset_description,
             blocks=blocks,
             stains=stains,
+        )
+
+    @staticmethod
+    async def load_fields(fields_iter: Iterator[BigpictureFields]) -> None:
+        """
+        Write extracted fields to the database, skipping datasets whose files have not
+        changed since the last load.
+
+        :param fields_iter: Iterator of extracted fields, typically from
+            ``BigPictureExtractService.extract_fields``.
+        """
+        loaded = 0
+        skipped_datasets: set[str] = set()
+        checked_datasets: set[str] = set()
+
+        async with get_cursor() as cur:
+            for fields in fields_iter:
+                if fields.dataset_id in skipped_datasets:
+                    continue
+
+                if fields.dataset_id not in checked_datasets:
+                    checked_datasets.add(fields.dataset_id)
+                    existing_date = await BigPictureLoadService.get_dataset_files_date(
+                        cur, fields.dataset_id
+                    )
+                    if (
+                        existing_date is not None
+                        and fields.dataset_files_date is not None
+                        and existing_date >= fields.dataset_files_date
+                    ):
+                        logging.info(
+                            "Skipping dataset %s — no newer files.", fields.dataset_id
+                        )
+                        skipped_datasets.add(fields.dataset_id)
+                        continue
+
+                await BigPictureLoadService._load_fields(cur, fields)
+                loaded += 1
+                logging.info(
+                    "Loaded image %s (dataset %s).", fields.image_id, fields.dataset_id
+                )
+
+        logging.info(
+            "Done — loaded %d image(s), skipped %d dataset(s).",
+            loaded,
+            len(skipped_datasets),
         )

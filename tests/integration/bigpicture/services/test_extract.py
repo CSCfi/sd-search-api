@@ -52,9 +52,8 @@ async def delete_images():
 @pytest.mark.asyncio
 async def test_extract_and_load_fields_plain():
     """Plain XML files from the fixture directory are extracted and loaded into the database."""
-    await BigPictureExtractService().extract_and_load_fields(
-        root=str(_XML_DIR),
-        single_dir=False,
+    await BigPictureLoadService.load_fields(
+        BigPictureExtractService.extract_fields(root=str(_XML_DIR), single_dir=False)
     )
 
     async with get_connection() as conn:
@@ -90,10 +89,12 @@ async def test_extract_and_load_fields_c4gh(tmp_path):
                 outfile,
             )
 
-    await BigPictureExtractService().extract_and_load_fields(
-        root=str(tmp_path),
-        single_dir=False,
-        c4gh_private_key_file=str(seckey_path),
+    await BigPictureLoadService.load_fields(
+        BigPictureExtractService.extract_fields(
+            root=str(tmp_path),
+            single_dir=False,
+            c4gh_private_key_file=str(seckey_path),
+        )
     )
 
     async with get_connection() as conn:

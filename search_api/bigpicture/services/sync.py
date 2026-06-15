@@ -124,7 +124,7 @@ class BigPictureSyncService:
                     blocks,
                     stains
                 FROM bp_image
-                WHERE opensearch_sync_date IS NULL
+                WHERE opensearch_synced_at IS NULL
             """
 
             params = []
@@ -148,7 +148,7 @@ class BigPictureSyncService:
                     """
                     UPDATE bp_image
                     SET
-                        opensearch_sync_date = now()
+                        opensearch_synced_at = now()
                     WHERE image_id = %s
                     """,
                     [(i,) for i in ids_batch],
@@ -207,7 +207,7 @@ class BigPictureSyncService:
         await cur.execute("""
             SELECT COUNT(1)
             FROM bp_image
-            WHERE opensearch_sync_date IS NULL
+            WHERE opensearch_synced_at IS NULL
         """)
 
         return (await cur.fetchone())[0]  # type: ignore

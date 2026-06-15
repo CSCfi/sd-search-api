@@ -104,7 +104,7 @@ def extract_fields(
             sample_file_path = resolve_path(fs, f"{d}/{SAMPLE_XML_FILE}")
             staining_file_path = resolve_path(fs, f"{d}/{STAINING_XML_FILE}")
 
-            dataset_files_date = _get_last_modification_time(
+            dataset_modified_at = _get_last_modification_time(
                 fs,
                 [
                     dataset_file_path,
@@ -291,7 +291,7 @@ def extract_fields(
                     dataset_short_name=dataset_short_name,
                     dataset_title=dataset_title,
                     dataset_description=dataset_description,
-                    dataset_files_date=dataset_files_date,
+                    dataset_modified_at=dataset_modified_at,
                 )
 
             # Add block fields.

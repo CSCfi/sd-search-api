@@ -99,6 +99,6 @@ class BigpictureFields(
     dataset_short_name: str | None = None
     dataset_title: str | None = None
     dataset_description: str | None = None
-    dataset_files_date: datetime | None = (
+    dataset_modified_at: datetime | None = (
         None  # newest file modification date in the dataset
     )

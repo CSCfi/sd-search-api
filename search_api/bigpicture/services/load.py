@@ -87,7 +87,7 @@ class BigPictureLoadService:
                 dataset_description,
                 blocks,
                 stains,
-                dataset_files_date
+                dataset_modified_at
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (image_id) DO UPDATE
@@ -99,8 +99,8 @@ class BigPictureLoadService:
                 dataset_description = EXCLUDED.dataset_description,
                 blocks = EXCLUDED.blocks,
                 stains = EXCLUDED.stains,
-                dataset_files_date = EXCLUDED.dataset_files_date,
-                opensearch_sync_date = NULL
+                dataset_modified_at = EXCLUDED.dataset_modified_at,
+                opensearch_synced_at = NULL
             """,
             (
                 fields.image_id,
@@ -173,17 +173,16 @@ class BigPictureLoadService:
                 )
                 if stains
                 else None,
-                # dataset_files_date
-                fields.dataset_files_date,
+                fields.dataset_modified_at,
             ),
         )
 
     @staticmethod
-    async def get_dataset_files_date(
+    async def get_dataset_modified_at(
         cur: AsyncCursor, dataset_id: str
     ) -> datetime | None:
         """
-        Return the newest dataset_files_date stored for a dataset, or None if not loaded yet.
+        Return the newest dataset_modified_at stored for a dataset, or None if not loaded yet.
 
         :param cur: The database cursor.
         :param dataset_id: The dataset identifier.
@@ -191,7 +190,7 @@ class BigPictureLoadService:
         """
         await cur.execute(
             """
-            SELECT dataset_files_date
+            SELECT dataset_modified_at
             FROM bp_image
             WHERE dataset_id = %s
             LIMIT 1
@@ -330,13 +329,13 @@ class BigPictureLoadService:
 
                 if fields.dataset_id not in checked_datasets:
                     checked_datasets.add(fields.dataset_id)
-                    existing_date = await BigPictureLoadService.get_dataset_files_date(
+                    existing_date = await BigPictureLoadService.get_dataset_modified_at(
                         cur, fields.dataset_id
                     )
                     if (
                         existing_date is not None
-                        and fields.dataset_files_date is not None
-                        and existing_date >= fields.dataset_files_date
+                        and fields.dataset_modified_at is not None
+                        and existing_date >= fields.dataset_modified_at
                     ):
                         logger.info(
                             "Skipping dataset %s — no newer files.", fields.dataset_id

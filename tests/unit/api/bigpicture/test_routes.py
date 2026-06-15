@@ -32,7 +32,7 @@ from search_api.api.bigpicture.routes import (
     get_snomed_term_service,
     router,
 )
-from search_api.api.models import FieldValue
+from search_api.api.models import FieldValue, IndexedFieldValueCounts
 from search_api.services.snomed_term import SnomedTermCacheService
 
 app = FastAPI()
@@ -75,17 +75,19 @@ class MockBeaconService(
     @override
     async def get_indexed_field_value_counts(
         self, field_id: str
-    ) -> list[dict[str, int]]:
+    ) -> IndexedFieldValueCounts:
         term = self.get_term(field_id)
         if isinstance(term.opensearch_field, OpenSearchOntologyOrValue):
-            return [{}, {}]
-        return [{}]
+            return IndexedFieldValueCounts(counts={}, other_counts={})
+        return IndexedFieldValueCounts(counts={})
 
 
-SUGGESTIONS_AND_VALUES_INDEXED_COUNTS: dict[str, list[dict[str, int]]] = {
-    "sex": [{"Male": 10, "Female": 8}],
-    "animal_species": [{"410607006": 5, "388480002": 3}],
-    "fixation_type": [{"1388477003": 4}, {"Formalin": 2, "Custom fix": 1}],
+SUGGESTIONS_AND_VALUES_INDEXED_COUNTS: dict[str, IndexedFieldValueCounts] = {
+    "sex": IndexedFieldValueCounts(counts={"Male": 10, "Female": 8}),
+    "animal_species": IndexedFieldValueCounts(counts={"410607006": 5, "388480002": 3}),
+    "fixation_type": IndexedFieldValueCounts(
+        counts={"1388477003": 4}, other_counts={"Formalin": 2, "Custom fix": 1}
+    ),
 }
 
 PREFERRED_TERMS: dict[str, str] = {
@@ -119,7 +121,7 @@ class MockSuggestionsAndValuesBeaconService(MockBeaconService):
     @override
     async def get_indexed_field_value_counts(
         self, field_id: str
-    ) -> list[dict[str, int]]:
+    ) -> IndexedFieldValueCounts:
         if field_id in SUGGESTIONS_AND_VALUES_INDEXED_COUNTS:
             return SUGGESTIONS_AND_VALUES_INDEXED_COUNTS[field_id]
         raise ValueError(f"Unsupported field: '{field_id}'")

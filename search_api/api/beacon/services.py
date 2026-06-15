@@ -22,6 +22,7 @@ from search_api.api.beacon.models import (
     BeaconResultSetResult,
     BeaconResultSets,
 )
+from search_api.api.models import IndexedFieldValueCounts
 from search_api.api.opensearch.models import (
     OpenSearchOntologyOrValue,
     OpenSearchBeaconFilteringTerm,
@@ -86,11 +87,12 @@ class BeaconService(ABC, Generic[T, S]):
     @abstractmethod
     async def get_indexed_field_value_counts(
         self, field_id: str
-    ) -> list[dict[str, int]]:
-        """Return value counts for each OpenSearch field mapped to field_id.
+    ) -> IndexedFieldValueCounts:
+        """Return value counts for the indexed fields mapped to field_id.
 
-        Returns one dict for simple fields and two dicts for ontologyOrValue fields
-        (concept field first, other-value field second).
+        For simple fields, only ``counts`` is populated.
+        For ``ontologyOrValue`` fields, ``counts`` holds ontology value counts and
+        ``other_counts`` holds free-text value counts.
         Raises ValueError if field_id is unknown.
         """
         pass
@@ -137,15 +139,10 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm, S]):
     @override
     async def get_indexed_field_value_counts(
         self, field_id: str
-    ) -> list[dict[str, int]]:
-        """Fetch term counts from the index for the given filtering term field.
-
-        Returns one dict for simple fields and two dicts for ontologyOrValue
-        fields.
-        """
+    ) -> IndexedFieldValueCounts:
         field = self.get_term(field_id).opensearch_field
         if isinstance(field, OpenSearchOntologyOrValue):
-            concept_field_counts, other_field_counts = await asyncio.gather(
+            concept_counts, other_counts = await asyncio.gather(
                 fetch_indexed_keywords(
                     self.client, self.index_name, field.concept_value_field
                 ),
@@ -153,8 +150,12 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm, S]):
                     self.client, self.index_name, field.other_value_field
                 ),
             )
-            return [concept_field_counts, other_field_counts]
-        return [await fetch_indexed_keywords(self.client, self.index_name, field)]
+            return IndexedFieldValueCounts(
+                counts=concept_counts, other_counts=other_counts
+            )
+        return IndexedFieldValueCounts(
+            counts=await fetch_indexed_keywords(self.client, self.index_name, field)
+        )
 
     @staticmethod
     def _get_query(

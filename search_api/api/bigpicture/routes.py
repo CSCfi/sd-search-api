@@ -200,7 +200,7 @@ async def suggestions(
 
     if filtering_term.type == "controlledValue":
         field_counts = await beacon_service.get_indexed_field_value_counts(field_id)
-        counts = field_counts[0]
+        counts = field_counts.counts
         candidates = (
             filtering_term.controlledValues or []
             if include_all_controlled_values
@@ -212,7 +212,7 @@ async def suggestions(
         ]
 
     field_counts = await beacon_service.get_indexed_field_value_counts(field_id)
-    counts = field_counts[0]
+    counts = field_counts.counts
     preferred_terms = await snomed_term_service.get_preferred_terms(set(counts.keys()))
     results = [
         FieldValue(
@@ -230,7 +230,7 @@ async def suggestions(
 
     if filtering_term.type == "ontologyOrValue" and include_other_ontology_values:
         existing = {s.value for s in results}
-        for text_value, count in field_counts[1].items():
+        for text_value, count in field_counts.other_counts.items():
             if _matches(text_value) and text_value not in existing:
                 results.append(FieldValue(value=text_value, count=count))
 
@@ -267,7 +267,7 @@ async def values(
         )
 
     field_counts = await beacon_service.get_indexed_field_value_counts(field_id)
-    counts = field_counts[0]
+    counts = field_counts.counts
 
     if filtering_term.type == "controlledValue":
         if include_all_controlled_values:
@@ -289,7 +289,8 @@ async def values(
 
     if filtering_term.type == "ontologyOrValue" and include_other_ontology_values:
         results += [
-            (text_value, count, None) for text_value, count in field_counts[1].items()
+            (text_value, count, None)
+            for text_value, count in field_counts.other_counts.items()
         ]
 
     sorted_results = sorted(results, key=lambda x: x[1], reverse=True)

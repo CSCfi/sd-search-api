@@ -193,22 +193,157 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
 HUMAN_PREFERRED_TERM = "Homo sapiens"
 MOUSE_PREFERRED_TERM = "Mus musculus"
 
+# anatomical_site preferred terms
+BREAST_PREFERRED_TERM = "Breast structure"
+PELVIS_PREFERRED_TERM = "Pelvis"
+KIDNEY_PREFERRED_TERM = "Kidney"
+
 # fixation_type preferred terms
 FFPE_PREFERRED_TERM = "Formalin-fixed paraffin-embedded specimen"
 FROZEN_FIX_PREFERRED_TERM = "Frozen specimen"
 
-# Preferred terms seeded into the SNOMED cache for animal_species and fixation_type
-# /values and /suggestions tests. Other ontology fields in OPENSEARCH_DOCS are not covered.
+# specimen_type preferred terms
+SPECIMEN_TYPE_PREFERRED_TERM = "Tissue specimen"
+
+# block_preparation preferred terms
+PARAFFIN_PREFERRED_TERM = "Paraffin wax"
+FROZEN_PREP_PREFERRED_TERM = "Frozen section embedding medium"
+
+# staining_procedure preferred terms
+HE_PREFERRED_TERM = "Haematoxylin and eosin stain"
+IHC_PREFERRED_TERM = "Immunohistochemistry"
+ISH_PREFERRED_TERM = "In situ hybridization"
+
+# SNOMED database and in-memory cache cache for ontology fields in OPENSEARCH_DOCS.
 SNOMED_TERMS: dict[str, str] = {
     # animal_species
     HUMAN_CONCEPT_ID: HUMAN_PREFERRED_TERM,
     MOUSE_CONCEPT_ID: MOUSE_PREFERRED_TERM,
+    # anatomical_site
+    BREAST_CONCEPT_ID: BREAST_PREFERRED_TERM,
+    PELVIS_CONCEPT_ID: PELVIS_PREFERRED_TERM,
+    KIDNEY_CONCEPT_ID: KIDNEY_PREFERRED_TERM,
     # fixation_type
     FFPE_CONCEPT_ID: FFPE_PREFERRED_TERM,
     FROZEN_FIX_CONCEPT_ID: FROZEN_FIX_PREFERRED_TERM,
+    # specimen_type
+    SPECIMEN_TYPE_CONCEPT_ID: SPECIMEN_TYPE_PREFERRED_TERM,
+    # block_preparation
+    PARAFFIN_CONCEPT_ID: PARAFFIN_PREFERRED_TERM,
+    FROZEN_PREP_CONCEPT_ID: FROZEN_PREP_PREFERRED_TERM,
+    # staining_procedure
+    HE_CONCEPT_ID: HE_PREFERRED_TERM,
+    IHC_CONCEPT_ID: IHC_PREFERRED_TERM,
+    ISH_CONCEPT_ID: ISH_PREFERRED_TERM,
 }
 
 _ADMIN_KEY = os.environ.get("ADMIN_KEY", "")
+
+
+def field_value(value: str, count: int, concept_id: str | None = None) -> FieldValue:
+    return FieldValue(value=value, count=count, concept_id=concept_id)
+
+
+EXPECTED_ONTOLOGY_VALUES: list[tuple[str, list[FieldValue]]] = [
+    (
+        "animal_species",
+        [
+            field_value(HUMAN_PREFERRED_TERM, 3, HUMAN_CONCEPT_ID),
+            field_value(MOUSE_PREFERRED_TERM, 2, MOUSE_CONCEPT_ID),
+        ],
+    ),
+    (
+        "anatomical_site",
+        [
+            field_value(BREAST_PREFERRED_TERM, 2, BREAST_CONCEPT_ID),
+            field_value(PELVIS_PREFERRED_TERM, 1, PELVIS_CONCEPT_ID),
+            field_value(KIDNEY_PREFERRED_TERM, 3, KIDNEY_CONCEPT_ID),
+        ],
+    ),
+    (
+        "specimen_type",
+        [field_value(SPECIMEN_TYPE_PREFERRED_TERM, 5, SPECIMEN_TYPE_CONCEPT_ID)],
+    ),
+    (
+        "block_preparation",
+        [
+            field_value(PARAFFIN_PREFERRED_TERM, 4, PARAFFIN_CONCEPT_ID),
+            field_value(FROZEN_PREP_PREFERRED_TERM, 1, FROZEN_PREP_CONCEPT_ID),
+        ],
+    ),
+    (
+        "fixation_type",
+        [
+            field_value(FFPE_PREFERRED_TERM, 4, FFPE_CONCEPT_ID),
+            field_value(FROZEN_FIX_PREFERRED_TERM, 1, FROZEN_FIX_CONCEPT_ID),
+        ],
+    ),
+    (
+        "staining_procedure",
+        [
+            field_value(HE_PREFERRED_TERM, 3, HE_CONCEPT_ID),
+            field_value(IHC_PREFERRED_TERM, 1, IHC_CONCEPT_ID),
+            field_value(ISH_PREFERRED_TERM, 1, ISH_CONCEPT_ID),
+        ],
+    ),
+]
+
+EXPECTED_ONTOLOGY_SUGGESTIONS: list[tuple[str, str, FieldValue]] = [
+    ("animal_species", "homo", field_value(HUMAN_PREFERRED_TERM, 3, HUMAN_CONCEPT_ID)),
+    ("animal_species", "mus", field_value(MOUSE_PREFERRED_TERM, 2, MOUSE_CONCEPT_ID)),
+    (
+        "anatomical_site",
+        "breast",
+        field_value(BREAST_PREFERRED_TERM, 2, BREAST_CONCEPT_ID),
+    ),
+    (
+        "anatomical_site",
+        "kidney",
+        field_value(KIDNEY_PREFERRED_TERM, 3, KIDNEY_CONCEPT_ID),
+    ),
+    (
+        "specimen_type",
+        "tissue",
+        field_value(SPECIMEN_TYPE_PREFERRED_TERM, 5, SPECIMEN_TYPE_CONCEPT_ID),
+    ),
+    (
+        "block_preparation",
+        "paraffin",
+        field_value(PARAFFIN_PREFERRED_TERM, 4, PARAFFIN_CONCEPT_ID),
+    ),
+    (
+        "block_preparation",
+        "frozen",
+        field_value(FROZEN_PREP_PREFERRED_TERM, 1, FROZEN_PREP_CONCEPT_ID),
+    ),
+    ("fixation_type", "formalin", field_value(FFPE_PREFERRED_TERM, 4, FFPE_CONCEPT_ID)),
+    ("staining_procedure", "haema", field_value(HE_PREFERRED_TERM, 3, HE_CONCEPT_ID)),
+    (
+        "staining_procedure",
+        "immunoh",
+        field_value(IHC_PREFERRED_TERM, 1, IHC_CONCEPT_ID),
+    ),
+]
+
+EXPECTED_ONTOLOGY_OTHER_VALUES: list[tuple[str, list[FieldValue]]] = [
+    (
+        "fixation_type",
+        [field_value("Formalin", 4), field_value("Custom fix", 1)],
+    ),
+    (
+        "staining_procedure",
+        [
+            field_value("Haematoxylin and eosin stain", 3),
+            field_value("Immunohistochemical staining", 1),
+            field_value("In situ hybridization", 1),
+        ],
+    ),
+]
+
+EXPECTED_ONTOLOGY_OTHER_SUGGESTIONS: list[tuple[str, str, FieldValue]] = [
+    ("fixation_type", "custom", field_value("Custom fix", 1)),
+    ("staining_procedure", "immunoh", field_value("Immunohistochemical staining", 1)),
+]
 
 
 @pytest.fixture(scope="module")
@@ -258,10 +393,6 @@ async def snomed_terms(client: httpx.Client):
                 f"DELETE FROM {BP_SNOMED_TABLE} WHERE concept_id = ANY(%s)",
                 (list(SNOMED_TERMS.keys()),),
             )
-
-
-def field_value(value: str, count: int, concept_id: str | None = None) -> FieldValue:
-    return FieldValue(value=value, count=count, concept_id=concept_id)
 
 
 def get_filters(
@@ -670,97 +801,66 @@ async def test_suggestions_unsupported_type(bp_opensearch_index, client):
     assert resp.status_code == 400
 
 
-# /values with ontology value (animal_species)
-# Requires the SNOMED database and in-memory cache to be updated.
+# /values and /suggestions for ontology and ontologyOrValue fields
 #
 
 
 @pytest.mark.asyncio
-async def test_values_animal_species(bp_opensearch_index, snomed_terms, client):
-    resp = client.get("/filtering_terms/animal_species/values")
+@pytest.mark.parametrize("field_id,expected", EXPECTED_ONTOLOGY_VALUES)
+async def test_values_ontology_fields(
+    bp_opensearch_index, snomed_terms, client, field_id, expected
+):
+    resp = client.get(f"/filtering_terms/{field_id}/values")
     assert resp.status_code == 200
     results = [FieldValue.model_validate(r) for r in resp.json()]
-    assert field_value(HUMAN_PREFERRED_TERM, 3, HUMAN_CONCEPT_ID) in results
-    assert field_value(MOUSE_PREFERRED_TERM, 2, MOUSE_CONCEPT_ID) in results
-
-
-# /suggestions with ontology value (animal_species)
-# Requires the SNOMED database and in-memory cache to be updated.
-#
+    for ev in expected:
+        assert ev in results
 
 
 @pytest.mark.asyncio
-async def test_suggestions_animal_species_prefix(
-    bp_opensearch_index, snomed_terms, client
+@pytest.mark.parametrize("field_id,expected", EXPECTED_ONTOLOGY_OTHER_VALUES)
+async def test_other_values_ontology_fields(
+    bp_opensearch_index, snomed_terms, client, field_id, expected
 ):
     resp = client.get(
-        "/filtering_terms/animal_species/suggestions", params={"term": "homo"}
+        f"/filtering_terms/{field_id}/values",
+        params={"include_other_ontology_values": True},
     )
     assert resp.status_code == 200
     results = [FieldValue.model_validate(r) for r in resp.json()]
-    assert results == [field_value(HUMAN_PREFERRED_TERM, 3, HUMAN_CONCEPT_ID)]
+    for ev in expected:
+        assert ev in results
 
 
 @pytest.mark.asyncio
-async def test_suggestions_animal_species_no_match(
-    bp_opensearch_index, snomed_terms, client
+@pytest.mark.parametrize("field_id,term,expected", EXPECTED_ONTOLOGY_SUGGESTIONS)
+async def test_suggestions_ontology_fields(
+    bp_opensearch_index, snomed_terms, client, field_id, term, expected
 ):
+    resp = client.get(f"/filtering_terms/{field_id}/suggestions", params={"term": term})
+    assert resp.status_code == 200
+    results = [FieldValue.model_validate(r) for r in resp.json()]
+    assert expected in results
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field_id,term,expected", EXPECTED_ONTOLOGY_OTHER_SUGGESTIONS)
+async def test_other_suggestions_ontology_fields(
+    bp_opensearch_index, snomed_terms, client, field_id, term, expected
+):
+    resp = client.get(
+        f"/filtering_terms/{field_id}/suggestions",
+        params={"term": term, "include_other_ontology_values": True},
+    )
+    assert resp.status_code == 200
+    results = [FieldValue.model_validate(r) for r in resp.json()]
+    assert expected in results
+
+
+@pytest.mark.asyncio
+async def test_suggestions_no_match(bp_opensearch_index, snomed_terms, client):
     resp = client.get(
         "/filtering_terms/animal_species/suggestions", params={"term": "xyz"}
     )
     assert resp.status_code == 200
     assert resp.json() == []
-
-
-# /values — ontologyOrValue (fixation_type)
-#
-
-
-@pytest.mark.asyncio
-async def test_values_fixation_type(bp_opensearch_index, snomed_terms, client):
-    resp = client.get("/filtering_terms/fixation_type/values")
-    assert resp.status_code == 200
-    results = [FieldValue.model_validate(r) for r in resp.json()]
-    assert field_value(FFPE_PREFERRED_TERM, 4, FFPE_CONCEPT_ID) in results
-    assert field_value(FROZEN_FIX_PREFERRED_TERM, 1, FROZEN_FIX_CONCEPT_ID) in results
-
-
-@pytest.mark.asyncio
-async def test_values_fixation_type_include_other_ontology_values(
-    bp_opensearch_index, snomed_terms, client
-):
-    resp = client.get(
-        "/filtering_terms/fixation_type/values",
-        params={"include_other_ontology_values": True},
-    )
-    assert resp.status_code == 200
-    results = [FieldValue.model_validate(r) for r in resp.json()]
-    assert field_value("Formalin", 4) in results
-    assert field_value("Custom fix", 1) in results
-
-
-# /suggestions — ontologyOrValue (fixation_type)
-#
-
-
-@pytest.mark.asyncio
-async def test_suggestions_fixation_type(bp_opensearch_index, snomed_terms, client):
-    resp = client.get(
-        "/filtering_terms/fixation_type/suggestions", params={"term": "formalin"}
-    )
-    assert resp.status_code == 200
-    results = [FieldValue.model_validate(r) for r in resp.json()]
-    assert field_value(FFPE_PREFERRED_TERM, 4, FFPE_CONCEPT_ID) in results
-
-
-@pytest.mark.asyncio
-async def test_suggestions_fixation_type_include_other_ontology_values(
-    bp_opensearch_index, snomed_terms, client
-):
-    resp = client.get(
-        "/filtering_terms/fixation_type/suggestions",
-        params={"term": "custom", "include_other_ontology_values": True},
-    )
-    assert resp.status_code == 200
-    results = [FieldValue.model_validate(r) for r in resp.json()]
-    assert field_value("Custom fix", 1) in results

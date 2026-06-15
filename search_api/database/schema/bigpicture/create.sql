@@ -4,6 +4,8 @@ CREATE TABLE bp_snomed (
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE INDEX idx_bp_snomed_updated_at ON bp_snomed (updated_at);
+
 CREATE TABLE bp_image (
     image_id TEXT PRIMARY KEY,
     dataset_id TEXT NOT NULL,

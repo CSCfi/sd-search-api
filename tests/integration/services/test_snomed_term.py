@@ -1,4 +1,6 @@
 import os
+import uuid
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 
 import pytest
@@ -165,3 +167,67 @@ async def test_cache_preferred_terms_resolves_via_snowstorm():
     stored = await _get_stored_term("337915000")
     assert stored is not None
     assert stored.lower().startswith("homo")
+
+
+@pytest.mark.asyncio
+async def test_has_changes_since():
+    initial_term_cnt = 500
+    extra_term_cnt = 50
+    initial_terms = {str(uuid.uuid4()): f"Term {i}" for i in range(initial_term_cnt)}
+    extra_terms = {str(uuid.uuid4()): f"Term {i}" for i in range(extra_term_cnt)}
+    all_concept_ids = list(initial_terms) + list(extra_terms)
+
+    initial_ts = datetime.now(timezone.utc) - timedelta(seconds=10)
+
+    try:
+        async with get_connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.executemany(
+                    "INSERT INTO bp_snomed (concept_id, preferred_term, updated_at) "
+                    "VALUES (%s, %s, %s)",
+                    [
+                        (concept_id, term, initial_ts)
+                        for concept_id, term in initial_terms.items()
+                    ],
+                )
+
+        service = PostgresSnomedTermCacheService(BP_SNOMED_TABLE)
+        await service.load()
+
+        assert service._last_refreshed is not None
+        for concept_id, term in initial_terms.items():
+            assert service._cache.get(concept_id) == term
+
+        current_ts = datetime.now(timezone.utc)
+
+        # No new rows
+        assert not await service._has_changes_since(current_ts)
+
+        future_ts = current_ts + timedelta(seconds=10)
+        async with get_connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.executemany(
+                    "INSERT INTO bp_snomed (concept_id, preferred_term, updated_at) "
+                    "VALUES (%s, %s, %s)",
+                    [
+                        (concept_id, term, future_ts)
+                        for concept_id, term in extra_terms.items()
+                    ],
+                )
+
+        # Extra rows exist
+        assert await service._has_changes_since(current_ts)
+
+        # Loads extra rows
+        await service.load()
+        for concept_id, term in initial_terms.items():
+            assert service._cache.get(concept_id) == term
+        for concept_id, term in extra_terms.items():
+            assert service._cache.get(concept_id) == term
+    finally:
+        async with get_connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "DELETE FROM bp_snomed WHERE concept_id = ANY(%s)",
+                    (all_concept_ids,),
+                )

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
 
 from search_api.database.repository import get_cursor
 from search_api.services.snomed import SnomedService
@@ -66,6 +67,7 @@ class PostgresSnomedTermCacheService(SnomedTermCacheService):
         self._table_name = table_name
         self._refresh_interval = refresh_interval
         self._cache: dict[str, str] = {}
+        self._last_refreshed: datetime | None = None
         self._task: asyncio.Task | None = None
 
     async def load(self) -> None:
@@ -78,9 +80,18 @@ class PostgresSnomedTermCacheService(SnomedTermCacheService):
                 f"SELECT concept_id, preferred_term FROM {self._table_name}"
             )
             self._cache = {row[0]: row[1] for row in await cur.fetchall()}
+        self._last_refreshed = datetime.now(timezone.utc)
         logger.info(
             "Loaded %d SNOMED preferred term(s) into memory cache.", len(self._cache)
         )
+
+    async def _has_changes_since(self, since: datetime) -> bool:
+        async with get_cursor() as cur:
+            await cur.execute(
+                f"SELECT 1 FROM {self._table_name} WHERE updated_at > %s LIMIT 1",
+                (since,),
+            )
+            return await cur.fetchone() is not None
 
     def start(self) -> None:
         """Start the background task that periodically reloads the cache from Postgres."""
@@ -99,6 +110,10 @@ class PostgresSnomedTermCacheService(SnomedTermCacheService):
         while True:
             await asyncio.sleep(self._refresh_interval)
             try:
+                if self._last_refreshed and not await self._has_changes_since(
+                    self._last_refreshed
+                ):
+                    continue
                 await self.load()
             except asyncio.CancelledError:
                 raise

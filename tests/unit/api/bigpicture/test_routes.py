@@ -198,7 +198,7 @@ def test_filtering_term_suggestions_unknown_field(suggestions_values_client):
     resp = suggestions_values_client.get(
         "/filtering_terms/unknown/suggestions", params={"term": "x"}
     )
-    assert resp.status_code == 404
+    assert resp.status_code == 400
     assert resp.json()["detail"] == "Unknown field: 'unknown'."
 
 
@@ -295,7 +295,7 @@ def test_filtering_term_suggestions_ontology_include_other(suggestions_values_cl
 
 def test_filtering_term_values_unknown_field(suggestions_values_client):
     resp = suggestions_values_client.get("/filtering_terms/unknown/values")
-    assert resp.status_code == 404
+    assert resp.status_code == 400
     assert resp.json()["detail"] == "Unknown field: 'unknown'."
 
 

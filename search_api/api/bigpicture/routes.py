@@ -3,7 +3,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 
-from search_api.exceptions import SystemException
+from search_api.exceptions import SystemException, UserException
 
 from search_api.api.bigpicture.models import (
     BP_BEACON_ID,
@@ -140,9 +140,7 @@ async def query(
             response=response,
         )
 
-    raise HTTPException(
-        status_code=400, detail=f"Unsupported granularity: {granularity!r}"
-    )
+    raise UserException(f"Unsupported granularity: {granularity!r}")
 
 
 if feature_config().FEATURE_AI:
@@ -184,12 +182,11 @@ async def suggestions(
     """Return value suggestions for a given field and search term."""
     filtering_term = next((t for t in BP_FILTERING_TERMS if t.id == field_id), None)
     if filtering_term is None:
-        raise HTTPException(status_code=404, detail=f"Unknown field: '{field_id}'.")
+        raise UserException(f"Unknown field: '{field_id}'.")
 
     if filtering_term.type not in ("controlledValue", "ontology", "ontologyOrValue"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Suggestions are not supported for field '{field_id}' (type '{filtering_term.type}').",
+        raise UserException(
+            f"Suggestions are not supported for field '{field_id}' (type '{filtering_term.type}')."
         )
 
     def _matches(value: str) -> bool:
@@ -259,12 +256,11 @@ async def values(
     """Return the values for a given field, ordered by count."""
     filtering_term = next((t for t in BP_FILTERING_TERMS if t.id == field_id), None)
     if filtering_term is None:
-        raise HTTPException(status_code=404, detail=f"Unknown field: '{field_id}'.")
+        raise UserException(f"Unknown field: '{field_id}'.")
 
     if filtering_term.type not in ("controlledValue", "ontology", "ontologyOrValue"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Values are not supported for field '{field_id}' (type '{filtering_term.type}').",
+        raise UserException(
+            f"Values are not supported for field '{field_id}' (type '{filtering_term.type}')."
         )
 
     field_counts = await beacon_service.get_indexed_field_value_counts(field_id)

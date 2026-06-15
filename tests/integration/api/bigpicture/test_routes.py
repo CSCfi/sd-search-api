@@ -734,7 +734,7 @@ async def test_values_sex_include_all_controlled_values(bp_opensearch_index, cli
 @pytest.mark.asyncio
 async def test_values_unknown_field(bp_opensearch_index, client):
     resp = client.get("/filtering_terms/unknown/values")
-    assert resp.status_code == 404
+    assert resp.status_code == 400
 
 
 @pytest.mark.asyncio
@@ -790,7 +790,7 @@ async def test_suggestions_sex_substring_match(bp_opensearch_index, client):
 @pytest.mark.asyncio
 async def test_suggestions_unknown_field(bp_opensearch_index, client):
     resp = client.get("/filtering_terms/unknown/suggestions", params={"term": "x"})
-    assert resp.status_code == 404
+    assert resp.status_code == 400
 
 
 @pytest.mark.asyncio

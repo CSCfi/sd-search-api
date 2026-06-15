@@ -63,7 +63,7 @@ async def index_documents(
     :param docs: The OpenSearch documents to index.
     """
     if len(ids) != len(docs):
-        raise ValueError("Different number of ids and docs")
+        raise SystemException("Different number of ids and docs")
 
     actions = (
         {

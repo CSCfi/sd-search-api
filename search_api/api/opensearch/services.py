@@ -78,7 +78,7 @@ async def index_documents(
     )
 
     if failed:
-        logging.error(f"{failed} documents failed to index")
+        raise RuntimeError(f"{failed} document(s) failed to index")
 
 
 @cached(ttl=_FETCH_INDEXED_KEYWORDS_TTL)

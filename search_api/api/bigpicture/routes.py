@@ -303,10 +303,10 @@ async def values(
 @router.get("/health")
 async def health(service: BeaconService = Depends(get_beacon_service)):
     try:
-        if await service.is_healthy():
-            return {"status": "ok"}
-
+        healthy = await service.is_healthy()
+    except Exception:
+        logger.exception("Health check failed.")
         raise HTTPException(status_code=503, detail="unhealthy")
-
-    except Exception as e:
-        raise HTTPException(status_code=503, detail=str(e))
+    if not healthy:
+        raise HTTPException(status_code=503, detail="unhealthy")
+    return {"status": "ok"}

@@ -338,9 +338,9 @@ def extract_fields(
             for image_id in image_ids:
                 yield fields[image_id]
 
-        except Exception as e:
-            # TODO(improve): add error handling
-            raise e
+        except Exception:
+            logging.error("Failed to extract fields from dataset %s.", d, exc_info=True)
+            raise
 
 
 def _extract_sample_block_fields(xml: ElementTree) -> BigpictureSampleBlockFields:

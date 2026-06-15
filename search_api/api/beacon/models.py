@@ -47,7 +47,7 @@ class BeaconQueryFilter(BaseModel):
     operator: Literal["="] = "="  # Only equality operator is supported
 
     # Used in Beacon V2 OntologyFilter.
-    includeDescendantTerms: bool = True
+    includeDescendantTerms: bool = False
 
 
 class BeaconQuery(BaseModel):

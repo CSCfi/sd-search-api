@@ -1,14 +1,9 @@
 from pydantic import BaseModel
 
 
-class FieldValueSuggestion(BaseModel):
-    term: str
-    concept_id: str | None = None
-
-
-class FieldValueCount(BaseModel):
+class FieldValue(BaseModel):
     value: str
-    count: int
+    count: int = 0
     concept_id: str | None = None
 
 

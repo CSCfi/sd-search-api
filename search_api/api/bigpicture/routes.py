@@ -13,7 +13,7 @@ from search_api.api.bigpicture.models import (
     BigpictureBeaconResultSetResult,
     BigpictureBeaconResultSetsResponse,
 )
-from search_api.api.models import AIQueryRequest, FieldValueCount, FieldValueSuggestion
+from search_api.api.models import AIQueryRequest, FieldValue
 from search_api.api.beacon.models import (
     BeaconQueryRequest,
     BeaconBooleanResponse,
@@ -160,7 +160,7 @@ if feature_config().FEATURE_AI:
 
 @router.get(
     "/filtering_terms/{field_id}/suggestions",
-    response_model=list[FieldValueSuggestion],
+    response_model=list[FieldValue],
 )
 async def suggestions(
     field_id: str = Path(description="Filtering term field ID."),
@@ -179,7 +179,7 @@ async def suggestions(
     ),
     beacon_service: BeaconService = Depends(get_beacon_service),
     snomed_term_service: SnomedTermCacheService = Depends(get_snomed_term_service),
-) -> list[FieldValueSuggestion]:
+) -> list[FieldValue]:
     """Return value suggestions for a given field and search term."""
     filtering_term = next((t for t in BP_FILTERING_TERMS if t.id == field_id), None)
     if filtering_term is None:
@@ -199,22 +199,25 @@ async def suggestions(
         return any(word.startswith(term_lower) for word in value_lower.split())
 
     if filtering_term.type == "controlledValue":
-        if include_all_controlled_values:
-            candidates = filtering_term.controlledValues or []
-        else:
-            field_counts = await beacon_service.get_indexed_field_value_counts(field_id)
-            candidates = list(field_counts[0].keys())
+        field_counts = await beacon_service.get_indexed_field_value_counts(field_id)
+        counts = field_counts[0]
+        candidates = (
+            filtering_term.controlledValues or []
+            if include_all_controlled_values
+            else list(counts.keys())
+        )
         return [
-            FieldValueSuggestion(term=v)
+            FieldValue(value=v, count=counts.get(v, 0))
             for v in sorted(v for v in candidates if _matches(v))
         ]
 
     field_counts = await beacon_service.get_indexed_field_value_counts(field_id)
-    preferred_terms = await snomed_term_service.get_preferred_terms(
-        set(field_counts[0].keys())
-    )
+    counts = field_counts[0]
+    preferred_terms = await snomed_term_service.get_preferred_terms(set(counts.keys()))
     results = [
-        FieldValueSuggestion(term=preferred_term, concept_id=concept_id)
+        FieldValue(
+            value=preferred_term, concept_id=concept_id, count=counts[concept_id]
+        )
         for preferred_term, concept_id in sorted(
             (preferred_term, concept_id)
             for concept_id, preferred_term in preferred_terms.items()
@@ -226,17 +229,17 @@ async def suggestions(
         return results
 
     if filtering_term.type == "ontologyOrValue" and include_other_ontology_values:
-        existing = {s.term for s in results}
-        for text_value in sorted(field_counts[1]):
+        existing = {s.value for s in results}
+        for text_value, count in field_counts[1].items():
             if _matches(text_value) and text_value not in existing:
-                results.append(FieldValueSuggestion(term=text_value))
+                results.append(FieldValue(value=text_value, count=count))
 
     return results
 
 
 @router.get(
     "/filtering_terms/{field_id}/values",
-    response_model=list[FieldValueCount],
+    response_model=list[FieldValue],
 )
 async def values(
     field_id: str = Path(description="Filtering term field ID."),
@@ -251,7 +254,7 @@ async def values(
     ),
     beacon_service: BeaconService = Depends(get_beacon_service),
     snomed_term_service: SnomedTermCacheService = Depends(get_snomed_term_service),
-) -> list[FieldValueCount]:
+) -> list[FieldValue]:
     """Return the values for a given field, ordered by count."""
     filtering_term = next((t for t in BP_FILTERING_TERMS if t.id == field_id), None)
     if filtering_term is None:
@@ -276,7 +279,7 @@ async def values(
             )
         else:
             sorted_values = sorted(counts.items(), key=lambda x: x[1], reverse=True)
-        return [FieldValueCount(value=v, count=c) for v, c in sorted_values]
+        return [FieldValue(value=v, count=c) for v, c in sorted_values]
 
     preferred_terms = await snomed_term_service.get_preferred_terms(set(counts.keys()))
     results: list[tuple[str, int, str | None]] = [
@@ -291,7 +294,7 @@ async def values(
 
     sorted_results = sorted(results, key=lambda x: x[1], reverse=True)
     return [
-        FieldValueCount(value=label, count=count, concept_id=concept_id)
+        FieldValue(value=label, count=count, concept_id=concept_id)
         for label, count, concept_id in sorted_results
     ]
 

@@ -29,6 +29,7 @@ from search_api.api.opensearch.models import OpenSearchBeaconFilteringTerm
 from search_api.api.bigpicture.opensearch import BigpictureOpenSearchBeaconService
 from search_api.ai.models import AISearchResult
 from search_api.ai.services import AIService
+from search_api.conf import feature_config
 from search_api.services.snomed import SnomedService
 from search_api.services.snomed_term import SnomedTermCacheService
 
@@ -143,16 +144,18 @@ async def query(
     )
 
 
-@router.post(
-    "/ai/query",
-    response_model=AISearchResult,
-)
-async def ai_query(
-    request: AIQueryRequest,
-    beacon_service: BeaconService = Depends(get_beacon_service),
-    ai_service: AIService = Depends(get_ai_service),
-) -> AISearchResult:
-    return await ai_service.search(request.query, beacon_service)
+if feature_config().FEATURE_AI:
+
+    @router.post(
+        "/ai/query",
+        response_model=AISearchResult,
+    )
+    async def ai_query(
+        request: AIQueryRequest,
+        beacon_service: BeaconService = Depends(get_beacon_service),
+        ai_service: AIService = Depends(get_ai_service),
+    ) -> AISearchResult:
+        return await ai_service.search(request.query, beacon_service)
 
 
 @router.get(

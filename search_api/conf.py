@@ -53,6 +53,15 @@ class SnomedTermCacheConfiguration(BaseSettings):
     )
 
 
+class FeatureConfiguration(BaseSettings):
+    """Feature flags."""
+
+    FEATURE_AI: bool = Field(
+        default=False,
+        description="Enable the POST /ai/query endpoint. Disabled by default.",
+    )
+
+
 class AIConfiguration(BaseSettings):
     """AI/LLM configuration."""
 
@@ -83,6 +92,11 @@ def snowstorm_config() -> SnowstormConfiguration:
 def snomed_term_cache_config() -> SnomedTermCacheConfiguration:
     """Get SNOMED term cache configuration."""
     return SnomedTermCacheConfiguration()
+
+
+def feature_config() -> FeatureConfiguration:
+    """Get feature flag configuration."""
+    return FeatureConfiguration()
 
 
 def ai_config() -> AIConfiguration:

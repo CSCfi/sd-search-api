@@ -32,7 +32,7 @@ from search_api.api.bigpicture.routes import (
     get_snomed_term_service,
     router,
 )
-from search_api.api.models import FieldValueSuggestion
+from search_api.api.models import FieldValue
 from search_api.services.snomed_term import SnomedTermCacheService
 
 app = FastAPI()
@@ -215,16 +215,16 @@ def test_filtering_term_suggestions_controlled_value_all(suggestions_values_clie
         params={"term": "ma", "include_all_controlled_values": True},
     )
     assert resp.status_code == 200
-    assert [FieldValueSuggestion.model_validate(r).term for r in resp.json()] == [
-        "Male"
+    assert [FieldValue.model_validate(r) for r in resp.json()] == [
+        FieldValue(value="Male", count=10)
     ]
     resp = suggestions_values_client.get(
         "/filtering_terms/sex/suggestions",
         params={"term": "FE", "include_all_controlled_values": True},
     )
     assert resp.status_code == 200
-    assert [FieldValueSuggestion.model_validate(r).term for r in resp.json()] == [
-        "Female"
+    assert [FieldValue.model_validate(r) for r in resp.json()] == [
+        FieldValue(value="Female", count=8)
     ]
 
 
@@ -236,15 +236,15 @@ def test_filtering_term_suggestions_controlled_value_indexed_only(
         params={"term": "o", "include_all_controlled_values": True},
     )
     assert resp.status_code == 200
-    assert [FieldValueSuggestion.model_validate(r).term for r in resp.json()] == [
-        "Other"
+    assert [FieldValue.model_validate(r) for r in resp.json()] == [
+        FieldValue(value="Other", count=0)  # "Other" is not indexed
     ]
     resp = suggestions_values_client.get(
         "/filtering_terms/sex/suggestions",
         params={"term": "o", "include_all_controlled_values": False},
     )
     assert resp.status_code == 200
-    assert [FieldValueSuggestion.model_validate(r).term for r in resp.json()] == []
+    assert [FieldValue.model_validate(r) for r in resp.json()] == []
 
 
 def test_filtering_term_suggestions_controlled_value_substring_match(
@@ -255,15 +255,15 @@ def test_filtering_term_suggestions_controlled_value_substring_match(
         params={"term": "ale", "substring_match": False},
     )
     assert resp.status_code == 200
-    assert [FieldValueSuggestion.model_validate(r).term for r in resp.json()] == []
+    assert [FieldValue.model_validate(r) for r in resp.json()] == []
     resp = suggestions_values_client.get(
         "/filtering_terms/sex/suggestions",
         params={"term": "ale", "substring_match": True},
     )
     assert resp.status_code == 200
-    assert [FieldValueSuggestion.model_validate(r).term for r in resp.json()] == [
-        "Female",
-        "Male",
+    assert [FieldValue.model_validate(r) for r in resp.json()] == [
+        FieldValue(value="Female", count=8),
+        FieldValue(value="Male", count=10),
     ]
 
 
@@ -273,14 +273,16 @@ def test_filtering_term_suggestions_ontology_include_other(suggestions_values_cl
         params={"term": "fo", "include_other_ontology_values": True},
     )
     assert resp.status_code == 200
-    assert "Formalin" in [r["term"] for r in resp.json()]
+    results = [FieldValue.model_validate(r) for r in resp.json()]
+    assert FieldValue(value="Formalin", count=2) in results
 
     resp = suggestions_values_client.get(
         "/filtering_terms/fixation_type/suggestions",
         params={"term": "fo", "include_other_ontology_values": False},
     )
     assert resp.status_code == 200
-    assert "Formalin" not in [r["term"] for r in resp.json()]
+    results = [FieldValue.model_validate(r) for r in resp.json()]
+    assert not any(r.value == "Formalin" for r in results)
 
 
 # Filtering term values
@@ -308,14 +310,16 @@ def test_filtering_term_values_controlled_include_all(suggestions_values_client)
         params={"include_all_controlled_values": False},
     )
     assert resp.status_code == 200
-    assert {r["value"]: r["count"] for r in resp.json()} == {"Male": 10, "Female": 8}
+    results = [FieldValue.model_validate(r) for r in resp.json()]
+    assert {r.value: r.count for r in results} == {"Male": 10, "Female": 8}
 
     resp = suggestions_values_client.get(
         "/filtering_terms/sex/values",
         params={"include_all_controlled_values": True},
     )
     assert resp.status_code == 200
-    assert {r["value"]: r["count"] for r in resp.json()} == {
+    results = [FieldValue.model_validate(r) for r in resp.json()]
+    assert {r.value: r.count for r in results} == {
         "Male": 10,
         "Female": 8,
         "Not-known": 0,
@@ -326,7 +330,8 @@ def test_filtering_term_values_controlled_include_all(suggestions_values_client)
 def test_filtering_term_values_ontology_indexed(suggestions_values_client):
     resp = suggestions_values_client.get("/filtering_terms/animal_species/values")
     assert resp.status_code == 200
-    assert {r["value"]: r["count"] for r in resp.json()} == {
+    results = [FieldValue.model_validate(r) for r in resp.json()]
+    assert {r.value: r.count for r in results} == {
         "Homo sapiens": 5,
         "Sus scrofa": 3,
     }
@@ -341,7 +346,8 @@ def test_filtering_term_values_ontology_include_other(suggestions_values_client)
         },
     )
     assert resp.status_code == 200
-    assert {r["value"]: r["count"] for r in resp.json()} == {
+    results = [FieldValue.model_validate(r) for r in resp.json()]
+    assert {r.value: r.count for r in results} == {
         "Tissue fixative": 4,
         "Formalin": 2,  # free-text, only visible with include_other=True
         "Custom fix": 1,  # free-text, only visible with include_other=True
@@ -355,13 +361,13 @@ def test_filtering_term_values_ontology_include_other(suggestions_values_client)
         },
     )
     assert resp.status_code == 200
-    assert {r["value"]: r["count"] for r in resp.json()} == {
-        "Tissue fixative": 4,
-    }
+    results = [FieldValue.model_validate(r) for r in resp.json()]
+    assert {r.value: r.count for r in results} == {"Tissue fixative": 4}
 
 
 def test_filtering_term_values_sorted_by_count(suggestions_values_client):
     resp = suggestions_values_client.get("/filtering_terms/animal_species/values")
     assert resp.status_code == 200
-    counts = [r["count"] for r in resp.json()]
+    results = [FieldValue.model_validate(r) for r in resp.json()]
+    counts = [r.count for r in results]
     assert counts == sorted(counts, reverse=True)

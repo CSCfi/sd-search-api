@@ -61,14 +61,13 @@ async def test_load_and_sync_fields():
         },
     )
 
-    load_service = BigPictureLoadService()
     sync_service = BigPictureSyncService()
 
     async with get_connection() as conn:
         async with conn.cursor() as cur:
-            await load_service._load_fields(cur, fields)
+            await BigPictureLoadService._load_fields(cur, fields)
 
-            actual = await load_service.get_fields(cur, image_id)
+            actual = await BigPictureLoadService.get_fields(cur, image_id)
 
             assert fields.image_id == actual.image_id
             assert fields.dataset_id == actual.dataset_id

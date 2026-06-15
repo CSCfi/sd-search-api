@@ -1,3 +1,4 @@
+import argparse
 import io
 import os
 from pathlib import Path
@@ -10,7 +11,7 @@ from crypt4gh.keys.c4gh import generate as c4gh_generate
 from crypt4gh.lib import encrypt as c4gh_encrypt
 from nacl.public import PrivateKey
 
-from scripts.bigpicture.load import main
+from scripts.bigpicture import _load
 from search_api.bigpicture.services.load import BigPictureLoadService
 from search_api.database.repository import get_connection
 
@@ -18,10 +19,7 @@ os.environ.setdefault("POSTGRES_DB", os.environ["BP_POSTGRES_DB"])
 os.environ.setdefault("POSTGRES_PORT", os.environ["BP_POSTGRES_PORT"])
 
 _XML_DIR = (
-    Path(__file__).resolve().parent.parent.parent.parent
-    / "files"
-    / "bigpicture"
-    / "xml"
+    Path(__file__).resolve().parent.parent.parent / "files" / "bigpicture" / "xml"
 )
 _XML_METADATA_FILES = [
     "METADATA/dataset.xml",
@@ -31,6 +29,18 @@ _XML_METADATA_FILES = [
 ]
 _DATASET_ID = "dataset_1"
 _IMAGE_IDS = ["image_1", "image_2"]
+
+
+def _args(**kwargs) -> argparse.Namespace:
+    defaults = dict(
+        directory=str(_XML_DIR),
+        multi_dir=True,
+        load=False,
+        sync=False,
+        c4gh_key_file=None,
+        c4gh_passphrase=None,
+    )
+    return argparse.Namespace(**{**defaults, **kwargs})
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -51,18 +61,11 @@ async def delete_images():
 
 
 @pytest.mark.asyncio
-async def test_extract_only():
+async def test_load_extract_only():
     with patch.object(
         BigPictureLoadService, "_load_fields", new_callable=AsyncMock
     ) as load_spy:
-        await main(
-            directory=str(_XML_DIR),
-            multi_dir=True,
-            load=False,
-            sync=False,
-            c4gh_private_key_file=None,
-            c4gh_passphrase=None,
-        )
+        await _load(_args(load=False))
         load_spy.assert_not_called()
 
     async with get_connection() as conn:
@@ -76,15 +79,8 @@ async def test_extract_only():
 
 @pytest.mark.asyncio
 async def test_load_plain_files():
-    """The load script processes plain XML files and inserts them into the database."""
-    await main(
-        directory=str(_XML_DIR),
-        multi_dir=True,
-        load=True,
-        sync=False,
-        c4gh_private_key_file=None,
-        c4gh_passphrase=None,
-    )
+    """The load command processes plain XML files and inserts them into the database."""
+    await _load(_args(load=True))
 
     async with get_connection() as conn:
         async with conn.cursor() as cur:
@@ -97,8 +93,7 @@ async def test_load_plain_files():
 
 @pytest.mark.asyncio
 async def test_load_c4gh_files(tmp_path):
-    """The load script decrypts Crypt4GH-encrypted XML files and inserts them into the database."""
-    # Generate a recipient key pair.
+    """The load command decrypts Crypt4GH-encrypted XML files and inserts them into the database."""
     seckey_path = tmp_path / "key.sec"
     pubkey_path = tmp_path / "key.pub"
     c4gh_generate(str(seckey_path), str(pubkey_path), b"", b"")
@@ -106,7 +101,6 @@ async def test_load_c4gh_files(tmp_path):
     recipient_pk = c4gh_get_public_key(str(pubkey_path))
     sender_sk = bytes(PrivateKey.generate())
 
-    # Mirror the fixture directory structure, replacing each XML with a .c4gh version.
     metadata_dir = tmp_path / _DATASET_ID / "METADATA"
     metadata_dir.mkdir(parents=True)
     for xml_file in _XML_METADATA_FILES:
@@ -119,13 +113,12 @@ async def test_load_c4gh_files(tmp_path):
                 outfile,
             )
 
-    await main(
-        directory=str(tmp_path),
-        multi_dir=True,
-        load=True,
-        sync=False,
-        c4gh_private_key_file=str(seckey_path),
-        c4gh_passphrase=None,
+    await _load(
+        _args(
+            directory=str(tmp_path),
+            load=True,
+            c4gh_key_file=str(seckey_path),
+        )
     )
 
     async with get_connection() as conn:

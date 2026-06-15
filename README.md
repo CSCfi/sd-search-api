@@ -219,24 +219,34 @@ Example output:
 
 ### Bigpicture
 
-Load Bigpicture XML data into the database with `load.py`.
+#### Load datasets
 
 Load a single dataset directory (default):
 
 ```bash
-uv run python scripts/bigpicture/load.py /path/to/dataset/
+uv run python scripts/bigpicture.py load /path/to/dataset/ --load
 ```
 
 Load from a parent directory containing multiple dataset subdirectories:
 
 ```bash
-uv run python scripts/bigpicture/load.py /path/to/datasets/ --multi-dir
+uv run python scripts/bigpicture.py load /path/to/datasets/ --multi-dir --load
 ```
+
+Omit `--load` parse XMLs without loading them to the database.
 
 To also sync to OpenSearch immediately after loading, add `--sync`:
 
 ```bash
-uv run python scripts/bigpicture/load.py /path/to/datasets/ --sync
+uv run python scripts/bigpicture.py load /path/to/datasets/ --multi-dir --load --sync
+```
+
+#### Refresh SNOMED CT preferred terms
+
+After a new SNOMED CT release, update the stored preferred terms to match the new release:
+
+```bash
+uv run python scripts/bigpicture.py snomed refresh
 ```
 
 ## LLM search

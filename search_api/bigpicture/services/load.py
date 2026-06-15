@@ -49,8 +49,8 @@ def get_concept_ids(fields: BigpictureFields) -> set[str]:
 class BigPictureLoadService:
     def __init__(
         self,
-        snomed_term_service: SnomedTermCacheService | None = None,
-        snomed_service: SnomedService | None = None,
+        snomed_term_service: SnomedTermCacheService,
+        snomed_service: SnomedService,
     ) -> None:
         self._snomed_term_service = snomed_term_service
         self._snomed_service = snomed_service
@@ -308,15 +308,13 @@ class BigPictureLoadService:
         Write extracted fields to the database, skipping datasets whose files have not
         changed since the last load.
 
-        If a ``SnomedTermCacheService`` and ``SnomedService`` were provided at
-        construction time, preferred terms for all concept IDs in each loaded image
-        are resolved and stored in the SNOMED term cache.
+        Preferred terms for all concept IDs in each loaded image are resolved via
+        the SNOMED service and stored in the SNOMED term cache.
 
         :param fields_iter: Iterator of extracted fields, typically from
             ``BigPictureExtractService.extract_fields``.
         """
-        if self._snomed_term_service:
-            await self._snomed_term_service.load()
+        await self._snomed_term_service.load()
 
         loaded = 0
         skipped_datasets: set[str] = set()
@@ -349,11 +347,10 @@ class BigPictureLoadService:
                     "Loaded image %s (dataset %s).", fields.image_id, fields.dataset_id
                 )
 
-                if self._snomed_term_service and self._snomed_service:
-                    concept_ids = get_concept_ids(fields)
-                    await self._snomed_term_service.cache_preferred_terms(
-                        concept_ids, self._snomed_service
-                    )
+                concept_ids = get_concept_ids(fields)
+                await self._snomed_term_service.cache_preferred_terms(
+                    concept_ids, self._snomed_service
+                )
 
         logger.info(
             "Done — loaded %d image(s), skipped %d dataset(s).",

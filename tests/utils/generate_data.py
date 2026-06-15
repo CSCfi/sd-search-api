@@ -20,7 +20,6 @@ from search_api.bigpicture.services.load import BigPictureLoadService
 from search_api.bigpicture.services.sync import BigPictureSyncService
 from search_api.database.repository import get_connection
 
-bp_load_service = BigPictureLoadService()
 bp_sync_service = BigPictureSyncService()
 
 _INDEX_MAPPING_PATH = (
@@ -254,7 +253,7 @@ async def generate_and_load_data(image_cnt: int, dataset_cnt: int) -> None:
                 # Load fields to the database for each image.
 
                 logging.info(f"Loading image '{image_id}' to the database")
-                await bp_load_service._load_fields(cur, fields)
+                await BigPictureLoadService._load_fields(cur, fields)
 
             elapsed = time.time() - start_time
             print(

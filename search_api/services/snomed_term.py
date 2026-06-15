@@ -8,6 +8,8 @@ from search_api.services.snomed import SnomedService
 
 logger = logging.getLogger(__name__)
 
+_BATCH_SIZE = 1000
+
 
 class SnomedTermCacheService(ABC):
     """Persistent cache mapping indexed SNOMED CT concept IDs to preferred terms."""
@@ -142,15 +144,17 @@ class PostgresSnomedTermCacheService(SnomedTermCacheService):
         if not terms:
             return
 
+        rows = list(terms.items())
         async with get_cursor() as cur:
-            await cur.executemany(
-                f"""
-                INSERT INTO {self._table_name} (concept_id, preferred_term, updated_at)
-                VALUES (%s, %s, now())
-                ON CONFLICT (concept_id) DO NOTHING
-                """,
-                [(cid, term) for cid, term in terms.items()],
-            )
+            for i in range(0, len(rows), _BATCH_SIZE):
+                await cur.executemany(
+                    f"""
+                    INSERT INTO {self._table_name} (concept_id, preferred_term, updated_at)
+                    VALUES (%s, %s, now())
+                    ON CONFLICT (concept_id) DO NOTHING
+                    """,
+                    rows[i : i + _BATCH_SIZE],
+                )
         self._cache.update(terms)
         logger.info("Cached preferred terms for %d concept ID(s).", len(terms))
 
@@ -166,14 +170,16 @@ class PostgresSnomedTermCacheService(SnomedTermCacheService):
         logger.info("Refreshing preferred terms for %d concept ID(s).", len(all_ids))
         terms = await snomed.get_preferred_terms(all_ids)
 
+        rows = [(term, cid) for cid, term in terms.items()]
         async with get_cursor() as cur:
-            await cur.executemany(
-                f"""
-                UPDATE {self._table_name}
-                SET preferred_term = %s, updated_at = now()
-                WHERE concept_id = %s
-                """,
-                [(term, cid) for cid, term in terms.items()],
-            )
+            for i in range(0, len(rows), _BATCH_SIZE):
+                await cur.executemany(
+                    f"""
+                    UPDATE {self._table_name}
+                    SET preferred_term = %s, updated_at = now()
+                    WHERE concept_id = %s
+                    """,
+                    rows[i : i + _BATCH_SIZE],
+                )
         self._cache.update(terms)
         logger.info("Refreshed %d preferred term(s).", len(terms))

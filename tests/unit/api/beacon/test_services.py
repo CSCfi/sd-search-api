@@ -1,6 +1,7 @@
 import pytest
 
 from search_api.api.beacon.models import BeaconQueryFilter
+from search_api.exceptions import UserException
 from search_api.api.beacon.services import (
     OpenSearchBeaconService,
     build_opensearch_query,
@@ -190,10 +191,9 @@ def test_build_opensearch_query_iso8601range_multi():
 
 
 def test_build_opensearch_query_unsupported_type():
-    """An unsupported term type raises ValueError."""
     term = get_term("sex")
     term_bad = term.model_copy(update={"type": "unknown"})  # type: ignore[arg-type]
-    with pytest.raises(ValueError, match="Unsupported term type unknown"):
+    with pytest.raises(UserException, match="Unsupported term type unknown"):
         build_opensearch_query(term_bad, "Male")
 
 

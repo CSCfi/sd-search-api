@@ -6,8 +6,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from search_api.api.beacon.models import (
-    BeaconQueryRequest,
     BeaconQuery,
+    BeaconQueryRequest,
     BeaconBooleanResponse,
     BeaconCountResponse,
     BeaconResultSet,
@@ -32,11 +32,13 @@ from search_api.api.bigpicture.routes import (
     get_snomed_term_service,
     router,
 )
+from search_api.api.exception_handlers import register_exception_handlers
 from search_api.api.models import FieldValue, IndexedFieldValueCounts
 from search_api.services.snomed_term import SnomedTermCacheService
 
 app = FastAPI()
 app.include_router(router)
+register_exception_handlers(app)
 
 
 def get_mock_query_result() -> BeaconResultSets[BigpictureBeaconResultSetResult]:

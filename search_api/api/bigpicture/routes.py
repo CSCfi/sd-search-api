@@ -3,6 +3,8 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 
+from search_api.exceptions import SystemException
+
 from search_api.api.bigpicture.models import (
     BP_BEACON_ID,
     BP_FILTERING_TERMS,
@@ -105,8 +107,7 @@ async def query(
             )
         )
     except Exception as e:
-        logger.exception("Ontology service error: %s", e)
-        raise HTTPException(status_code=503, detail="Ontology service error.")
+        raise SystemException("Ontology service error.") from e
 
     granularity = request.query.requestedGranularity
     filters = other_filters + resolved_ontology_filters
@@ -304,9 +305,8 @@ async def values(
 async def health(service: BeaconService = Depends(get_beacon_service)):
     try:
         healthy = await service.is_healthy()
-    except Exception:
-        logger.exception("Health check failed.")
-        raise HTTPException(status_code=503, detail="unhealthy")
+    except Exception as e:
+        raise SystemException("Health check failed.") from e
     if not healthy:
         raise HTTPException(status_code=503, detail="unhealthy")
     return {"status": "ok"}

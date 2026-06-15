@@ -1,5 +1,6 @@
 from typing import Any, override
 
+from search_api.exceptions import SystemException
 from search_api.api.beacon.models import (
     BeaconQueryGranularity,
     BeaconResultSet,
@@ -105,7 +106,7 @@ class BigpictureOpenSearchBeaconService(
                         "dataset_image_cnt",
                     ):
                         if f not in source:
-                            raise ValueError(
+                            raise SystemException(
                                 f"Dataset '{dataset_id}' is missing field: {f}"
                             )
                     dataset_title = source["dataset_title"]

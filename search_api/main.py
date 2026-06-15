@@ -6,6 +6,7 @@ import uvicorn
 
 from search_api.api.bigpicture.models import BP_SNOMED_TABLE
 from search_api.api.bigpicture.routes import router as bigpicture_router
+from search_api.api.exception_handlers import register_exception_handlers
 from search_api.api.opensearch.services import create_search
 from search_api.api.admin.routes import router as admin_router
 from search_api.conf import admin_config, deployment_config, snomed_term_cache_config
@@ -46,6 +47,7 @@ app = FastAPI(
 )
 
 app.include_router(_router)
+register_exception_handlers(app)
 
 if admin_config().ADMIN_KEY:
     app.include_router(admin_router)

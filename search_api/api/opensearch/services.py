@@ -10,6 +10,7 @@ from aiocache import cached  # type: ignore[import-untyped]
 from opensearchpy import AsyncOpenSearch, helpers
 
 from search_api.conf import opensearch_config as _opensearch_config
+from search_api.exceptions import SystemException
 
 logging.basicConfig(level=logging.INFO)
 
@@ -78,7 +79,7 @@ async def index_documents(
     )
 
     if failed:
-        raise RuntimeError(f"{failed} document(s) failed to index")
+        raise SystemException(f"{failed} document(s) failed to index")
 
 
 @cached(ttl=_FETCH_INDEXED_KEYWORDS_TTL)

@@ -12,6 +12,7 @@ from search_api.api.opensearch.services import (
     build_iso8601_range_query,
     or_queries,
 )
+from search_api.exceptions import UserException
 from search_api.services.snomed import is_concept_id
 
 from search_api.api.beacon.models import (
@@ -59,7 +60,7 @@ def build_opensearch_query(
     if term.type == "iso8601Range":
         return or_queries([build_iso8601_range_query(field, v) for v in values])
 
-    raise ValueError(f"Unsupported term type {term.type}")
+    raise UserException(f"Unsupported term type {term.type}")
 
 
 class BeaconService(ABC, Generic[T, S]):
@@ -70,7 +71,7 @@ class BeaconService(ABC, Generic[T, S]):
         for term in self.filtering_terms:
             if term.id == field_id:
                 return term
-        raise ValueError(f"Unsupported field: {field_id}")
+        raise UserException(f"Unsupported field: {field_id}")
 
     @abstractmethod
     async def query(
@@ -173,7 +174,7 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm, S]):
 
         for f in filters:
             if f.id not in terms_by_id:
-                raise ValueError(f"Unsupported field: {f.id}")
+                raise UserException(f"Unsupported field: {f.id}")
             term = terms_by_id[f.id]
             path = OpenSearchBeaconService._nested_path(term.opensearch_field)
             q = build_opensearch_query(term, f.value)

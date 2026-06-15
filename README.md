@@ -30,6 +30,12 @@ Install [uv](https://docs.astral.sh/uv/), then create the virtualenv and install
 uv sync --dev
 ```
 
+Activate the pre-commit hook to run `tox` before every commit:
+
+```bash
+uv run pre-commit install
+```
+
 ### Formatting and linting
 
 ```bash

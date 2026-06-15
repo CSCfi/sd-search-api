@@ -7,7 +7,8 @@ import uvicorn
 from search_api.api.bigpicture.models import BP_SNOMED_TABLE
 from search_api.api.bigpicture.routes import router as bigpicture_router
 from search_api.api.opensearch.services import create_search
-from search_api.conf import deployment_config, snomed_term_cache_config
+from search_api.api.admin.routes import router as admin_router
+from search_api.conf import admin_config, deployment_config, snomed_term_cache_config
 from search_api.services.snomed_term import PostgresSnomedTermCacheService
 
 # uvicorn search_api.main:app --reload
@@ -26,7 +27,7 @@ async def lifespan(app: FastAPI):
 
     snomed_term_service = PostgresSnomedTermCacheService(
         table_name=BP_SNOMED_TABLE,
-        refresh_interval=snomed_term_cache_config().SNOMED_TERM_CACHE_REFRESH_INTERVAL,
+        refresh_interval=snomed_term_cache_config().SNOMED_CACHE_REFRESH,
     )
     await snomed_term_service.load()
     snomed_term_service.start()
@@ -45,6 +46,9 @@ app = FastAPI(
 )
 
 app.include_router(_router)
+
+if admin_config().ADMIN_KEY:
+    app.include_router(admin_router)
 
 
 @app.get("/", include_in_schema=False)

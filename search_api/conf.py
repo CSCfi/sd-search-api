@@ -42,13 +42,24 @@ class SnowstormConfiguration(BaseSettings):
 
 
 class SnomedTermCacheConfiguration(BaseSettings):
-    """SNOMED preferred term in-memory cache configuration."""
+    """SNOMED CT preferred term in-memory cache configuration."""
 
-    SNOMED_TERM_CACHE_REFRESH_INTERVAL: int = Field(
+    SNOMED_CACHE_REFRESH: int = Field(
         default=300,
         description=(
-            "How often (in seconds) the in-memory SNOMED preferred term cache is "
-            "reloaded from the database. Defaults to 300 (5 minutes)."
+            "Frequency (in seconds) to update theSNOMED CT preferred term in-memory cache."
+        ),
+    )
+
+
+class AdminConfiguration(BaseSettings):
+    """Admin API configuration."""
+
+    ADMIN_KEY: str | None = Field(
+        default=None,
+        description=(
+            "Secret key required to use admin endpoints. "
+            "Admin endpoints are not mounted when this is unset."
         ),
     )
 
@@ -87,6 +98,11 @@ def opensearch_config() -> OpenSearchConfiguration:
 def snowstorm_config() -> SnowstormConfiguration:
     """Get Snowstorm configuration."""
     return SnowstormConfiguration()
+
+
+def admin_config() -> AdminConfiguration:
+    """Get admin configuration."""
+    return AdminConfiguration()
 
 
 def snomed_term_cache_config() -> SnomedTermCacheConfiguration:

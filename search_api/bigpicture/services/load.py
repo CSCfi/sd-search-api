@@ -4,15 +4,14 @@ import logging
 from collections.abc import Iterator
 from datetime import datetime
 
-from pydantic import BaseModel
 from psycopg import AsyncCursor
 from psycopg.types.json import Json
 
 from search_api.bigpicture.models import (
     BigpictureFields,
+    BigpictureBlockFields,
     BigpictureCodeAttributeValue,
     BigpictureStainingFields,
-    BigpictureBlockFields,
 )
 from search_api.database.repository import get_cursor
 from search_api.services.snomed import SnomedService, is_concept_id
@@ -21,28 +20,37 @@ from search_api.services.snomed_term import SnomedTermCacheService
 logger = logging.getLogger(__name__)
 
 
-def _iter_concept_ids(model: BaseModel) -> Iterator[str]:
+def _iter_concept_ids(fields: BigpictureFields) -> Iterator[tuple[str, str]]:
     """Yield all concept IDs found in any BigpictureCodeAttributeValue field of model."""
-    for field_name in type(model).model_fields:
-        value = getattr(model, field_name)
-        if isinstance(value, BigpictureCodeAttributeValue):
-            if is_concept_id(value.code):
-                yield value.code
-        elif isinstance(value, frozenset):
-            for item in value:
-                if isinstance(item, BigpictureCodeAttributeValue) and is_concept_id(
-                    item.code
-                ):
-                    yield item.code
 
+    def _get_concept_id(code: str | None) -> str | None:
+        return code if code is not None and is_concept_id(code) else None
 
-def get_concept_ids(fields: BigpictureFields) -> set[str]:
-    """Return all SNOMED CT concept IDs referenced in a BigpictureFields object."""
-    result: set[str] = set()
+    def _iter(
+        obj: BigpictureBlockFields | BigpictureStainingFields,
+    ) -> Iterator[tuple[str, str]]:
+        for field_name in type(obj).model_fields:
+            value = getattr(obj, field_name)
+            if isinstance(value, BigpictureCodeAttributeValue):
+                if concept_id := _get_concept_id(value.code):
+                    yield field_name, concept_id
+            elif isinstance(value, frozenset):
+                for item in value:
+                    if isinstance(item, BigpictureCodeAttributeValue):
+                        if concept_id := _get_concept_id(item.code):
+                            yield field_name, concept_id
+
     for block in fields.blocks:
-        result.update(_iter_concept_ids(block))
+        yield from _iter(block)
     for stain in fields.stains:
-        result.update(_iter_concept_ids(stain))
+        yield from _iter(stain)
+
+
+def get_concept_ids_by_field(fields: BigpictureFields) -> dict[str, set[str]]:
+    """Return SNOMED CT concept IDs grouped by filtering term field ID."""
+    result: dict[str, set[str]] = {}
+    for field_id, concept_id in _iter_concept_ids(fields):
+        result.setdefault(field_id, set()).add(concept_id)
     return result
 
 
@@ -134,7 +142,9 @@ class BigPictureLoadService:
                                         if block.age_at_extraction is not None
                                         else None
                                     ),
-                                    "species": _extract_code(block.species),
+                                    "animal_species": _extract_code(
+                                        block.animal_species
+                                    ),
                                     "sex": block.sex,
                                 }.items()
                                 if v is not None
@@ -271,7 +281,7 @@ class BigPictureLoadService:
                 **{
                     **block,
                     **_convert_code("block_preparation", block),
-                    **_convert_code("species", block),
+                    **_convert_code("animal_species", block),
                     **_convert_codes("anatomical_site", block),
                     **_convert_code("fixation_type", block),
                     **_convert_code("specimen_type", block),
@@ -347,10 +357,10 @@ class BigPictureLoadService:
                     "Loaded image %s (dataset %s).", fields.image_id, fields.dataset_id
                 )
 
-                concept_ids = get_concept_ids(fields)
-                await self._snomed_term_service.cache_preferred_terms(
-                    concept_ids, self._snomed_service
-                )
+                for field_id, concept_ids in get_concept_ids_by_field(fields).items():
+                    await self._snomed_term_service.cache_preferred_terms(
+                        field_id, concept_ids, self._snomed_service
+                    )
 
         logger.info(
             "Done — loaded %d image(s), skipped %d dataset(s).",

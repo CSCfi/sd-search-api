@@ -1,4 +1,4 @@
-from typing import cast
+from typing import cast, get_args
 
 from search_api.api.beacon.models import (
     BeaconQueryRequest,
@@ -7,10 +7,37 @@ from search_api.api.beacon.models import (
     BeaconQueryFilter,
 )
 from search_api.api.bigpicture.models import (
+    BP_FILTERING_TERMS,
     BP_FILTERING_TERMS_RESPONSE,
     BP_INFO_RESPONSE,
 )
+from search_api.bigpicture.models import (
+    BigpictureBlockFields,
+    BigpictureCodeAttributeValue,
+    BigpictureStainingFields,
+)
 from search_api.services.validate import validate_json
+
+
+def test_ontology_model_fields_match_filtering_terms():
+    """BigpictureCodeAttributeValue field names and ontology filtering term ids must be identical."""
+
+    def ontology_field_names(model_cls) -> set[str]:
+        return {
+            name
+            for name, info in model_cls.model_fields.items()
+            if info.annotation is BigpictureCodeAttributeValue
+            or BigpictureCodeAttributeValue in get_args(info.annotation)
+        }
+
+    model_field_ids = ontology_field_names(
+        BigpictureBlockFields
+    ) | ontology_field_names(BigpictureStainingFields)
+    filtering_term_ids = {
+        t.id for t in BP_FILTERING_TERMS if t.type in ("ontology", "ontologyOrValue")
+    }
+
+    assert model_field_ids == filtering_term_ids
 
 
 def test_beacon_query_request():

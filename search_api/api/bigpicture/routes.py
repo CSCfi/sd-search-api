@@ -44,7 +44,7 @@ def get_beacon_service(
     request: Request,
 ) -> BeaconService[OpenSearchBeaconFilteringTerm, BigpictureBeaconResultSetResult]:
     return BigpictureOpenSearchBeaconService(
-        request.app.state.bp_search,
+        request.app.state.search,
         BP_OPENSEARCH_INDEX,
         BP_FILTERING_TERMS,
     )
@@ -211,7 +211,9 @@ async def suggestions(
 
     field_counts = await beacon_service.get_indexed_field_value_counts(field_id)
     counts = field_counts.counts
-    preferred_terms = await snomed_term_service.get_preferred_terms(set(counts.keys()))
+    preferred_terms = await snomed_term_service.get_preferred_terms(
+        field_id, set(counts.keys())
+    )
     results = [
         FieldValue(
             value=preferred_term, concept_id=concept_id, count=counts[concept_id]
@@ -278,7 +280,9 @@ async def values(
             sorted_values = sorted(counts.items(), key=lambda x: x[1], reverse=True)
         return [FieldValue(value=v, count=c) for v, c in sorted_values]
 
-    preferred_terms = await snomed_term_service.get_preferred_terms(set(counts.keys()))
+    preferred_terms = await snomed_term_service.get_preferred_terms(
+        field_id, set(counts.keys())
+    )
     results: list[tuple[str, int, str | None]] = [
         (preferred_term, counts[concept_id], concept_id)
         for concept_id, preferred_term in preferred_terms.items()

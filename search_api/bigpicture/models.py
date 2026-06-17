@@ -1,4 +1,7 @@
-"""Bigpicture models."""
+"""Bigpicture models.
+
+Attribute names must match the corresponding filtering term field ids.
+"""
 
 from datetime import datetime
 from typing import Literal
@@ -20,7 +23,7 @@ class BigpictureCodeAttributeValue(BaseModel):
 class BigpictureSampleBiologicalBeingFields(BaseModel):
     """Bigpicture biological being search fields."""
 
-    species: BigpictureCodeAttributeValue | None = None
+    animal_species: BigpictureCodeAttributeValue | None = None
     sex: Literal["Male", "Female", "Not-known", "Other"] | None = None
 
 

@@ -87,7 +87,7 @@ BP_SPECIES_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
     scopes=BP_BIOLOGICAL_BEING_SCOPE,
     label="Biological species",
     description="Species of the biological being",
-    opensearch_field="blocks.species",
+    opensearch_field="blocks.animal_species",
 )
 BP_SEX_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
     id="sex",

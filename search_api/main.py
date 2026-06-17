@@ -1,52 +1,41 @@
-from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
+from fastapi.routing import APIRouter
+from pydantic import BaseModel
 import uvicorn
 
-from search_api.api.bigpicture.models import BP_SNOMED_TABLE
+from search_api.api.admin.routes import router as admin_router
+from search_api.api.bigpicture.lifespan import bigpicture_lifespan
 from search_api.api.bigpicture.routes import router as bigpicture_router
 from search_api.api.exception_handlers import register_exception_handlers
-from search_api.api.opensearch.services import create_search
-from search_api.api.admin.routes import router as admin_router
-from search_api.conf import admin_config, deployment_config, snomed_term_cache_config
-from search_api.services.snomed_term import PostgresSnomedTermCacheService
+from search_api.conf import admin_config, deployment_config
 
 # uvicorn search_api.main:app --reload
 
-_ROUTERS = {
-    "Bigpicture": bigpicture_router,
+
+class RouterConfig(BaseModel):
+    model_config = {"arbitrary_types_allowed": True}
+
+    router: APIRouter
+    lifespan: Any
+
+
+_DEPLOYMENTS: dict[str, RouterConfig] = {
+    "Bigpicture": RouterConfig(router=bigpicture_router, lifespan=bigpicture_lifespan),
 }
 
 _deployment = deployment_config()
-_router = _ROUTERS[_deployment.DEPLOYMENT_TYPE]
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    app.state.bp_search = create_search()
-
-    snomed_term_service = PostgresSnomedTermCacheService(
-        table_name=BP_SNOMED_TABLE,
-        refresh_interval=snomed_term_cache_config().SNOMED_CACHE_REFRESH,
-    )
-    await snomed_term_service.load()
-    snomed_term_service.start()
-    app.state.snomed_term_service = snomed_term_service
-
-    yield
-
-    snomed_term_service.stop()
-    await app.state.bp_search.close()
-
+_config = _DEPLOYMENTS[_deployment.DEPLOYMENT_TYPE]
 
 app = FastAPI(
     title=f"CSC {_deployment.DEPLOYMENT_TYPE} Beacon",
     version="1.0",
-    lifespan=lifespan,
+    lifespan=_config.lifespan,
 )
 
-app.include_router(_router)
+app.include_router(_config.router)
 register_exception_handlers(app)
 
 if admin_config().ADMIN_KEY:

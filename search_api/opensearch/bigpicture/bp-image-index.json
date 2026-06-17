@@ -35,7 +35,7 @@
       "blocks": {
         "type": "nested",
         "properties": {
-          "species": {
+          "animal_species": {
             "type": "keyword"
           },
           "anatomical_site": {

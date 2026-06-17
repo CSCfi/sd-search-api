@@ -105,13 +105,15 @@ class MockSnomedTermCacheService(SnomedTermCacheService):
         pass
 
     @override
-    async def get_preferred_terms(self, concept_ids: set[str]) -> dict[str, str]:
+    async def get_preferred_terms(
+        self, field_id: str, concept_ids: set[str]
+    ) -> dict[str, str]:
         return {
             cid: PREFERRED_TERMS[cid] for cid in concept_ids if cid in PREFERRED_TERMS
         }
 
     @override
-    async def cache_preferred_terms(self, concept_ids, snomed) -> None:
+    async def cache_preferred_terms(self, field_id, concept_ids, snomed) -> None:
         pass
 
     @override
@@ -375,3 +377,51 @@ def test_filtering_term_values_sorted_by_count(suggestions_values_client):
     results = [FieldValue.model_validate(r) for r in resp.json()]
     counts = [r.count for r in results]
     assert counts == sorted(counts, reverse=True)
+
+
+class OnlyHomoSapiensCacheService(MockSnomedTermCacheService):
+    """Returns only Homo sapiens as valid for animal_species."""
+
+    @override
+    async def get_preferred_terms(
+        self, field_id: str, concept_ids: set[str]
+    ) -> dict[str, str]:
+        if field_id == "animal_species":
+            return {"410607006": "Homo sapiens"} if "410607006" in concept_ids else {}
+        return await super().get_preferred_terms(field_id, concept_ids)
+
+
+def test_filtering_term_values_excludes_unexpected():
+    saved = dict(app.dependency_overrides)
+    app.dependency_overrides[get_beacon_service] = lambda: (
+        MockSuggestionsAndValuesBeaconService(BP_FILTERING_TERMS)
+    )
+    app.dependency_overrides[get_snomed_term_service] = OnlyHomoSapiensCacheService
+    try:
+        resp = TestClient(app).get("/filtering_terms/animal_species/values")
+    finally:
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(saved)
+
+    assert resp.status_code == 200
+    results = [FieldValue.model_validate(r) for r in resp.json()]
+    assert len(results) == 1
+    assert results[0].value == "Homo sapiens"
+
+
+def test_filtering_term_suggestions_excludes_unexpected():
+    saved = dict(app.dependency_overrides)
+    app.dependency_overrides[get_beacon_service] = lambda: (
+        MockSuggestionsAndValuesBeaconService(BP_FILTERING_TERMS)
+    )
+    app.dependency_overrides[get_snomed_term_service] = OnlyHomoSapiensCacheService
+    try:
+        resp = TestClient(app).get(
+            "/filtering_terms/animal_species/suggestions", params={"term": "su"}
+        )
+    finally:
+        app.dependency_overrides.clear()
+        app.dependency_overrides.update(saved)
+
+    assert resp.status_code == 200
+    assert resp.json() == []

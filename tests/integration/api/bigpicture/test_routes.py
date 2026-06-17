@@ -61,7 +61,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
         "dataset_description": "FFPE breast tissue sections stained with haematoxylin and eosin.",
         "blocks": [
             {
-                "species": HUMAN_CONCEPT_ID,
+                "animal_species": HUMAN_CONCEPT_ID,
                 "sex": "Female",
                 "anatomical_site": [BREAST_CONCEPT_ID],
                 "fixation_type": FFPE_CONCEPT_ID,
@@ -87,7 +87,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
         "dataset_description": "FFPE breast tissue sections stained with haematoxylin and eosin.",
         "blocks": [
             {
-                "species": HUMAN_CONCEPT_ID,
+                "animal_species": HUMAN_CONCEPT_ID,
                 "sex": "Female",
                 "anatomical_site": [BREAST_CONCEPT_ID],
                 "fixation_type": FFPE_CONCEPT_ID,
@@ -116,7 +116,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
         "dataset_description": "FFPE breast tissue sections stained with haematoxylin and eosin.",
         "blocks": [
             {
-                "species": HUMAN_CONCEPT_ID,
+                "animal_species": HUMAN_CONCEPT_ID,
                 "sex": "Male",
                 "anatomical_site": [PELVIS_CONCEPT_ID, KIDNEY_CONCEPT_ID],
                 "fixation_type": FFPE_CONCEPT_ID,
@@ -142,7 +142,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
         "dataset_description": "Kidney tissue from Mus musculus prepared by fresh frozen and paraffin embedding.",
         "blocks": [
             {
-                "species": MOUSE_CONCEPT_ID,
+                "animal_species": MOUSE_CONCEPT_ID,
                 "sex": "Male",
                 "anatomical_site": [KIDNEY_CONCEPT_ID],
                 "fixation_type": FROZEN_FIX_CONCEPT_ID,
@@ -168,7 +168,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
         "dataset_description": "Kidney tissue from Mus musculus prepared by fresh frozen and paraffin embedding.",
         "blocks": [
             {
-                "species": MOUSE_CONCEPT_ID,
+                "animal_species": MOUSE_CONCEPT_ID,
                 "sex": "Female",
                 "anatomical_site": [KIDNEY_CONCEPT_ID],
                 "fixation_type": FFPE_CONCEPT_ID,
@@ -215,27 +215,28 @@ IHC_PREFERRED_TERM = "Immunohistochemistry"
 ISH_PREFERRED_TERM = "In situ hybridization"
 
 # SNOMED database and in-memory cache cache for ontology fields in OPENSEARCH_DOCS.
-SNOMED_TERMS: dict[str, str] = {
+# (concept_id, field_id, preferred_term)
+SNOMED_TERMS: list[tuple[str, str, str]] = [
     # animal_species
-    HUMAN_CONCEPT_ID: HUMAN_PREFERRED_TERM,
-    MOUSE_CONCEPT_ID: MOUSE_PREFERRED_TERM,
+    (HUMAN_CONCEPT_ID, "animal_species", HUMAN_PREFERRED_TERM),
+    (MOUSE_CONCEPT_ID, "animal_species", MOUSE_PREFERRED_TERM),
     # anatomical_site
-    BREAST_CONCEPT_ID: BREAST_PREFERRED_TERM,
-    PELVIS_CONCEPT_ID: PELVIS_PREFERRED_TERM,
-    KIDNEY_CONCEPT_ID: KIDNEY_PREFERRED_TERM,
+    (BREAST_CONCEPT_ID, "anatomical_site", BREAST_PREFERRED_TERM),
+    (PELVIS_CONCEPT_ID, "anatomical_site", PELVIS_PREFERRED_TERM),
+    (KIDNEY_CONCEPT_ID, "anatomical_site", KIDNEY_PREFERRED_TERM),
     # fixation_type
-    FFPE_CONCEPT_ID: FFPE_PREFERRED_TERM,
-    FROZEN_FIX_CONCEPT_ID: FROZEN_FIX_PREFERRED_TERM,
+    (FFPE_CONCEPT_ID, "fixation_type", FFPE_PREFERRED_TERM),
+    (FROZEN_FIX_CONCEPT_ID, "fixation_type", FROZEN_FIX_PREFERRED_TERM),
     # specimen_type
-    SPECIMEN_TYPE_CONCEPT_ID: SPECIMEN_TYPE_PREFERRED_TERM,
+    (SPECIMEN_TYPE_CONCEPT_ID, "specimen_type", SPECIMEN_TYPE_PREFERRED_TERM),
     # block_preparation
-    PARAFFIN_CONCEPT_ID: PARAFFIN_PREFERRED_TERM,
-    FROZEN_PREP_CONCEPT_ID: FROZEN_PREP_PREFERRED_TERM,
+    (PARAFFIN_CONCEPT_ID, "block_preparation", PARAFFIN_PREFERRED_TERM),
+    (FROZEN_PREP_CONCEPT_ID, "block_preparation", FROZEN_PREP_PREFERRED_TERM),
     # staining_procedure
-    HE_CONCEPT_ID: HE_PREFERRED_TERM,
-    IHC_CONCEPT_ID: IHC_PREFERRED_TERM,
-    ISH_CONCEPT_ID: ISH_PREFERRED_TERM,
-}
+    (HE_CONCEPT_ID, "staining_procedure", HE_PREFERRED_TERM),
+    (IHC_CONCEPT_ID, "staining_procedure", IHC_PREFERRED_TERM),
+    (ISH_CONCEPT_ID, "staining_procedure", ISH_PREFERRED_TERM),
+]
 
 _ADMIN_KEY = os.environ.get("ADMIN_KEY", "")
 
@@ -367,15 +368,14 @@ async def snomed_terms(client: httpx.Client):
     """Initialise database SNOMED preferred terms cache."""
 
     # Insert values to database SNOMED preferred terms cache.
-    rows = list(SNOMED_TERMS.items())
     async with get_connection() as conn:
         async with conn.cursor() as cur:
             await cur.executemany(
-                f"INSERT INTO {BP_SNOMED_TABLE} (concept_id, preferred_term, updated_at)"
-                " VALUES (%s, %s, now())"
-                " ON CONFLICT (concept_id) DO UPDATE SET preferred_term = EXCLUDED.preferred_term,"
+                f"INSERT INTO {BP_SNOMED_TABLE} (concept_id, field_id, preferred_term, updated_at)"
+                " VALUES (%s, %s, %s, now())"
+                " ON CONFLICT (concept_id, field_id) DO UPDATE SET preferred_term = EXCLUDED.preferred_term,"
                 " updated_at = now()",
-                rows,
+                SNOMED_TERMS,
             )
 
     # Reload in-memory cache.
@@ -389,9 +389,9 @@ async def snomed_terms(client: httpx.Client):
     # Delete values from the database SNOMED preferred terms cache.
     async with get_connection() as conn:
         async with conn.cursor() as cur:
-            await cur.execute(
-                f"DELETE FROM {BP_SNOMED_TABLE} WHERE concept_id = ANY(%s)",
-                (list(SNOMED_TERMS.keys()),),
+            await cur.executemany(
+                f"DELETE FROM {BP_SNOMED_TABLE} WHERE concept_id = %s AND field_id = %s",
+                [(concept_id, field_id) for concept_id, field_id, _ in SNOMED_TERMS],
             )
 
 

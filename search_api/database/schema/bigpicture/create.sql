@@ -1,7 +1,9 @@
 CREATE TABLE bp_snomed (
-    concept_id     TEXT        PRIMARY KEY,
+    concept_id     TEXT        NOT NULL,
+    field_id       TEXT        NOT NULL,
     preferred_term TEXT        NOT NULL,
-    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (concept_id, field_id)
 );
 
 CREATE INDEX idx_bp_snomed_updated_at ON bp_snomed (updated_at);

@@ -54,7 +54,7 @@ def test_build_opensearch_query_ontology_single():
     result = build_opensearch_query(term, "410607006")
     assert result == {
         "bool": {
-            "should": [{"terms": {"blocks.species": ["410607006"]}}],
+            "should": [{"terms": {"blocks.animal_species": ["410607006"]}}],
             "minimum_should_match": 1,
         }
     }
@@ -66,7 +66,9 @@ def test_build_opensearch_query_ontology_multi():
     result = build_opensearch_query(term, ["123456789", "987654321"])
     assert result == {
         "bool": {
-            "should": [{"terms": {"blocks.species": ["123456789", "987654321"]}}],
+            "should": [
+                {"terms": {"blocks.animal_species": ["123456789", "987654321"]}}
+            ],
             "minimum_should_match": 1,
         }
     }
@@ -304,7 +306,9 @@ def test_get_query_multiple_nested_blocks_filter():
                                             "should": [
                                                 {
                                                     "terms": {
-                                                        "blocks.species": ["337915000"]
+                                                        "blocks.animal_species": [
+                                                            "337915000"
+                                                        ]
                                                     }
                                                 }
                                             ],

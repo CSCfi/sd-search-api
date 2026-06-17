@@ -2,18 +2,34 @@
 
 import argparse
 import asyncio
+import json
 import logging
 import warnings
+from pathlib import Path
 
 from dotenv import load_dotenv
 
-from search_api.api.bigpicture.models import BP_SNOMED_TABLE
+import search_api
+from search_api.api.bigpicture.models import (
+    BP_FILTERING_TERMS,
+    BP_NON_FILTERING_FIELDS,
+    BP_OPENSEARCH_INDEX,
+    BP_SNOMED_TABLE,
+)
+from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorService
 from search_api.bigpicture.services.extract import BigPictureExtractService
 from search_api.bigpicture.services.load import BigPictureLoadService
 from search_api.bigpicture.services.sync import BigPictureSyncService
 from search_api.database.repository import get_cursor
 from search_api.services.snomed import SnomedService
 from search_api.services.snomed_term import PostgresSnomedTermCacheService
+
+_BP_INDEX_PATH = (
+    Path(search_api.__file__).parent
+    / "opensearch"
+    / "bigpicture"
+    / f"{BP_OPENSEARCH_INDEX}.json"
+)
 
 
 def _setup(env_file: str | None) -> None:
@@ -32,10 +48,14 @@ async def _load(args: argparse.Namespace) -> None:
     )
 
     if not args.load:
-        logging.info("Extracting from %s without writing to the database.", args.directory)
+        logging.info(
+            "Extracting from %s without writing to the database.", args.directory
+        )
         count = 0
         for fields in fields_iter:
-            logging.info("Would load image %s (dataset %s).", fields.image_id, fields.dataset_id)
+            logging.info(
+                "Would load image %s (dataset %s).", fields.image_id, fields.dataset_id
+            )
             count += 1
         logging.info("%d image(s) extracted without loading them.", count)
         return
@@ -64,6 +84,14 @@ async def _snomed_refresh() -> None:
     snomed_service = SnomedService()
     logging.info("Refreshing SNOMED preferred terms.")
     await snomed_term_service.refresh(snomed_service)
+
+
+def _generate_index() -> None:
+    body = OpenSearchIndexGeneratorService(
+        BP_FILTERING_TERMS, BP_NON_FILTERING_FIELDS
+    ).generate()
+    _BP_INDEX_PATH.write_text(json.dumps(body, indent=2) + "\n")
+    logging.info("Wrote OpenSearch index to %s.", _BP_INDEX_PATH)
 
 
 if __name__ == "__main__":
@@ -121,14 +149,24 @@ if __name__ == "__main__":
     )
 
     # snomed
-    snomed_parser = subparsers.add_parser("snomed", help="Managed SNOMED CT preferred terms cache.")
-    snomed_subparsers = snomed_parser.add_subparsers(dest="snomed_command", required=True)
+    snomed_parser = subparsers.add_parser(
+        "snomed", help="Managed SNOMED CT preferred terms cache."
+    )
+    snomed_subparsers = snomed_parser.add_subparsers(
+        dest="snomed_command", required=True
+    )
     snomed_subparsers.add_parser(
         "refresh",
         help=(
             "Refresh SNOMED CT preferred terms stored in the database. "
             "Run after a new SNOMED release to keep preferred terms current."
         ),
+    )
+
+    # generate-index
+    subparsers.add_parser(
+        "generate-index",
+        help=("Generate the OpenSearch JSON index."),
     )
 
     args = parser.parse_args()
@@ -138,3 +176,5 @@ if __name__ == "__main__":
         asyncio.run(_load(args))
     elif args.command == "snomed" and args.snomed_command == "refresh":
         asyncio.run(_snomed_refresh())
+    elif args.command == "generate-index":
+        _generate_index()

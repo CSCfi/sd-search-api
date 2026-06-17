@@ -10,6 +10,7 @@ SNOMED_ONTOLOGY_ID = "SCTID"
 BeaconQueryGranularity = Literal["boolean", "count", "record"]
 BeaconFilteringTermType = Literal[
     "text",
+    "keyword",
     "controlledValue",
     "ontology",
     "ontologyOrValue",

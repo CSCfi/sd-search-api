@@ -41,19 +41,19 @@
           "anatomical_site": {
             "type": "keyword"
           },
-          "sex": {
-            "type": "keyword"
-          },
           "fixation_type": {
             "type": "keyword"
           },
           "fixation_type_text": {
             "type": "keyword"
           },
+          "specimen_type": {
+            "type": "keyword"
+          },
           "block_preparation": {
             "type": "keyword"
           },
-          "specimen_type": {
+          "sex": {
             "type": "keyword"
           },
           "age_at_extraction": {
@@ -64,9 +64,6 @@
       "stains": {
         "type": "nested",
         "properties": {
-          "staining_target": {
-            "type": "keyword"
-          },
           "staining_procedure": {
             "type": "keyword"
           },
@@ -77,6 +74,9 @@
             "type": "keyword"
           },
           "staining_substance_text": {
+            "type": "keyword"
+          },
+          "staining_target": {
             "type": "keyword"
           }
         }

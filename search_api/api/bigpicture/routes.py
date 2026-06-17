@@ -184,7 +184,12 @@ async def suggestions(
     if filtering_term is None:
         raise UserException(f"Unknown field: '{field_id}'.")
 
-    if filtering_term.type not in ("controlledValue", "ontology", "ontologyOrValue"):
+    if filtering_term.type not in (
+        "controlledValue",
+        "keyword",
+        "ontology",
+        "ontologyOrValue",
+    ):
         raise UserException(
             f"Suggestions are not supported for field '{field_id}' (type '{filtering_term.type}')."
         )
@@ -196,14 +201,13 @@ async def suggestions(
             return term_lower in value_lower
         return any(word.startswith(term_lower) for word in value_lower.split())
 
-    if filtering_term.type == "controlledValue":
+    if filtering_term.type in ("controlledValue", "keyword"):
         field_counts = await beacon_service.get_indexed_field_value_counts(field_id)
         counts = field_counts.counts
-        candidates = (
-            filtering_term.controlledValues or []
-            if include_all_controlled_values
-            else list(counts.keys())
-        )
+        if filtering_term.type == "controlledValue" and include_all_controlled_values:
+            candidates = filtering_term.controlledValues or []
+        else:
+            candidates = list(counts.keys())
         return [
             FieldValue(value=v, count=counts.get(v, 0))
             for v in sorted(v for v in candidates if _matches(v))
@@ -260,7 +264,12 @@ async def values(
     if filtering_term is None:
         raise UserException(f"Unknown field: '{field_id}'.")
 
-    if filtering_term.type not in ("controlledValue", "ontology", "ontologyOrValue"):
+    if filtering_term.type not in (
+        "controlledValue",
+        "keyword",
+        "ontology",
+        "ontologyOrValue",
+    ):
         raise UserException(
             f"Values are not supported for field '{field_id}' (type '{filtering_term.type}')."
         )
@@ -268,8 +277,8 @@ async def values(
     field_counts = await beacon_service.get_indexed_field_value_counts(field_id)
     counts = field_counts.counts
 
-    if filtering_term.type == "controlledValue":
-        if include_all_controlled_values:
+    if filtering_term.type in ("controlledValue", "keyword"):
+        if filtering_term.type == "controlledValue" and include_all_controlled_values:
             all_values = filtering_term.controlledValues or []
             sorted_values = sorted(
                 ((v, counts.get(v, 0)) for v in all_values),

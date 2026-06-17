@@ -3,9 +3,11 @@
 import logging
 from collections.abc import Iterator
 from datetime import datetime
+from typing import TypeVar, get_args, get_origin
 
 from psycopg import AsyncCursor
 from psycopg.types.json import Json
+from pydantic import BaseModel
 
 from search_api.bigpicture.models import (
     BigpictureFields,
@@ -18,6 +20,64 @@ from search_api.services.snomed import SnomedService, is_concept_id
 from search_api.services.snomed_term import SnomedTermCacheService
 
 logger = logging.getLogger(__name__)
+
+_ModelT = TypeVar("_ModelT", bound=BaseModel)
+
+
+def serialize_fields(obj: BaseModel) -> dict:
+    """Serialize a block/stain model to its JSONB representation.
+
+    The JSONB key for each field is the model attribute name, so the stored key
+    can never drift from the model.
+    """
+    out: dict = {}
+    for name in type(obj).model_fields:
+        value = getattr(obj, name)
+        if value is None:
+            continue
+        if isinstance(value, BigpictureCodeAttributeValue):
+            out[name] = value.code
+        elif isinstance(value, frozenset):
+            if codes := [item.code for item in value]:
+                out[name] = codes
+        elif isinstance(value, tuple):
+            out[name] = {"gte": value[0], "lte": value[1]}
+        else:
+            out[name] = value
+    return out
+
+
+def deserialize_fields(model_cls: type[_ModelT], data: dict) -> _ModelT:
+    """Inverse of serialize_fields: rebuild a block/stain model from JSONB.
+
+    Uses field's declared annotation, so the JSONB key is always
+    the model attribute name. For ontology fields the stored code is used for
+    both the code and the meaning.
+    """
+    kwargs: dict = {}
+    for name, info in model_cls.model_fields.items():
+        if name not in data:
+            continue
+        raw = data[name]
+        annotation = info.annotation
+        args = get_args(annotation)
+        if get_origin(annotation) is frozenset:
+            codes = raw if isinstance(raw, list) else [raw]
+            kwargs[name] = frozenset(
+                BigpictureCodeAttributeValue(code=code, meaning=code) for code in codes
+            )
+        elif (
+            annotation is BigpictureCodeAttributeValue
+            or BigpictureCodeAttributeValue in args
+        ):
+            kwargs[name] = BigpictureCodeAttributeValue(code=raw, meaning=raw)
+        elif get_origin(annotation) is tuple or any(
+            get_origin(arg) is tuple for arg in args
+        ):
+            kwargs[name] = (raw["gte"], raw["lte"])
+        else:
+            kwargs[name] = raw
+    return model_cls(**kwargs)
 
 
 def _iter_concept_ids(fields: BigpictureFields) -> Iterator[tuple[str, str]]:
@@ -71,17 +131,8 @@ class BigPictureLoadService:
         :param cur: The database cursor.
         :param fields: The Bigpicture fields for one image.
         """
-
-        def _extract_code(value: BigpictureCodeAttributeValue | None) -> str | None:
-            return value.code if value is not None else None
-
-        def _extract_codes(
-            values: frozenset[BigpictureCodeAttributeValue],
-        ) -> list[str] | None:
-            return [v.code for v in values] or None
-
-        blocks = fields.blocks
-        stains = fields.stains
+        block_dicts = [d for block in fields.blocks if (d := serialize_fields(block))]
+        stain_dicts = [d for stain in fields.stains if (d := serialize_fields(stain))]
 
         # Replace existing image row.
         await cur.execute(
@@ -117,72 +168,8 @@ class BigPictureLoadService:
                 fields.dataset_short_name,
                 fields.dataset_title,
                 fields.dataset_description,
-                # blocks
-                Json(
-                    [
-                        b
-                        for b in [
-                            {
-                                k: v
-                                for k, v in {
-                                    "block_preparation": _extract_code(
-                                        block.block_preparation
-                                    ),
-                                    "anatomical_site": _extract_codes(
-                                        block.anatomical_site
-                                    ),
-                                    "fixation_type": _extract_code(block.fixation_type),
-                                    "fixation_type_text": block.fixation_type_text,
-                                    "specimen_type": _extract_code(block.specimen_type),
-                                    "age_at_extraction": (
-                                        {
-                                            "gte": block.age_at_extraction[0],
-                                            "lte": block.age_at_extraction[1],
-                                        }
-                                        if block.age_at_extraction is not None
-                                        else None
-                                    ),
-                                    "animal_species": _extract_code(
-                                        block.animal_species
-                                    ),
-                                    "sex": block.sex,
-                                }.items()
-                                if v is not None
-                            }
-                            for block in blocks
-                        ]
-                        if b
-                    ]
-                )
-                if blocks
-                else None,
-                # stains
-                Json(
-                    [
-                        s
-                        for s in [
-                            {
-                                k: v
-                                for k, v in {
-                                    "staining_target": stain.staining_target,
-                                    "staining_procedure": _extract_code(
-                                        stain.staining_procedure
-                                    ),
-                                    "staining_procedure_text": stain.staining_procedure_text,
-                                    "staining_substance": _extract_code(
-                                        stain.staining_substance
-                                    ),
-                                    "staining_substance_text": stain.staining_substance_text,
-                                }.items()
-                                if v is not None
-                            }
-                            for stain in stains
-                        ]
-                        if s
-                    ]
-                )
-                if stains
-                else None,
+                Json(block_dicts) if block_dicts else None,
+                Json(stain_dicts) if stain_dicts else None,
                 fields.dataset_modified_at,
             ),
         )
@@ -253,52 +240,11 @@ class BigPictureLoadService:
             stains,
         ) = row
 
-        def _convert_code(key: str, _dict: dict) -> dict:
-            v = _dict.get(key)
-            if v is None:
-                return {}
-            return {key: BigpictureCodeAttributeValue(code=v, meaning=v)}
-
-        def _convert_codes(key: str, _dict: dict) -> dict:
-            v = _dict.get(key)
-            if not v:
-                return {}
-            codes = v if isinstance(v, list) else [v]
-            return {
-                key: frozenset(
-                    BigpictureCodeAttributeValue(code=c, meaning=c) for c in codes
-                )
-            }
-
-        def _convert_age_at_extraction(_dict: dict) -> dict:
-            v = _dict.get("age_at_extraction")
-            if v is None:
-                return {}
-            return {"age_at_extraction": (v["gte"], v["lte"])}
-
         blocks = {
-            BigpictureBlockFields(
-                **{
-                    **block,
-                    **_convert_code("block_preparation", block),
-                    **_convert_code("animal_species", block),
-                    **_convert_codes("anatomical_site", block),
-                    **_convert_code("fixation_type", block),
-                    **_convert_code("specimen_type", block),
-                    **_convert_age_at_extraction(block),
-                }
-            )
-            for block in (blocks or [])
+            deserialize_fields(BigpictureBlockFields, block) for block in (blocks or [])
         }
-
         stains = {
-            BigpictureStainingFields(
-                **{
-                    **stain,
-                    **_convert_code("staining_procedure", stain),
-                    **_convert_code("staining_substance", stain),
-                }
-            )
+            deserialize_fields(BigpictureStainingFields, stain)
             for stain in (stains or [])
         }
 

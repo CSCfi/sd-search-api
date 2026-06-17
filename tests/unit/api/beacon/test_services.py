@@ -48,6 +48,18 @@ def test_build_opensearch_query_controlled_value_multi():
     }
 
 
+def test_build_opensearch_query_keyword_single():
+    """Single value for keyword produces an exact terms query (not a match query)."""
+    term = get_term("staining_target")  # keyword
+    result = build_opensearch_query(term, "Ki-67")
+    assert result == {
+        "bool": {
+            "should": [{"terms": {"stains.staining_target": ["Ki-67"]}}],
+            "minimum_should_match": 1,
+        }
+    }
+
+
 def test_build_opensearch_query_ontology_single():
     """Single concept ID for ontology produces a terms query."""
     term = get_term("animal_species")  # ontology
@@ -265,8 +277,10 @@ def test_get_query_nested_stain_filter():
                                         "bool": {
                                             "should": [
                                                 {
-                                                    "match": {
-                                                        "stains.staining_target": "Ki-67"
+                                                    "terms": {
+                                                        "stains.staining_target": [
+                                                            "Ki-67"
+                                                        ]
                                                     }
                                                 }
                                             ],
@@ -368,8 +382,10 @@ def test_get_query_all_filter_scopes():
                                         "bool": {
                                             "should": [
                                                 {
-                                                    "match": {
-                                                        "stains.staining_target": "Ki-67"
+                                                    "terms": {
+                                                        "stains.staining_target": [
+                                                            "Ki-67"
+                                                        ]
                                                     }
                                                 }
                                             ],

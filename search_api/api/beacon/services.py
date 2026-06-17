@@ -51,7 +51,7 @@ def build_opensearch_query(
         return or_queries(queries)
 
     # field is str for all remaining term types.
-    if term.type in ("controlledValue", "ontology"):
+    if term.type in ("controlledValue", "ontology", "keyword"):
         return or_queries([build_terms_query(field, values)])
 
     if term.type == "text":

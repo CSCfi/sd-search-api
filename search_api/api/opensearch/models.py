@@ -1,6 +1,17 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field, model_validator
 
 from search_api.api.beacon.models import BeaconFilteringTerm
+
+OpenSearchFieldType = Literal["keyword", "text", "long", "integer_range"]
+
+
+class OpenSearchFieldMapping(BaseModel):
+    """OpenSearch mapping for a single leaf index field."""
+
+    type: OpenSearchFieldType
+    analyzer: str | None = None
 
 
 class OpenSearchOntologyOrValue(BaseModel):

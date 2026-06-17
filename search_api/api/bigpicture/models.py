@@ -15,6 +15,7 @@ from search_api.api.beacon.models import (
     BeaconInfo,
 )
 from search_api.api.opensearch.models import (
+    OpenSearchFieldMapping,
     OpenSearchOntologyOrValue,
     OpenSearchBeaconFilteringTerm,
 )
@@ -61,7 +62,6 @@ BP_BIOLOGICAL_BEING_SCOPE = [BP_BIOLOGICAL_BEING_SCHEMA]
 BP_SPECIMEN_SCOPE = [BP_SPECIMEN_SCHEMA]
 BP_BLOCK_SCOPE = [BP_BLOCK_SCHEMA]
 BP_STAINING_SCOPE = [BP_STAINING_SCHEMA]
-
 
 BP_DATASET_TITLE_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
     id="dataset_title",
@@ -159,7 +159,7 @@ BP_BLOCK_PREPARATION_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
 )
 BP_STAINING_TARGET_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
     id="staining_target",
-    type="text",
+    type="keyword",
     scopes=BP_STAINING_SCOPE,
     label="Staining target",
     description="The specific target of the stain",
@@ -210,6 +210,15 @@ BP_FILTERING_TERMS = [
     BP_AGE_AT_EXTRACTION_FILTERING_TERM,
     BP_STAINING_TARGET_FILTERING_TERM,
 ]
+
+# Fields that are indexed in OpenSearch but are not filterable, so they
+# have no filtering term. Mapped to their OpenSearch field types explicitly.
+BP_NON_FILTERING_FIELDS: dict[str, OpenSearchFieldMapping] = {
+    "image_id": OpenSearchFieldMapping(type="keyword"),
+    "dataset_id": OpenSearchFieldMapping(type="keyword"),
+    "dataset_image_cnt": OpenSearchFieldMapping(type="long"),
+    "dataset_short_name": OpenSearchFieldMapping(type="text", analyzer="english_text"),
+}
 
 BP_META_RESPONSE = BeaconInfoMeta(
     beaconId=BP_BEACON_ID,

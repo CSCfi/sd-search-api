@@ -255,6 +255,19 @@ After a new SNOMED CT release, update the stored preferred terms to match the ne
 uv run python scripts/bigpicture.py snomed refresh
 ```
 
+#### Generate the OpenSearch index
+
+The OpenSearch index mapping (`search_api/opensearch/bigpicture/bp-image-index.json`) is
+is generated from the filtered and non-filtered field definitions, so that field names
+and types stay in sync with them.
+After changing them, regenerate and commit the file:
+
+```bash
+uv run python scripts/bigpicture.py generate-index
+```
+
+An unit test fails if this file is different from a freshy generated one.
+
 ## LLM search
 
 The experimental Bigpicture LLM search endpoint uses a small local [Ollama](https://ollama.com) model. Install and

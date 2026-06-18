@@ -18,12 +18,12 @@ from search_api.bigpicture.services.extract import (
     BigpictureBlockFields,
     to_opensearch_field_values,
 )
-from search_api.bigpicture.services.sync import BigPictureSyncService
+from search_api.services.sync import SyncService
 from search_api.database.document import DOCUMENT_TABLE
 from search_api.services.load import LoadService
 from search_api.database.repository import get_connection
 
-bp_sync_service = BigPictureSyncService()
+bp_sync_service = SyncService(BP_OPENSEARCH_INDEX)
 
 _INDEX_MAPPING_PATH = (
     Path(__file__).resolve().parent.parent.parent

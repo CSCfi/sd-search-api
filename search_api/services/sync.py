@@ -1,4 +1,4 @@
-"""Bigpicture sync service."""
+"""Generic sync service: push stored documents to OpenSearch."""
 
 import asyncio
 import logging
@@ -7,7 +7,6 @@ from typing import Any
 from opensearchpy import AsyncOpenSearch
 from psycopg import AsyncCursor
 
-from search_api.api.bigpicture.models import BP_OPENSEARCH_INDEX
 from search_api.api.opensearch.services import create_search, index_documents
 from search_api.database.document import (
     iter_unsynced,
@@ -22,10 +21,11 @@ logging.basicConfig(level=logging.INFO)
 BATCH_SIZE = 1000
 
 
-class BigPictureSyncService:
-    """Service for syncing Bigpicture fields from the database to OpenSearch."""
+class SyncService:
+    """Service for syncing stored documents to an OpenSearch index."""
 
-    def __init__(self) -> None:
+    def __init__(self, opensearch_index: str) -> None:
+        self._opensearch_index = opensearch_index
         self._search: AsyncOpenSearch = create_search()
         self._task: asyncio.Task | None = None
 
@@ -58,12 +58,12 @@ class BigPictureSyncService:
                 logging.exception("Error during periodic sync.")
             await asyncio.sleep(interval_seconds)
 
-    async def sync_fields(self, cur: AsyncCursor, image_id: str | None = None) -> None:
+    async def sync_fields(self, cur: AsyncCursor, doc_id: str | None = None) -> None:
         """
         Sync unsynced documents to OpenSearch.
 
         :param cur: The database cursor.
-        :param image_id: An optional image id.
+        :param doc_id: An optional document id to restrict the sync to.
         """
 
         logging.info("Finding documents to sync to OpenSearch.")
@@ -77,7 +77,7 @@ class BigPictureSyncService:
                 # Flush the OpenSearch batch.
                 logging.info(f"Syncing {len(docs_batch)} documents to OpenSearch.")
                 await index_documents(
-                    self._search, BP_OPENSEARCH_INDEX, ids_batch, docs_batch
+                    self._search, self._opensearch_index, ids_batch, docs_batch
                 )
 
                 # Update sync state in the document store.
@@ -88,11 +88,9 @@ class BigPictureSyncService:
                 ids_batch.clear()
                 docs_batch.clear()
 
-            async for doc_id, payload in iter_unsynced(cur, image_id):
-                doc = dict(payload)
-
-                ids_batch.append(doc_id)
-                docs_batch.append(doc)
+            async for row_id, payload in iter_unsynced(cur, doc_id):
+                ids_batch.append(row_id)
+                docs_batch.append(dict(payload))
 
                 if len(docs_batch) >= BATCH_SIZE:
                     # Flush batch.
@@ -104,10 +102,5 @@ class BigPictureSyncService:
 
     @staticmethod
     async def unsynced_count(cur: AsyncCursor) -> int:
-        """
-        Return number of documents to sync to OpenSearch.
-
-        :param cur: The database cursor.
-        :return: The number of documents to sync to OpenSearch.
-        """
+        """Return the number of documents pending sync to OpenSearch."""
         return await unsynced_count(cur)

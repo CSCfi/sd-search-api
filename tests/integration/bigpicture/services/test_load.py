@@ -11,7 +11,8 @@ from search_api.bigpicture.services.extract import (
     BigpictureBlockFields,
     to_opensearch_field_values,
 )
-from search_api.bigpicture.services.sync import BigPictureSyncService
+from search_api.api.bigpicture.models import BP_OPENSEARCH_INDEX
+from search_api.services.sync import SyncService
 from search_api.database.document import get_document
 from search_api.services.load import LoadService
 from search_api.database.repository import get_connection
@@ -64,7 +65,7 @@ async def test_load_and_sync_fields():
         },
     )
 
-    sync_service = BigPictureSyncService()
+    sync_service = SyncService(BP_OPENSEARCH_INDEX)
 
     async with get_connection() as conn:
         async with conn.cursor() as cur:

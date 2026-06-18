@@ -18,7 +18,7 @@ from search_api.api.bigpicture.models import (
 from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorService
 from search_api.bigpicture.services.extract import extract_documents
 from search_api.services.load import LoadService
-from search_api.bigpicture.services.sync import BigPictureSyncService
+from search_api.services.sync import SyncService
 from search_api.database.repository import get_cursor
 from search_api.services.snomed import SnomedService
 from search_api.services.snomed_term import PostgresSnomedTermCacheService
@@ -65,7 +65,7 @@ async def _load(args: argparse.Namespace) -> None:
     await load_service.store_documents(docs_iter)
 
     if args.sync:
-        sync_service = BigPictureSyncService()
+        sync_service = SyncService(BP_OPENSEARCH_INDEX)
         try:
             async with get_cursor() as cur:
                 await sync_service.sync_fields(cur)

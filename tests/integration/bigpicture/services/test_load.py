@@ -3,14 +3,17 @@ import uuid
 
 import pytest
 
-from search_api.bigpicture.models import (
+from search_api.api.opensearch.models import ExtractedDocument
+from search_api.bigpicture.services.extract import (
     BigpictureCodeAttributeValue,
     BigpictureFields,
     BigpictureStainingFields,
     BigpictureBlockFields,
+    to_opensearch_field_values,
 )
-from search_api.bigpicture.services.load import BigPictureLoadService
 from search_api.bigpicture.services.sync import BigPictureSyncService
+from search_api.database.document import get_document
+from search_api.services.load import LoadService
 from search_api.database.repository import get_connection
 
 os.environ.setdefault("POSTGRES_DB", os.environ["BP_POSTGRES_DB"])
@@ -41,7 +44,7 @@ async def test_load_and_sync_fields():
         blocks={
             BigpictureBlockFields(
                 sex="Male",
-                species=get_code("1"),
+                animal_species=get_code("1"),
                 anatomical_site=frozenset([get_code("2")]),
                 fixation_type=get_code("3"),
                 fixation_type_text="test_fixation",
@@ -65,23 +68,22 @@ async def test_load_and_sync_fields():
 
     async with get_connection() as conn:
         async with conn.cursor() as cur:
-            await BigPictureLoadService._load_fields(cur, fields)
+            doc = ExtractedDocument(
+                id=image_id, values=to_opensearch_field_values(fields)
+            )
+            await LoadService.store_document(cur, doc)
 
-            actual = await BigPictureLoadService.get_fields(cur, image_id)
+            payload = await get_document(cur, image_id)
+            assert payload is not None
 
-            assert fields.image_id == actual.image_id
-            assert fields.dataset_id == actual.dataset_id
-            assert fields.dataset_image_cnt == actual.dataset_image_cnt
-
-            assert fields.dataset_short_name == actual.dataset_short_name
-            assert fields.dataset_title == actual.dataset_title
-            assert fields.dataset_description == actual.dataset_description
-
-            assert len(fields.blocks) == 1
-            assert len(fields.stains) == 1
-
-            assert fields.blocks == actual.blocks
-            assert fields.stains == actual.stains
+            assert payload["image_id"] == image_id
+            assert payload["dataset_id"] == dataset_id
+            assert payload["dataset_image_cnt"] == dataset_image_cnt
+            assert payload["dataset_short_name"] == dataset_short_name
+            assert payload["dataset_title"] == dataset_title
+            assert payload["dataset_description"] == dataset_description
+            assert len(payload.get("blocks", [])) == 1
+            assert len(payload.get("stains", [])) == 1
 
             await sync_service.sync_fields(cur, image_id)
 

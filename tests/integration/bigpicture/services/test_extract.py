@@ -10,9 +10,10 @@ from crypt4gh.keys.c4gh import generate as c4gh_generate
 from crypt4gh.lib import encrypt as c4gh_encrypt
 from nacl.public import PrivateKey
 
-from search_api.bigpicture.services.extract import BigPictureExtractService
-from search_api.bigpicture.services.load import BigPictureLoadService
+from search_api.bigpicture.services.extract import extract_documents
+from search_api.database.document import DOCUMENT_TABLE, get_document
 from search_api.database.repository import get_connection
+from search_api.services.load import LoadService
 
 os.environ.setdefault("POSTGRES_DB", os.environ["BP_POSTGRES_DB"])
 os.environ.setdefault("POSTGRES_PORT", os.environ["BP_POSTGRES_PORT"])
@@ -42,7 +43,7 @@ async def delete_images():
             async with conn.cursor() as cur:
                 for image_id in _IMAGE_IDS:
                     await cur.execute(
-                        "DELETE FROM bp_image WHERE image_id = %s", (image_id,)
+                        f"DELETE FROM {DOCUMENT_TABLE} WHERE id = %s", (image_id,)
                     )
 
     await _delete()
@@ -54,19 +55,18 @@ async def delete_images():
 async def test_extract_and_load_fields_plain():
     """Plain XML files from the fixture directory are extracted and loaded into the database."""
     snomed_term_service = MagicMock(load=AsyncMock(), cache_preferred_terms=AsyncMock())
-    await BigPictureLoadService(
-        snomed_term_service=snomed_term_service, snomed_service=MagicMock()
-    ).load_fields(
-        BigPictureExtractService.extract_fields(root=str(_XML_DIR), single_dir=False)
-    )
+    await LoadService(
+        snomed_term_service=snomed_term_service,
+        snomed_service=MagicMock(),
+    ).store_documents(extract_documents(root=str(_XML_DIR), single_dir=False))
 
     async with get_connection() as conn:
         async with conn.cursor() as cur:
             for image_id in _IMAGE_IDS:
-                fields = await BigPictureLoadService.get_fields(cur, image_id)
-                assert fields is not None, f"{image_id!r} was not loaded"
-                assert fields.image_id == image_id
-                assert fields.dataset_id == _DATASET_ID
+                payload = await get_document(cur, image_id)
+                assert payload is not None, f"{image_id!r} was not loaded"
+                assert payload["image_id"] == image_id
+                assert payload["dataset_id"] == _DATASET_ID
 
 
 @pytest.mark.asyncio
@@ -94,10 +94,11 @@ async def test_extract_and_load_fields_c4gh(tmp_path):
             )
 
     snomed_term_service = MagicMock(load=AsyncMock(), cache_preferred_terms=AsyncMock())
-    await BigPictureLoadService(
-        snomed_term_service=snomed_term_service, snomed_service=MagicMock()
-    ).load_fields(
-        BigPictureExtractService.extract_fields(
+    await LoadService(
+        snomed_term_service=snomed_term_service,
+        snomed_service=MagicMock(),
+    ).store_documents(
+        extract_documents(
             root=str(tmp_path),
             single_dir=False,
             c4gh_private_key_file=str(seckey_path),
@@ -107,7 +108,7 @@ async def test_extract_and_load_fields_c4gh(tmp_path):
     async with get_connection() as conn:
         async with conn.cursor() as cur:
             for image_id in _IMAGE_IDS:
-                fields = await BigPictureLoadService.get_fields(cur, image_id)
-                assert fields is not None, f"{image_id!r} was not loaded"
-                assert fields.image_id == image_id
-                assert fields.dataset_id == _DATASET_ID
+                payload = await get_document(cur, image_id)
+                assert payload is not None, f"{image_id!r} was not loaded"
+                assert payload["image_id"] == image_id
+                assert payload["dataset_id"] == _DATASET_ID

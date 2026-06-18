@@ -3,23 +3,152 @@
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator, Literal, cast
+from typing import Any, Iterator, Literal, cast
 from lxml.etree import _ElementTree as ElementTree  # noqa
 
 import fsspec  # type: ignore
 import isodate  # type: ignore[import-untyped]
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
+
+from search_api.api.bigpicture.models import BP_DOCUMENT_FIELDS
+from search_api.exceptions import SystemException
+from search_api.api.opensearch.models import ExtractedDocument, OpenSearchFieldValue
 from search_api.services.crypt import load_c4gh_keys, read_file, resolve_path
-from search_api.bigpicture.models import (
-    BigpictureFields,
-    BigpictureCodeAttributeValue,
-    BigpictureStainingFields,
-    BigpictureSampleBlockFields,
-    BigpictureSampleSpecimenFields,
-    BigpictureSampleBiologicalBeingFields,
-    BigpictureBlockFields,
-)
 from search_api.services.dir import list_directories
 from search_api.services.xml import parse_xml, validate_xml, get_xml_value
+
+
+# Parsing models for Bigpicture XML, converted to OpenSearchFieldValues by to_opensearch_field_values.
+
+
+class BigpictureCodeAttributeValue(BaseModel):
+    """Bigpicture code attribute value."""
+
+    model_config = ConfigDict(frozen=True)
+
+    code: str
+    scheme: str | None = None
+    meaning: str
+    scheme_version: str | None = None
+
+
+class BigpictureSampleBiologicalBeingFields(BaseModel):
+    """Bigpicture biological being search fields."""
+
+    animal_species: BigpictureCodeAttributeValue | None = None
+    sex: Literal["Male", "Female", "Not-known", "Other"] | None = None
+
+
+class BigpictureSampleSpecimenFields(BaseModel):
+    """Bigpicture specimen search fields."""
+
+    anatomical_site: frozenset[BigpictureCodeAttributeValue] = Field(
+        default_factory=frozenset
+    )
+    fixation_type: BigpictureCodeAttributeValue | None = None
+    fixation_type_text: str | None = None  # Free text alternative
+    specimen_type: BigpictureCodeAttributeValue | None = None
+    age_at_extraction: tuple[str, str] | None = None
+
+    @field_serializer("anatomical_site")
+    def _serialize_anatomical_site(
+        self, v: frozenset[BigpictureCodeAttributeValue]
+    ) -> list[dict]:
+        # Set elements must be hashable; Pydantic serialises frozenset[BaseModel] as
+        # set[dict], but dict is unhashable, so serialise as list[dict].
+        return [item.model_dump() for item in v]
+
+
+class BigpictureSampleBlockFields(BaseModel):
+    """Bigpicture block search fields."""
+
+    block_preparation: BigpictureCodeAttributeValue | None = None
+
+
+class BigpictureBlockFields(
+    BigpictureSampleBiologicalBeingFields,
+    BigpictureSampleSpecimenFields,
+    BigpictureSampleBlockFields,
+    BaseModel,
+):
+    """Bigpicture block search field."""
+
+    model_config = ConfigDict(frozen=True)
+
+
+class BigpictureStainingFields(BaseModel):
+    """Bigpicture staining search field."""
+
+    model_config = ConfigDict(frozen=True)
+
+    staining_procedure: BigpictureCodeAttributeValue | None = None
+    staining_procedure_text: str | None = None  # Free text alternative
+    staining_substance: BigpictureCodeAttributeValue | None = None
+    staining_substance_text: str | None = None  # Free text alternative
+    staining_target: str | None = None
+
+
+class BigpictureFields(BaseModel):
+    """Bigpicture IDs and search fields."""
+
+    image_id: str
+    dataset_id: str
+    dataset_image_cnt: int
+    dataset_short_name: str | None = None
+    dataset_title: str | None = None
+    dataset_description: str | None = None
+    # Newest file modification date in the dataset.
+    dataset_modified_at: datetime | None = None
+    blocks: set[BigpictureBlockFields] = Field(default_factory=set)
+    stains: set[BigpictureStainingFields] = Field(default_factory=set)
+
+
+def to_opensearch_field_values(fields: BigpictureFields) -> list[OpenSearchFieldValue]:
+    """Convert extracted field models to OpenSearch field values."""
+    values: list[OpenSearchFieldValue] = []
+
+    def add_value(index: int, field_name: str, value: Any) -> None:
+        if value is None:
+            return
+        field = BP_DOCUMENT_FIELDS.get(field_name)
+        if field is None:
+            raise SystemException(
+                f"Field {field_name!r} is not registered in BP_DOCUMENT_FIELDS"
+            )
+        if isinstance(value, BigpictureCodeAttributeValue):
+            values.append(
+                OpenSearchFieldValue(field=field, value=value.code, index=index)
+            )
+        elif isinstance(value, frozenset):
+            for item in value:
+                values.append(
+                    OpenSearchFieldValue(field=field, value=item.code, index=index)
+                )
+        elif isinstance(value, (tuple, int, str)):
+            values.append(OpenSearchFieldValue(field=field, value=value, index=index))
+        else:
+            raise SystemException(
+                f"Field {field_name!r} has an unexpected value type: {type(value).__name__!r}"
+            )
+
+    # Add root level fields.
+    for field_name in type(fields).model_fields:
+        if field_name in BP_DOCUMENT_FIELDS:
+            add_value(0, field_name, getattr(fields, field_name))
+
+    # Add nested blocks and stains fields.
+    for items in (fields.blocks, fields.stains):
+        index = 0
+        for item in items:
+            before = len(values)
+            for field_name in type(item).model_fields:
+                add_value(index, field_name, getattr(item, field_name))
+            if len(values) > before:
+                # Index advances if a new value was added.
+                index += 1
+
+    return values
+
 
 DATASET_XML_FILE = "METADATA/dataset.xml"
 IMAGE_XML_FILE = "METADATA/image.xml"
@@ -64,14 +193,14 @@ def _get_last_modification_time(
     return max(mtimes) if mtimes else None
 
 
-def extract_fields(
+def extract_documents(
     root: str = "/",
     fs: fsspec.AbstractFileSystem | None = None,
     use_aliases: bool = False,
     single_dir: bool = False,
     c4gh_private_key_file: str | None = None,
     c4gh_passphrase: str | None = None,
-) -> Iterator[BigpictureFields]:
+) -> Iterator[ExtractedDocument]:
     """
     Extract search fields from Bigpicture XML directories under the root path.
 
@@ -319,8 +448,7 @@ def extract_fields(
                                     ].model_dump(),
                                     **biological_being_fields.model_dump(),
                                 )
-                                if any(v is not None for v in f.model_dump().values()):
-                                    fields[image_id].blocks.add(f)
+                                fields[image_id].blocks.add(f)
 
             # Add staining fields.
             for staining_id, staining_fields_list in map_staining_id_to_fields.items():
@@ -332,11 +460,16 @@ def extract_fields(
                             for image_id in map_slide_to_image_ids[slide_id]:
                                 fields[image_id].stains.add(staining_fields)
 
-            # Return iterator of extracted fields.
+            # Return iterator of extracted documents.
             #
 
             for image_id in image_ids:
-                yield fields[image_id]
+                bp_fields = fields[image_id]
+                yield ExtractedDocument(
+                    id=bp_fields.image_id,
+                    modified_at=bp_fields.dataset_modified_at,
+                    values=to_opensearch_field_values(bp_fields),
+                )
 
         except Exception:
             logging.error("Failed to extract fields from dataset %s.", d, exc_info=True)
@@ -353,7 +486,7 @@ def _extract_sample_biological_being_fields(
     xml: ElementTree,
 ) -> BigpictureSampleBiologicalBeingFields:
     return BigpictureSampleBiologicalBeingFields(
-        species=_extract_code_attribute_value(xml, "animal_species"),
+        animal_species=_extract_code_attribute_value(xml, "animal_species"),
         sex=cast(
             Literal["Male", "Female", "Not-known", "Other"] | None,
             _extract_string_attribute_value(xml, "sex"),
@@ -553,34 +686,3 @@ def _extract_age_at_extraction_range(elem: ElementTree) -> tuple[str, str] | Non
         return None
 
     return start, end
-
-
-class BigPictureExtractService:
-    """Service for extracting Bigpicture fields from XML files."""
-
-    @staticmethod
-    def extract_fields(
-        root: str = "/",
-        fs: fsspec.AbstractFileSystem | None = None,
-        use_aliases: bool = False,
-        single_dir: bool = False,
-        c4gh_private_key_file: str | None = None,
-        c4gh_passphrase: str | None = None,
-    ) -> Iterator[BigpictureFields]:
-        """
-        Extract search fields from Bigpicture XML directories under the root path.
-
-        :param root: Local directory or bucket path containing dataset subdirectories,
-            or a single dataset directory if ``single_dir`` is True.
-        :param fs: Optional fsspec filesystem. If None, a local filesystem is used.
-        :param use_aliases: Use XML aliases instead of accessions.
-        :param single_dir: If True, treat root as a single dataset directory instead of
-            a parent directory containing multiple dataset directories.
-        :param c4gh_private_key_file: Path to a Crypt4GH private key file (.sec) for
-            decrypting ``.c4gh`` XML files. If None, only plain XML files are accepted.
-        :param c4gh_passphrase: Passphrase protecting the private key, or None for an
-            unprotected key.
-        """
-        return extract_fields(
-            root, fs, use_aliases, single_dir, c4gh_private_key_file, c4gh_passphrase
-        )

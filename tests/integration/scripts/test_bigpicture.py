@@ -12,7 +12,8 @@ from crypt4gh.lib import encrypt as c4gh_encrypt
 from nacl.public import PrivateKey
 
 from scripts.bigpicture import _load
-from search_api.bigpicture.services.load import BigPictureLoadService
+from search_api.services.load import LoadService
+from search_api.database.document import DOCUMENT_TABLE, get_document
 from search_api.database.repository import get_connection
 
 os.environ.setdefault("POSTGRES_DB", os.environ["BP_POSTGRES_DB"])
@@ -52,7 +53,7 @@ async def delete_images():
             async with conn.cursor() as cur:
                 for image_id in _IMAGE_IDS:
                     await cur.execute(
-                        "DELETE FROM bp_image WHERE image_id = %s", (image_id,)
+                        f"DELETE FROM {DOCUMENT_TABLE} WHERE id = %s", (image_id,)
                     )
 
     await _delete()
@@ -63,7 +64,7 @@ async def delete_images():
 @pytest.mark.asyncio
 async def test_load_extract_only():
     with patch.object(
-        BigPictureLoadService, "_load_fields", new_callable=AsyncMock
+        LoadService, "store_document", new_callable=AsyncMock
     ) as load_spy:
         await _load(_args(load=False))
         load_spy.assert_not_called()
@@ -71,8 +72,8 @@ async def test_load_extract_only():
     async with get_connection() as conn:
         async with conn.cursor() as cur:
             for image_id in _IMAGE_IDS:
-                fields = await BigPictureLoadService.get_fields(cur, image_id)
-                assert fields is None, (
+                payload = await get_document(cur, image_id)
+                assert payload is None, (
                     f"{image_id!r} was unexpectedly written during dry-run"
                 )
 
@@ -85,10 +86,10 @@ async def test_load_plain_files():
     async with get_connection() as conn:
         async with conn.cursor() as cur:
             for image_id in _IMAGE_IDS:
-                fields = await BigPictureLoadService.get_fields(cur, image_id)
-                assert fields is not None, f"{image_id!r} was not loaded"
-                assert fields.image_id == image_id
-                assert fields.dataset_id == _DATASET_ID
+                payload = await get_document(cur, image_id)
+                assert payload is not None, f"{image_id!r} was not loaded"
+                assert payload["image_id"] == image_id
+                assert payload["dataset_id"] == _DATASET_ID
 
 
 @pytest.mark.asyncio
@@ -124,7 +125,7 @@ async def test_load_c4gh_files(tmp_path):
     async with get_connection() as conn:
         async with conn.cursor() as cur:
             for image_id in _IMAGE_IDS:
-                fields = await BigPictureLoadService.get_fields(cur, image_id)
-                assert fields is not None, f"{image_id!r} was not loaded"
-                assert fields.image_id == image_id
-                assert fields.dataset_id == _DATASET_ID
+                payload = await get_document(cur, image_id)
+                assert payload is not None, f"{image_id!r} was not loaded"
+                assert payload["image_id"] == image_id
+                assert payload["dataset_id"] == _DATASET_ID

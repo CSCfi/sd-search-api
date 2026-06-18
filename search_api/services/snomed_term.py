@@ -8,6 +8,8 @@ from search_api.services.snomed import SnomedService
 
 logger = logging.getLogger(__name__)
 
+SNOMED_TABLE = "snomed"
+
 _BATCH_SIZE = 1000
 
 type SnomedTermCache = dict[str, dict[str, str]]
@@ -71,8 +73,7 @@ class PostgresSnomedTermCacheService(SnomedTermCacheService):
     dict.
     """
 
-    def __init__(self, table_name: str, refresh_interval: float = 300.0) -> None:
-        self._table_name = table_name
+    def __init__(self, refresh_interval: float = 300.0) -> None:
         self._refresh_interval = refresh_interval
         self._cache: SnomedTermCache = {}
         self._last_refreshed: datetime | None = None
@@ -85,7 +86,7 @@ class PostgresSnomedTermCacheService(SnomedTermCacheService):
         """
         async with get_cursor() as cur:
             await cur.execute(
-                f"SELECT field_id, concept_id, preferred_term FROM {self._table_name}"
+                f"SELECT field_id, concept_id, preferred_term FROM {SNOMED_TABLE}"
             )
             rows = await cur.fetchall()
         cache: SnomedTermCache = {}
@@ -98,7 +99,7 @@ class PostgresSnomedTermCacheService(SnomedTermCacheService):
     async def _has_changes_since(self, since: datetime) -> bool:
         async with get_cursor() as cur:
             await cur.execute(
-                f"SELECT 1 FROM {self._table_name} WHERE updated_at > %s LIMIT 1",
+                f"SELECT 1 FROM {SNOMED_TABLE} WHERE updated_at > %s LIMIT 1",
                 (since,),
             )
             return await cur.fetchone() is not None
@@ -167,7 +168,7 @@ class PostgresSnomedTermCacheService(SnomedTermCacheService):
             for i in range(0, len(rows), _BATCH_SIZE):
                 await cur.executemany(
                     f"""
-                    INSERT INTO {self._table_name} (concept_id, field_id, preferred_term, updated_at)
+                    INSERT INTO {SNOMED_TABLE} (concept_id, field_id, preferred_term, updated_at)
                     VALUES (%s, %s, %s, now())
                     ON CONFLICT (concept_id, field_id) DO NOTHING
                     """,
@@ -183,7 +184,7 @@ class PostgresSnomedTermCacheService(SnomedTermCacheService):
 
     async def refresh(self, snomed: SnomedService) -> None:
         async with get_cursor() as cur:
-            await cur.execute(f"SELECT field_id, concept_id FROM {self._table_name}")
+            await cur.execute(f"SELECT field_id, concept_id FROM {SNOMED_TABLE}")
             rows = await cur.fetchall()
 
         if not rows:
@@ -215,7 +216,7 @@ class PostgresSnomedTermCacheService(SnomedTermCacheService):
                 for i in range(0, len(to_update), _BATCH_SIZE):
                     await cur.executemany(
                         f"""
-                        UPDATE {self._table_name}
+                        UPDATE {SNOMED_TABLE}
                         SET preferred_term = %s, updated_at = now()
                         WHERE concept_id = %s AND field_id = %s
                         """,

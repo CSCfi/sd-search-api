@@ -42,7 +42,7 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - PGPORT=${BP_POSTGRES_PORT}
     volumes:
-      - ./search_api/database/schema/bigpicture/create.sql:/docker-entrypoint-initdb.d/10_bigpicture.sql
+      - ./search_api/database/schema/create.sql:/docker-entrypoint-initdb.d/10_create.sql
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U postgres -p ${BP_POSTGRES_PORT}" ]
       interval: 10s

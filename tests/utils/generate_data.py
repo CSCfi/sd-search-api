@@ -10,14 +10,17 @@ import time
 from pathlib import Path
 
 from search_api.api.bigpicture.models import BP_OPENSEARCH_INDEX
-from search_api.bigpicture.models import (
+from search_api.api.opensearch.models import ExtractedDocument
+from search_api.bigpicture.services.extract import (
     BigpictureFields,
     BigpictureCodeAttributeValue,
     BigpictureStainingFields,
     BigpictureBlockFields,
+    to_opensearch_field_values,
 )
-from search_api.bigpicture.services.load import BigPictureLoadService
 from search_api.bigpicture.services.sync import BigPictureSyncService
+from search_api.database.document import DOCUMENT_TABLE
+from search_api.services.load import LoadService
 from search_api.database.repository import get_connection
 
 bp_sync_service = BigPictureSyncService()
@@ -192,11 +195,9 @@ async def generate_and_load_data(image_cnt: int, dataset_cnt: int) -> None:
 
             logging.info("Truncate tables")
 
-            await cur.execute("""
-                TRUNCATE TABLE bp_image
-            """)
+            await cur.execute(f"TRUNCATE TABLE {DOCUMENT_TABLE}")
 
-            assert await bp_sync_service.sync_count(cur) == 0
+            assert await bp_sync_service.unsynced_count(cur) == 0
 
             # Load data.
             #
@@ -230,7 +231,7 @@ async def generate_and_load_data(image_cnt: int, dataset_cnt: int) -> None:
                     blocks={
                         BigpictureBlockFields(
                             sex=_generate_sex_value(),
-                            species=_generate_code_value(),
+                            animal_species=_generate_code_value(),
                             anatomical_site=_generate_code_value(),
                             fixation_type=_generate_code_value(),
                             fixation_type_text=f"{_generate_code_value().code}",
@@ -253,14 +254,19 @@ async def generate_and_load_data(image_cnt: int, dataset_cnt: int) -> None:
                 # Load fields to the database for each image.
 
                 logging.info(f"Loading image '{image_id}' to the database")
-                await BigPictureLoadService._load_fields(cur, fields)
+                doc = ExtractedDocument(
+                    id=image_id,
+                    modified_at=fields.dataset_modified_at,
+                    values=to_opensearch_field_values(fields),
+                )
+                await LoadService.store_document(cur, doc)
 
             elapsed = time.time() - start_time
             print(
                 f"Data for {generated_cnt} images generated and loaded into database in {elapsed:.2f} seconds."
             )
 
-            assert await bp_sync_service.sync_count(cur) == generated_cnt
+            assert await bp_sync_service.unsynced_count(cur) == generated_cnt
 
 
 async def ensure_index() -> None:
@@ -290,14 +296,14 @@ async def sync_data() -> None:
     async with get_connection() as conn:
         async with conn.cursor() as cur:
             logging.info(
-                f"Number of images to sync is {await bp_sync_service.sync_count(cur)}"
+                f"Number of images to sync is {await bp_sync_service.unsynced_count(cur)}"
             )
             await bp_sync_service.sync_fields(cur)
 
             elapsed = time.time() - start_time
             print(f"Images synced to OpenSearch in {elapsed:.2f} seconds.")
 
-            assert await bp_sync_service.sync_count(cur) == 0
+            assert await bp_sync_service.unsynced_count(cur) == 0
 
 
 def main() -> None:

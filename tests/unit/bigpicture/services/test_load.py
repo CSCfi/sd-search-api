@@ -1,14 +1,12 @@
-from search_api.bigpicture.models import (
+from search_api.api.opensearch.document import build_document
+from search_api.bigpicture.services.extract import (
     BigpictureBlockFields,
     BigpictureCodeAttributeValue,
     BigpictureFields,
     BigpictureStainingFields,
+    to_opensearch_field_values,
 )
-from search_api.bigpicture.services.load import (
-    deserialize_fields,
-    get_concept_ids_by_field,
-    serialize_fields,
-)
+from search_api.services.load import concept_ids_from_values
 
 _SPECIES = "337915000"
 _BREAST = "80248007"
@@ -24,96 +22,76 @@ def _fields(**kwargs) -> BigpictureFields:
     )
 
 
+def test_to_opensearch_field_values():
+    fields = _fields(
+        dataset_title="A title",
+        blocks={
+            BigpictureBlockFields(
+                animal_species=_code(_SPECIES),
+                anatomical_site=frozenset([_code(_BREAST), _code(_AXILLA)]),
+                age_at_extraction=("P40Y", "P41Y"),
+                sex="Female",
+            )
+        },
+        stains={BigpictureStainingFields(staining_target="Nucleus")},
+    )
+    payload = build_document(to_opensearch_field_values(fields))
+
+    assert payload["image_id"] == "img"
+    assert payload["dataset_id"] == "ds"
+    assert payload["dataset_image_cnt"] == 1
+    assert payload["dataset_title"] == "A title"
+    block = payload["blocks"][0]
+    assert block["animal_species"] == _SPECIES
+    assert sorted(block["anatomical_site"]) == sorted([_BREAST, _AXILLA])
+    assert block["age_at_extraction"] == {"gte": 14600, "lte": 14965}
+    assert block["sex"] == "Female"
+    assert payload["stains"][0]["staining_target"] == "Nucleus"
+
+
 def _code(code: str) -> BigpictureCodeAttributeValue:
     return BigpictureCodeAttributeValue(code=code, meaning=code)
 
 
-def test_get_concept_ids_by_field_animal_species():
-    result = get_concept_ids_by_field(
+def _concept_ids(fields: BigpictureFields) -> dict[str, set[str]]:
+    return concept_ids_from_values(to_opensearch_field_values(fields))
+
+
+def test_concept_ids_from_values_animal_species():
+    result = _concept_ids(
         _fields(blocks={BigpictureBlockFields(animal_species=_code(_SPECIES))})
     )
     assert _SPECIES in result.get("animal_species", set())
 
 
-def test_get_concept_ids_by_field_anatomical_site():
+def test_concept_ids_from_values_anatomical_site():
     block = BigpictureBlockFields(
         anatomical_site=frozenset([_code(_BREAST), _code(_AXILLA)])
     )
-    result = get_concept_ids_by_field(_fields(blocks={block}))
+    result = _concept_ids(_fields(blocks={block}))
     assert {_BREAST, _AXILLA} <= result.get("anatomical_site", set())
 
 
-def test_get_concept_ids_by_field_fixation_type():
-    fields = _fields(blocks={BigpictureBlockFields(fixation_type=_code(_FFPE))})
-    result = get_concept_ids_by_field(fields)
+def test_concept_ids_from_values_fixation_type():
+    result = _concept_ids(
+        _fields(blocks={BigpictureBlockFields(fixation_type=_code(_FFPE))})
+    )
     assert _FFPE in result.get("fixation_type", set())
 
-    block = BigpictureBlockFields(
-        fixation_type=BigpictureCodeAttributeValue(code="Formalin", meaning="Formalin")
-    )
-    result = get_concept_ids_by_field(_fields(blocks={block}))
+    block = BigpictureBlockFields(fixation_type=_code("Formalin"))
+    result = _concept_ids(_fields(blocks={block}))
     assert "Formalin" not in result.get("fixation_type", set())
 
 
-def test_get_concept_ids_by_field_staining_procedure():
+def test_concept_ids_from_values_staining_procedure():
     stain = BigpictureStainingFields(staining_procedure=_code(_HE))
-    result = get_concept_ids_by_field(_fields(stains={stain}))
+    result = _concept_ids(_fields(stains={stain}))
     assert _HE in result.get("staining_procedure", set())
 
 
-def test_get_concept_ids_by_field_multiple_blocks():
+def test_concept_ids_from_values_multiple_blocks():
     block1 = BigpictureBlockFields(animal_species=_code(_SPECIES))
     block2 = BigpictureBlockFields(block_preparation=_code(_PARAFFIN))
-    result = get_concept_ids_by_field(_fields(blocks={block1, block2}))
+    result = _concept_ids(_fields(blocks={block1, block2}))
     assert _SPECIES in result.get("animal_species", set())
     assert _PARAFFIN in result.get("block_preparation", set())
-
-
-def test_serialize_fields():
-    block = BigpictureBlockFields(
-        animal_species=_code(_SPECIES),
-        anatomical_site=frozenset([_code(_BREAST)]),
-        fixation_type=_code(_FFPE),
-        fixation_type_text="Formalin",
-        age_at_extraction=("P40Y", "P41Y"),
-        sex="Female",
-    )
-    assert serialize_fields(block) == {
-        "animal_species": _SPECIES,
-        "anatomical_site": [_BREAST],
-        "fixation_type": _FFPE,
-        "fixation_type_text": "Formalin",
-        "age_at_extraction": {"gte": "P40Y", "lte": "P41Y"},
-        "sex": "Female",
-    }
-
-
-def test_serialize_fields_empty():
-    assert serialize_fields(BigpictureBlockFields()) == {}
-
-
-def test_serialize_and_deserialize_block():
-    block = BigpictureBlockFields(
-        animal_species=_code(_SPECIES),
-        anatomical_site=frozenset([_code(_BREAST), _code(_AXILLA)]),
-        fixation_type=_code(_FFPE),
-        fixation_type_text="Formalin",
-        specimen_type=_code(_PARAFFIN),
-        age_at_extraction=("P40Y", "P41Y"),
-        block_preparation=_code(_PARAFFIN),
-        sex="Female",
-    )
-    assert deserialize_fields(BigpictureBlockFields, serialize_fields(block)) == block
-
-
-def test_serialize_and_deserialize_stain():
-    stain = BigpictureStainingFields(
-        staining_procedure=_code(_HE),
-        staining_procedure_text="H&E",
-        staining_substance=_code(_BREAST),
-        staining_substance_text="Eosin",
-        staining_target="Nucleus",
-    )
-    assert (
-        deserialize_fields(BigpictureStainingFields, serialize_fields(stain)) == stain
-    )

@@ -14,8 +14,9 @@ from search_api.api.beacon.models import (
     BeaconSchema,
     BeaconInfo,
 )
+from search_api.exceptions import SystemException
 from search_api.api.opensearch.models import (
-    OpenSearchFieldMapping,
+    OpenSearchField,
     OpenSearchOntologyOrValue,
     OpenSearchBeaconFilteringTerm,
 )
@@ -38,8 +39,7 @@ class BigpictureBeaconResultSetsResponse(
     """Beacon V2 result sets response for the Bigpicture document schema."""
 
 
-BP_SNOMED_TABLE = "bp_snomed"
-
+BP_DOMAIN_NAME = "bigpicture"
 BP_OPENSEARCH_INDEX = "bp-image-index"
 
 BP_BEACON_ID = "fi.csc.bigpicture.beacon.v2"
@@ -108,6 +108,7 @@ BP_ANATOMICAL_SITE_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
     description="The anatomical site from which the specimen originated, typically at the organ level. "
     "If no organ can be identified, use an equivalent anatomical region.",
     opensearch_field="blocks.anatomical_site",
+    multivalued=True,
 )
 BP_FIXATION_TYPE_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
     id="fixation_type",
@@ -211,14 +212,64 @@ BP_FILTERING_TERMS = [
     BP_STAINING_TARGET_FILTERING_TERM,
 ]
 
-# Fields that are indexed in OpenSearch but are not filterable, so they
-# have no filtering term. Mapped to their OpenSearch field types explicitly.
-BP_NON_FILTERING_FIELDS: dict[str, OpenSearchFieldMapping] = {
-    "image_id": OpenSearchFieldMapping(type="keyword"),
-    "dataset_id": OpenSearchFieldMapping(type="keyword"),
-    "dataset_image_cnt": OpenSearchFieldMapping(type="long"),
-    "dataset_short_name": OpenSearchFieldMapping(type="text", analyzer="english_text"),
-}
+# Fields that are indexed in OpenSearch but are not filterable, so they have no
+# filtering term.
+BP_NON_FILTERING_FIELDS: list[OpenSearchField] = [
+    OpenSearchField(id="image_id", type="keyword", opensearch_field="image_id"),
+    OpenSearchField(id="dataset_id", type="keyword", opensearch_field="dataset_id"),
+    OpenSearchField(
+        id="dataset_image_cnt", type="integer", opensearch_field="dataset_image_cnt"
+    ),
+    OpenSearchField(
+        id="dataset_short_name", type="text", opensearch_field="dataset_short_name"
+    ),
+]
+
+
+def _document_fields() -> dict[str, OpenSearchField]:
+    """Returns a dict of OpenSearch fields keyed by field name."""
+
+    def field_name(path: str) -> str:
+        return path.rsplit(".", 1)[-1]
+
+    fields: dict[str, OpenSearchField] = {}
+
+    def add_field(name: str, field: OpenSearchField) -> None:
+        if name in fields:
+            raise SystemException(
+                f"Field name {name!r} is used by both {fields[name].id!r} and {field.id!r}"
+            )
+        fields[name] = field
+
+    for field in BP_NON_FILTERING_FIELDS:
+        add_field(field_name(field.opensearch_field), field)
+
+    for term in BP_FILTERING_TERMS:
+        osf = term.opensearch_field
+        if isinstance(osf, OpenSearchOntologyOrValue):
+            # Concept ID and free text are stored in separate fields.
+            add_field(
+                field_name(osf.concept_value_field),
+                OpenSearchField(
+                    id=field_name(osf.concept_value_field),
+                    type="ontology",
+                    opensearch_field=osf.concept_value_field,
+                ),
+            )
+            add_field(
+                field_name(osf.other_value_field),
+                OpenSearchField(
+                    id=field_name(osf.other_value_field),
+                    type="keyword",
+                    opensearch_field=osf.other_value_field,
+                ),
+            )
+        else:
+            add_field(term.id, term)
+    return fields
+
+
+BP_DOCUMENT_FIELDS: dict[str, OpenSearchField] = _document_fields()
 
 BP_META_RESPONSE = BeaconInfoMeta(
     beaconId=BP_BEACON_ID,

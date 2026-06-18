@@ -2,7 +2,7 @@ from search_api.api.beacon.models import BeaconFilteringOntology, SNOMED_ONTOLOG
 from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorService
 from search_api.api.opensearch.models import (
     OpenSearchBeaconFilteringTerm,
-    OpenSearchFieldMapping,
+    OpenSearchField,
     OpenSearchOntologyOrValue,
 )
 
@@ -24,8 +24,8 @@ def _filtering_term(field_id, type_, opensearch_field) -> OpenSearchBeaconFilter
     )
 
 
-def _generate(*terms, non_filtering_fields=None) -> dict:
-    body = OpenSearchIndexGeneratorService(terms, non_filtering_fields).generate()
+def _generate(*fields: OpenSearchField) -> dict:
+    body = OpenSearchIndexGeneratorService(list(fields)).generate()
     return body["mappings"]["properties"]
 
 
@@ -87,12 +87,14 @@ def test_generate_type_to_opensearch_mapping():
         _filtering_term("cv", "controlledValue", "stains.cv"),
         _filtering_term("onto", "ontology", "stains.onto"),
         _filtering_term("age", "iso8601Range", "stains.age"),
+        OpenSearchField(id="cnt", type="integer", opensearch_field="cnt"),
     )
     fields = props["stains"]["properties"]
     assert fields["kw"] == {"type": "keyword"}
     assert fields["cv"] == {"type": "keyword"}
     assert fields["onto"] == {"type": "keyword"}
     assert fields["age"] == {"type": "integer_range"}
+    assert props["cnt"] == {"type": "long"}
 
 
 def test_generate_ontology_or_value_expands_to_two_keyword_fields():
@@ -112,12 +114,24 @@ def test_generate_ontology_or_value_expands_to_two_keyword_fields():
     }
 
 
-def test_generate_non_filtering_fields_included():
+def test_generate_non_filtering_field_included():
     props = _generate(
         _filtering_term("dataset_title", "text", "dataset_title"),
-        non_filtering_fields={"image_id": OpenSearchFieldMapping(type="keyword")},
+        OpenSearchField(id="image_id", type="keyword", opensearch_field="image_id"),
     )
     assert props["image_id"] == {"type": "keyword"}
+
+
+def test_generate_non_filtering_field_nested():
+    props = _generate(
+        OpenSearchField(
+            id="image_id", type="keyword", opensearch_field="blocks.image_id"
+        ),
+    )
+    assert props["blocks"] == {
+        "type": "nested",
+        "properties": {"image_id": {"type": "keyword"}},
+    }
 
 
 def test_generate_settings_define_the_text_analyzer():

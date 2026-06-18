@@ -14,11 +14,11 @@ from search_api.api.beacon.models import (
 )
 from search_api.api.bigpicture.models import (
     BP_OPENSEARCH_INDEX,
-    BP_SNOMED_TABLE,
     BigpictureBeaconResultSetsResponse,
 )
 from search_api.api.models import FieldValue
 from search_api.database.repository import get_connection
+from search_api.services.snomed_term import SNOMED_TABLE
 
 os.environ.setdefault("POSTGRES_DB", os.environ["BP_POSTGRES_DB"])
 os.environ.setdefault("POSTGRES_PORT", os.environ["BP_POSTGRES_PORT"])
@@ -371,7 +371,7 @@ async def snomed_terms(client: httpx.Client):
     async with get_connection() as conn:
         async with conn.cursor() as cur:
             await cur.executemany(
-                f"INSERT INTO {BP_SNOMED_TABLE} (concept_id, field_id, preferred_term, updated_at)"
+                f"INSERT INTO {SNOMED_TABLE} (concept_id, field_id, preferred_term, updated_at)"
                 " VALUES (%s, %s, %s, now())"
                 " ON CONFLICT (concept_id, field_id) DO UPDATE SET preferred_term = EXCLUDED.preferred_term,"
                 " updated_at = now()",
@@ -390,7 +390,7 @@ async def snomed_terms(client: httpx.Client):
     async with get_connection() as conn:
         async with conn.cursor() as cur:
             await cur.executemany(
-                f"DELETE FROM {BP_SNOMED_TABLE} WHERE concept_id = %s AND field_id = %s",
+                f"DELETE FROM {SNOMED_TABLE} WHERE concept_id = %s AND field_id = %s",
                 [(concept_id, field_id) for concept_id, field_id, _ in SNOMED_TERMS],
             )
 

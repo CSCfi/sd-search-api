@@ -1,41 +1,30 @@
-from typing import Any
-
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
-from fastapi.routing import APIRouter
-from pydantic import BaseModel
 import uvicorn
 
 from search_api.api.admin.routes import router as admin_router
-from search_api.api.bigpicture.lifespan import bigpicture_lifespan
-from search_api.api.bigpicture.routes import router as bigpicture_router
+from search_api.api.bigpicture.domain import BP_DOMAIN
+from search_api.api.domain import Domain, make_lifespan
 from search_api.api.exception_handlers import register_exception_handlers
 from search_api.conf import admin_config, deployment_config
 
 # uvicorn search_api.main:app --reload
 
-
-class RouterConfig(BaseModel):
-    model_config = {"arbitrary_types_allowed": True}
-
-    router: APIRouter
-    lifespan: Any
-
-
-_DEPLOYMENTS: dict[str, RouterConfig] = {
-    "Bigpicture": RouterConfig(router=bigpicture_router, lifespan=bigpicture_lifespan),
+# A deployment is associated with a domain.
+_DOMAINS: dict[str, Domain] = {
+    "Bigpicture": BP_DOMAIN,
 }
 
 _deployment = deployment_config()
-_config = _DEPLOYMENTS[_deployment.DEPLOYMENT_TYPE]
+_domain = _DOMAINS[_deployment.DEPLOYMENT_TYPE]
 
 app = FastAPI(
-    title=f"CSC {_deployment.DEPLOYMENT_TYPE} Beacon",
+    title=f"CSC {_domain.name.capitalize()} Beacon",
     version="1.0",
-    lifespan=_config.lifespan,
+    lifespan=make_lifespan(_domain),
 )
 
-app.include_router(_config.router)
+app.include_router(_domain.router)
 register_exception_handlers(app)
 
 if admin_config().ADMIN_KEY:

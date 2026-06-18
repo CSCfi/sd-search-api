@@ -7,13 +7,10 @@ import pytest
 
 from lxml import etree
 
-from search_api.bigpicture.models import (
-    BigpictureCodeAttributeValue,
-    BigpictureBlockFields,
-    BigpictureStainingFields,
-)
+from search_api.api.opensearch.document import build_document
 from search_api.bigpicture.services.extract import (
-    extract_fields,
+    BigpictureCodeAttributeValue,
+    extract_documents,
     _add_iso8601_durations,
     _extract_anatomical_sites,
     _extract_code_attribute_value,
@@ -33,95 +30,33 @@ TEST_DIR = (
 
 
 def test_extract_fields():
-    fields_iterator = extract_fields(root=str(TEST_DIR))
-    for fields in fields_iterator:
-        if fields.image_id == "image_1":
-            assert fields is not None
-            assert fields.image_id == "image_1"
-            assert fields.dataset_id == "dataset_1"
-            assert fields.dataset_description == "test_description"
-            assert fields.blocks == {
-                BigpictureBlockFields(
-                    block_preparation=BigpictureCodeAttributeValue(
-                        code="5", scheme="Scheme5", meaning="Test5", scheme_version=""
-                    ),
-                    species=BigpictureCodeAttributeValue(
-                        code="1", scheme="Scheme1", meaning="Test1", scheme_version=""
-                    ),
-                    sex="Male",
-                    anatomical_site=frozenset(
-                        [
-                            BigpictureCodeAttributeValue(
-                                code="2",
-                                scheme="Scheme2",
-                                meaning="Test2",
-                                scheme_version="",
-                            )
-                        ]
-                    ),
-                    fixation_type=BigpictureCodeAttributeValue(
-                        code="3", scheme="Scheme3", meaning="Test3", scheme_version=""
-                    ),
-                    specimen_type=BigpictureCodeAttributeValue(
-                        code="4", scheme="Scheme4", meaning="Test4", scheme_version=""
-                    ),
-                    age_at_extraction=("P40Y", "P41Y"),
-                )
-            }
+    # extract_documents yields ExtractedDocument; build the payload to assert on stored values.
+    # (Full code-attribute fidelity — scheme/meaning — is covered by the helper tests below.)
+    docs = {doc.id: doc for doc in extract_documents(root=str(TEST_DIR))}
+    assert set(docs) == {"image_1", "image_2"}
 
-            assert fields.stains == {
-                BigpictureStainingFields(
-                    staining_procedure=BigpictureCodeAttributeValue(
-                        code="6", scheme="Scheme6", meaning="Test6", scheme_version=""
-                    ),
-                    staining_procedure_text="test6",
-                    staining_target=None,
-                )
-            }
-        else:
-            assert fields is not None
-            assert fields.image_id == "image_2"
-            assert fields.dataset_id == "dataset_1"
-            assert fields.dataset_description == "test_description"
+    payload = build_document(docs["image_1"].values)
+    assert payload["image_id"] == "image_1"
+    assert payload["dataset_id"] == "dataset_1"
+    assert payload["dataset_description"] == "test_description"
+    block = payload["blocks"][0]
+    assert block["animal_species"] == "1"
+    assert block["block_preparation"] == "5"
+    assert block["sex"] == "Male"
+    assert block["anatomical_site"] == ["2"]
+    assert block["fixation_type"] == "3"
+    assert block["specimen_type"] == "4"
+    assert block["age_at_extraction"] == {"gte": 14600, "lte": 14965}
+    stain = payload["stains"][0]
+    assert stain["staining_procedure"] == "6"
+    assert stain["staining_procedure_text"] == "test6"
+    assert "staining_target" not in stain
 
-            assert fields.blocks == {
-                BigpictureBlockFields(
-                    block_preparation=BigpictureCodeAttributeValue(
-                        code="5", scheme="Scheme5", meaning="Test5", scheme_version=""
-                    ),
-                    species=BigpictureCodeAttributeValue(
-                        code="1", scheme="Scheme1", meaning="Test1", scheme_version=""
-                    ),
-                    sex="Male",
-                    anatomical_site=frozenset(
-                        [
-                            BigpictureCodeAttributeValue(
-                                code="2",
-                                scheme="Scheme2",
-                                meaning="Test2",
-                                scheme_version="",
-                            )
-                        ]
-                    ),
-                    fixation_type=BigpictureCodeAttributeValue(
-                        code="3", scheme="Scheme3", meaning="Test3", scheme_version=""
-                    ),
-                    specimen_type=BigpictureCodeAttributeValue(
-                        code="4", scheme="Scheme4", meaning="Test4", scheme_version=""
-                    ),
-                    age_at_extraction=("P40Y", "P41Y"),
-                )
-            }
-
-            assert fields.stains == {
-                BigpictureStainingFields(
-                    staining_procedure=BigpictureCodeAttributeValue(
-                        code="7", scheme="Scheme7", meaning="Test7", scheme_version=""
-                    ),
-                    staining_procedure_text="test7",
-                    staining_target="pan Cytokeratin",
-                )
-            }
+    payload2 = build_document(docs["image_2"].values)
+    stain2 = payload2["stains"][0]
+    assert stain2["staining_procedure"] == "7"
+    assert stain2["staining_procedure_text"] == "test7"
+    assert stain2["staining_target"] == "pan Cytokeratin"
 
 
 def test_process_code_attribute():

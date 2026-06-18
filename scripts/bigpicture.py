@@ -14,11 +14,10 @@ from search_api.api.bigpicture.models import (
     BP_FILTERING_TERMS,
     BP_NON_FILTERING_FIELDS,
     BP_OPENSEARCH_INDEX,
-    BP_SNOMED_TABLE,
 )
 from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorService
-from search_api.bigpicture.services.extract import BigPictureExtractService
-from search_api.bigpicture.services.load import BigPictureLoadService
+from search_api.bigpicture.services.extract import extract_documents
+from search_api.services.load import LoadService
 from search_api.bigpicture.services.sync import BigPictureSyncService
 from search_api.database.repository import get_cursor
 from search_api.services.snomed import SnomedService
@@ -40,7 +39,7 @@ def _setup(env_file: str | None) -> None:
 
 
 async def _load(args: argparse.Namespace) -> None:
-    fields_iter = BigPictureExtractService.extract_fields(
+    docs_iter = extract_documents(
         root=args.directory,
         single_dir=not args.multi_dir,
         c4gh_private_key_file=args.c4gh_key_file,
@@ -52,23 +51,18 @@ async def _load(args: argparse.Namespace) -> None:
             "Extracting from %s without writing to the database.", args.directory
         )
         count = 0
-        for fields in fields_iter:
-            logging.info(
-                "Would load image %s (dataset %s).", fields.image_id, fields.dataset_id
-            )
+        for doc in docs_iter:
+            logging.info("Would load document %s.", doc.id)
             count += 1
-        logging.info("%d image(s) extracted without loading them.", count)
+        logging.info("%d document(s) extracted without loading them.", count)
         return
 
-    snomed_term_service = PostgresSnomedTermCacheService(BP_SNOMED_TABLE)
+    snomed_term_service = PostgresSnomedTermCacheService()
     snomed_service = SnomedService()
 
     logging.info("Loading fields from %s.", args.directory)
-    load_service = BigPictureLoadService(
-        snomed_term_service=snomed_term_service,
-        snomed_service=snomed_service,
-    )
-    await load_service.load_fields(fields_iter)
+    load_service = LoadService(snomed_term_service, snomed_service)
+    await load_service.store_documents(docs_iter)
 
     if args.sync:
         sync_service = BigPictureSyncService()
@@ -80,7 +74,7 @@ async def _load(args: argparse.Namespace) -> None:
 
 
 async def _snomed_refresh() -> None:
-    snomed_term_service = PostgresSnomedTermCacheService(BP_SNOMED_TABLE)
+    snomed_term_service = PostgresSnomedTermCacheService()
     snomed_service = SnomedService()
     logging.info("Refreshing SNOMED preferred terms.")
     await snomed_term_service.refresh(snomed_service)
@@ -88,7 +82,7 @@ async def _snomed_refresh() -> None:
 
 def _generate_index() -> None:
     body = OpenSearchIndexGeneratorService(
-        BP_FILTERING_TERMS, BP_NON_FILTERING_FIELDS
+        [*BP_NON_FILTERING_FIELDS, *BP_FILTERING_TERMS]
     ).generate()
     _BP_INDEX_PATH.write_text(json.dumps(body, indent=2) + "\n")
     logging.info("Wrote OpenSearch index to %s.", _BP_INDEX_PATH)

@@ -21,7 +21,10 @@ os.environ.setdefault("POSTGRES_DB", os.environ["BP_POSTGRES_DB"])
 os.environ.setdefault("POSTGRES_PORT", os.environ["BP_POSTGRES_PORT"])
 
 _XML_DIR = (
-    Path(__file__).resolve().parent.parent.parent / "files" / "bigpicture" / "xml"
+    Path(__file__).resolve().parent.parent.parent.parent
+    / "files"
+    / "bigpicture"
+    / "xml"
 )
 _XML_METADATA_FILES = [
     "METADATA/dataset.xml",

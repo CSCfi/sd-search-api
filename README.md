@@ -249,10 +249,12 @@ uv run python scripts/admin.py Bigpicture load /path/to/datasets/ --multi-dir --
 
 #### Refresh SNOMED CT preferred terms
 
-After a new SNOMED CT release, update the stored preferred terms to match the new release:
+After a new SNOMED CT release, update the stored preferred terms to match the new
+release. The preferred-terms cache is shared across deployments, so this command is
+not tied to a specific one:
 
 ```bash
-uv run python scripts/admin.py Bigpicture snomed refresh
+uv run python scripts/admin.py snomed refresh
 ```
 
 #### Generate the OpenSearch index

@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastapi import FastAPI
-from fastapi.routing import APIRouter
 
+from search_api.api.beacon.models import BeaconResultSetsResponse
 from search_api.api.beacon.services import BeaconService
 from search_api.api.opensearch.models import (
     OpenSearchBeaconFilteringTerm,
@@ -24,8 +24,11 @@ class Domain:
     opensearch_index: str
     filtering_terms: Sequence[OpenSearchBeaconFilteringTerm]
     non_filtering_fields: Sequence[OpenSearchField]
-    router: APIRouter
     beacon_service_factory: Callable[[Any], BeaconService]
+    beacon_id: str
+    beacon_name: str
+    schemas: Sequence[str]  # Beacon entity types (returnedSchemas).
+    result_sets_response_model: type[BeaconResultSetsResponse[Any]]
 
     @property
     def opensearch_fields(self) -> list[OpenSearchField]:
@@ -38,6 +41,7 @@ def make_lifespan(domain: Domain) -> Callable[[FastAPI], Any]:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        app.state.domain = domain
         app.state.search = create_search()
         app.state.filtering_terms = domain.filtering_terms
         app.state.beacon_service = domain.beacon_service_factory(app.state.search)

@@ -3,6 +3,7 @@ from fastapi.responses import RedirectResponse
 import uvicorn
 
 from search_api.api.admin.routes import router as admin_router
+from search_api.api.beacon.routes import make_beacon_router
 from search_api.api.bigpicture.domain import BP_DOMAIN
 from search_api.api.domain import Domain, make_lifespan
 from search_api.api.exception_handlers import register_exception_handlers
@@ -24,7 +25,7 @@ app = FastAPI(
     lifespan=make_lifespan(_domain),
 )
 
-app.include_router(_domain.router)
+app.include_router(make_beacon_router(_domain))
 register_exception_handlers(app)
 
 if admin_config().ADMIN_KEY:

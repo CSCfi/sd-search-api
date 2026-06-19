@@ -27,17 +27,18 @@ from search_api.api.bigpicture.models import (
     BP_INFO_RESPONSE,
     BP_FILTERING_TERMS_RESPONSE,
 )
-from search_api.api.bigpicture.routes import (
+from search_api.api.bigpicture.domain import BP_DOMAIN
+from search_api.api.beacon.routes import (
     get_beacon_service,
     get_snomed_term_service,
-    router,
+    make_beacon_router,
 )
 from search_api.api.exception_handlers import register_exception_handlers
 from search_api.api.models import FieldValue, IndexedFieldValueCounts
 from search_api.services.snomed_term import SnomedTermCacheService
 
 app = FastAPI()
-app.include_router(router)
+app.include_router(make_beacon_router(BP_DOMAIN))
 register_exception_handlers(app)
 
 

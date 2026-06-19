@@ -261,7 +261,11 @@ def register_term_cache(ontology_id: str, factory: TermCacheFactory) -> None:
 def create_term_caches(
     ontology_ids: Iterable[str],
 ) -> dict[str, OntologyTermCacheService]:
-    """Create a preferred term cache for each ontology id, keyed by that id.
+    """Create one preferred term cache per ontology id, keyed by that id.
+
+    The cache is per ontology. Callers map a field to its
+    ontology id and look the cache up here, so every field resolving against
+    the same ontology shares the one cache instance for that id.
 
     :raises SystemException: if no term-cache factory is registered for an id,
         e.g. when the provider module has not been imported.

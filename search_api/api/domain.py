@@ -15,6 +15,7 @@ from search_api.api.opensearch.models import (
     OpenSearchField,
 )
 from search_api.api.opensearch.services import create_search
+from search_api.services.ontology import get_ontology_id_by_field
 from search_api.services.ontology_term import (
     OntologyTermCacheService,
     create_term_caches,
@@ -56,13 +57,14 @@ class Domain:
         return [*self.non_filtering_fields, *self.filtering_terms]
 
     @property
+    def ontology_id_by_field(self) -> dict[str, str]:
+        """Map each ontology filtering term's id to its ontology id (e.g. ``SCTID``)."""
+        return get_ontology_id_by_field(self.filtering_terms)
+
+    @property
     def ontology_ids(self) -> set[str]:
         """Distinct ontology ids referenced by the filtering terms."""
-        return {
-            t.ontology.id
-            for t in self.filtering_terms
-            if t.type in ("ontology", "ontologyOrValue") and t.ontology is not None
-        }
+        return set(self.ontology_id_by_field.values())
 
 
 def make_lifespan(domain: Domain) -> Callable[[FastAPI], Any]:

@@ -10,7 +10,11 @@ from search_api.api.opensearch.document import build_document
 from search_api.api.opensearch.models import ExtractedDocument, OpenSearchFieldValue
 from search_api.database.document import get_modified_at, upsert_document
 from search_api.database.repository import get_cursor
-from search_api.services.ontology import OntologyService, get_ontology_service
+from search_api.services.ontology import (
+    OntologyService,
+    get_ontology_id_by_field,
+    get_ontology_service,
+)
 from search_api.services.ontology_term import OntologyTermCacheService
 
 logger = logging.getLogger(__name__)
@@ -21,9 +25,8 @@ def ontology_services_by_field(
 ) -> dict[str, OntologyService]:
     """Map each ontology field id to its provider, selected by ``ontology.id``."""
     return {
-        t.id: get_ontology_service(t.ontology.id)
-        for t in filtering_terms
-        if t.type in ("ontology", "ontologyOrValue") and t.ontology is not None
+        field_id: get_ontology_service(ontology_id)
+        for field_id, ontology_id in get_ontology_id_by_field(filtering_terms).items()
     }
 
 
@@ -49,10 +52,11 @@ class LoadService:
 
     def __init__(
         self,
-        term_cache: OntologyTermCacheService,
+        term_caches: dict[str, OntologyTermCacheService],
         filtering_terms: Sequence[BeaconFilteringTerm],
     ) -> None:
-        self._term_cache = term_cache
+        self._term_caches = term_caches
+        self._ontology_id_by_field = get_ontology_id_by_field(filtering_terms)
         self._ontology_by_field = ontology_services_by_field(filtering_terms)
 
     @staticmethod
@@ -65,11 +69,13 @@ class LoadService:
         Store extracted documents to the database.
 
         Documents that are not newer than what is already stored are skipped.
-        Preferred terms for ontology concepts are stored in the term cache.
+        Preferred terms for ontology concepts are stored in the term cache for
+        the concept's ontology.
 
         :param docs_iter: Iterator of extracted documents.
         """
-        await self._term_cache.load()
+        for cache in self._term_caches.values():
+            await cache.load()
 
         loaded = 0
         skipped = 0
@@ -93,7 +99,8 @@ class LoadService:
                 for field_id, concept_ids in concept_ids_from_values(
                     doc.values, self._ontology_by_field
                 ).items():
-                    await self._term_cache.cache_preferred_terms(
+                    ontology_id = self._ontology_id_by_field[field_id]
+                    await self._term_caches[ontology_id].cache_preferred_terms(
                         field_id, concept_ids, self._ontology_by_field[field_id]
                     )
 

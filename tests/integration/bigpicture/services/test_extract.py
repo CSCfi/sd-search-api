@@ -35,6 +35,14 @@ _DATASET_ID = "dataset_1"
 _IMAGE_IDS = ["image_1", "image_2"]
 
 
+def _mock_term_caches() -> dict:
+    """One mock term cache per ontology in play (keyed like the serving side)."""
+    return {
+        ontology_id: MagicMock(load=AsyncMock(), cache_preferred_terms=AsyncMock())
+        for ontology_id in BP_DOMAIN.ontology_ids
+    }
+
+
 @pytest_asyncio.fixture(autouse=True)
 async def delete_images():
     """Delete images before and after each test."""
@@ -55,9 +63,8 @@ async def delete_images():
 @pytest.mark.asyncio
 async def test_extract_and_load_fields_plain():
     """Plain XML files from the fixture directory are extracted and loaded into the database."""
-    term_cache = MagicMock(load=AsyncMock(), cache_preferred_terms=AsyncMock())
     await LoadService(
-        term_cache=term_cache,
+        term_caches=_mock_term_caches(),
         filtering_terms=BP_DOMAIN.filtering_terms,
     ).store_documents(extract_documents(root=str(_XML_DIR), single_dir=False))
 
@@ -94,9 +101,8 @@ async def test_extract_and_load_fields_c4gh(tmp_path):
                 outfile,
             )
 
-    term_cache = MagicMock(load=AsyncMock(), cache_preferred_terms=AsyncMock())
     await LoadService(
-        term_cache=term_cache,
+        term_caches=_mock_term_caches(),
         filtering_terms=BP_DOMAIN.filtering_terms,
     ).store_documents(
         extract_documents(

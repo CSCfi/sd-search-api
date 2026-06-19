@@ -17,7 +17,10 @@ from search_api.services.load import LoadService
 from search_api.services.sync import SyncService
 from search_api.database.repository import get_cursor
 from search_api.services.snomed import SnomedService
-from search_api.services.ontology_term import SnomedPostgresOntologyTermCacheService
+from search_api.services.ontology_term import (
+    SnomedPostgresOntologyTermCacheService,
+    create_term_caches,
+)
 
 
 def _index_path(domain: Domain) -> Path:
@@ -50,7 +53,9 @@ async def _load(domain: Domain, args: argparse.Namespace) -> None:
         return
 
     logging.info("Loading documents into the database.")
-    load_service = LoadService(SnomedPostgresOntologyTermCacheService(), domain.filtering_terms)
+    load_service = LoadService(
+        create_term_caches(domain.ontology_ids), domain.filtering_terms
+    )
     await load_service.store_documents(docs_iter)
 
     if args.sync:

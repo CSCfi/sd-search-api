@@ -35,6 +35,26 @@ class OntologyService(ABC):
         """Resolve, and optionally expand, a filter's values to concept IDs."""
 
 
+def get_ontology_id_by_field(
+    filtering_terms: Sequence[BeaconFilteringTerm],
+) -> dict[str, str]:
+    """Map each ontology filtering term's id to its ontology id (e.g. ``SCTID``).
+
+    The single source of truth for "which fields are ontology fields and which
+    ontology each resolves against".
+    :raises SystemException: if an ontology-typed term has no ontology configured.
+    """
+    result: dict[str, str] = {}
+    for term in filtering_terms:
+        if term.type in ("ontology", "ontologyOrValue"):
+            if term.ontology is None:
+                raise SystemException(
+                    f"Filtering term '{term.id}' has no ontology configured."
+                )
+            result[term.id] = term.ontology.id
+    return result
+
+
 _PROVIDERS: dict[str, "OntologyService"] = {}
 
 

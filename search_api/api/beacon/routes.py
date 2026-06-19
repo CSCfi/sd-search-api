@@ -10,7 +10,6 @@ from search_api.ai.services import AIService
 from search_api.api.beacon.models import (
     BeaconBooleanResponse,
     BeaconCountResponse,
-    BeaconFilteringTerm,
     BeaconFilteringTerms,
     BeaconFilteringTermsResponse,
     BeaconInfo,
@@ -55,22 +54,11 @@ def get_ontology_term_services(
     return request.app.state.ontology_term_services
 
 
-def _ontology_term_service(
-    filtering_term: BeaconFilteringTerm,
-    services: dict[str, OntologyTermCacheService],
-) -> OntologyTermCacheService:
-    """Resolve the term cache for an ontology filtering term by its ontology id."""
-    if filtering_term.ontology is None:
-        raise SystemException(
-            f"Filtering term '{filtering_term.id}' has no ontology configured."
-        )
-    return services[filtering_term.ontology.id]
-
-
 def make_beacon_router(domain: Domain) -> APIRouter:
     """Build the Beacon V2 router for a deployment domain."""
     router = APIRouter()
     result_sets_response_model = domain.result_sets_response_model
+    ontology_id_by_field = domain.ontology_id_by_field
 
     # The info and filtering_terms responses share the same beacon meta.
     meta = BeaconInfoMeta(
@@ -117,21 +105,11 @@ def make_beacon_router(domain: Domain) -> APIRouter:
         request: BeaconQueryRequest,
         beacon_service: BeaconService = Depends(get_beacon_service),
     ):
-        # Map ontology field IDs to their provider ID (enforced non-None by config validation).
-        ontology_provider_by_field: dict[str, str] = {}
-        for t in domain.filtering_terms:
-            if t.type in ("ontology", "ontologyOrValue"):
-                if t.ontology is None:
-                    raise SystemException(
-                        f"Filtering term '{t.id}' has no ontology configured."
-                    )
-                ontology_provider_by_field[t.id] = t.ontology.id
-
         ontology_filters = [
-            f for f in request.query.filters if f.id in ontology_provider_by_field
+            f for f in request.query.filters if f.id in ontology_id_by_field
         ]
         other_filters = [
-            f for f in request.query.filters if f.id not in ontology_provider_by_field
+            f for f in request.query.filters if f.id not in ontology_id_by_field
         ]
 
         # Resolve ontology filter values to concept IDs, and optionally expand to
@@ -141,7 +119,7 @@ def make_beacon_router(domain: Domain) -> APIRouter:
                 await asyncio.gather(
                     *[
                         get_ontology_service(
-                            ontology_provider_by_field[f.id]
+                            ontology_id_by_field[f.id]
                         ).prepare_ontology_filter(f, domain.filtering_terms)
                         for f in ontology_filters
                     ]
@@ -263,7 +241,7 @@ def make_beacon_router(domain: Domain) -> APIRouter:
 
         field_counts = await beacon_service.get_indexed_field_value_counts(field_id)
         counts = field_counts.counts
-        term_service = _ontology_term_service(filtering_term, ontology_term_services)
+        term_service = ontology_term_services[ontology_id_by_field[field_id]]
         preferred_terms = await term_service.get_preferred_terms(
             field_id, set(counts.keys())
         )
@@ -344,7 +322,7 @@ def make_beacon_router(domain: Domain) -> APIRouter:
                 sorted_values = sorted(counts.items(), key=lambda x: x[1], reverse=True)
             return [FieldValue(value=v, count=c) for v, c in sorted_values]
 
-        term_service = _ontology_term_service(filtering_term, ontology_term_services)
+        term_service = ontology_term_services[ontology_id_by_field[field_id]]
         preferred_terms = await term_service.get_preferred_terms(
             field_id, set(counts.keys())
         )

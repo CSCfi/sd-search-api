@@ -28,6 +28,7 @@ class BigpictureBeaconResultSetResult(BeaconResultSetResult):
     datasetId: str
     datasetTitle: str
     datasetDescription: str
+    datasetUrl: str | None
     totalImageCount: int
     matchingImageCount: int
     imageIds: list[str] = Field(default_factory=list)

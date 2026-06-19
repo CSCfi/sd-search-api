@@ -431,12 +431,27 @@ def get_matching_image_count(
     return 0
 
 
+def get_dataset_url(
+    response: BigpictureBeaconResultSetsResponse, dataset_id: str
+) -> str | None:
+    for rs in response.response.resultSet:
+        if rs.id == dataset_id:
+            return rs.results[0].datasetUrl
+    return None
+
+
 @pytest.mark.asyncio
 async def test_query_no_filters_returns_all_datasets(bp_opensearch_index, client):
     result = query(client)
     assert get_dataset_ids(result) == {DATASET_1, DATASET_2}
     assert get_matching_image_count(result, DATASET_1) == 3
     assert get_matching_image_count(result, DATASET_2) == 2
+    assert get_dataset_url(result, DATASET_1) == (
+        f"https://datasets.bigipicture.eu/datasets/{DATASET_1}.html"
+    )
+    assert get_dataset_url(result, DATASET_2) == (
+        f"https://datasets.bigipicture.eu/datasets/{DATASET_2}.html"
+    )
 
 
 # Species

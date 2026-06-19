@@ -51,6 +51,7 @@ def get_mock_query_result() -> BeaconResultSets[BigpictureBeaconResultSetResult]
                     datasetId="testDataset",
                     datasetTitle="testTitle",
                     datasetDescription="testDescription",
+                    datasetUrl="https://datasets.bigipicture.eu/datasets/testDataset.html",
                     totalImageCount=1,
                     matchingImageCount=1,
                     imageIds=["testImage"],
@@ -162,6 +163,9 @@ def test_query(client: TestClient):
     assert response.responseSummary.exists
     assert response.responseSummary.numTotalResults == 1
     assert response.response.resultSet[0].results[0].matchingImageCount == 1
+    assert response.response.resultSet[0].results[0].datasetUrl == (
+        "https://datasets.bigipicture.eu/datasets/testDataset.html"
+    )
 
 
 def test_info(client: TestClient):

@@ -234,7 +234,7 @@ async def generate_and_load_data(image_cnt: int, dataset_cnt: int) -> None:
                             animal_species=_generate_code_value(),
                             anatomical_site=_generate_code_value(),
                             fixation_type=_generate_code_value(),
-                            fixation_type_text=f"{_generate_code_value().code}",
+                            fixation_type_other=f"{_generate_code_value().code}",
                             block_preparation=_generate_code_value(),
                             specimen_type=_generate_code_value(),
                             age_at_extraction=_generate_age_at_extraction_range(),
@@ -243,9 +243,9 @@ async def generate_and_load_data(image_cnt: int, dataset_cnt: int) -> None:
                     stains={
                         BigpictureStainingFields(
                             staining_procedure=_generate_code_value(),
-                            staining_procedure_text=f"{_generate_code_value().code}",
+                            staining_procedure_other=f"{_generate_code_value().code}",
                             staining_substance=_generate_code_value(),
-                            staining_substance_text=f"{_generate_code_value().code}",
+                            staining_substance_other=f"{_generate_code_value().code}",
                             staining_target=f"{_generate_code_value().code}",
                         )
                     },

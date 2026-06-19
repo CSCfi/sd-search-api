@@ -1,10 +1,9 @@
 import os
+from pathlib import Path
 
 from pydantic import Field
 
 from search_api.api.beacon.models import (
-    SNOMED_ONTOLOGY_ID,
-    BeaconFilteringOntology,
     BeaconFilteringTermsResponse,
     BeaconFilteringTerms,
     BeaconInfoResponse,
@@ -14,11 +13,11 @@ from search_api.api.beacon.models import (
     BeaconSchema,
     BeaconInfo,
 )
+from search_api.api.config import load_fields_config
 from search_api.exceptions import SystemException
 from search_api.api.opensearch.models import (
     OpenSearchField,
     OpenSearchOntologyOrValue,
-    OpenSearchBeaconFilteringTerm,
 )
 
 
@@ -58,215 +57,61 @@ BP_SCHEMAS = [
     BP_BLOCK_SCHEMA,
     BP_STAINING_SCHEMA,
 ]
-BP_DATASET_SCOPE = [BP_DATASET_SCHEMA]
-BP_BIOLOGICAL_BEING_SCOPE = [BP_BIOLOGICAL_BEING_SCHEMA]
-BP_SPECIMEN_SCOPE = [BP_SPECIMEN_SCHEMA]
-BP_BLOCK_SCOPE = [BP_BLOCK_SCHEMA]
-BP_STAINING_SCOPE = [BP_STAINING_SCHEMA]
 
-BP_DATASET_TITLE_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
-    id="dataset_title",
-    type="text",
-    scopes=BP_DATASET_SCOPE,
-    label="Dataset title",
-    description="The title of the dataset",
-    opensearch_field="dataset_title",
-)
-BP_DATASET_DESCRIPTION_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
-    id="dataset_description",
-    type="text",
-    scopes=BP_DATASET_SCOPE,
-    label="Dataset description",
-    description="The description of the dataset",
-    opensearch_field="dataset_description",
-)
-BP_SPECIES_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
-    id="animal_species",
-    type="ontology",
-    ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
-    ontologyConcept="410607006",  # Organism (organism)
-    scopes=BP_BIOLOGICAL_BEING_SCOPE,
-    label="Biological species",
-    description="Species of the biological being",
-    opensearch_field="blocks.animal_species",
-)
-BP_SEX_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
-    id="sex",
-    type="controlledValue",
-    controlledValues=["Male", "Female", "Not-known", "Other"],
-    scopes=BP_BIOLOGICAL_BEING_SCOPE,
-    label="Sex",
-    description="The sex of the biological being",
-    opensearch_field="blocks.sex",
-)
-BP_ANATOMICAL_SITE_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
-    id="anatomical_site",
-    type="ontology",
-    ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
-    ontologyConcept="123037004",  # Body structure (body structure)
-    scopes=BP_SPECIMEN_SCOPE,
-    label="Anatomical site",
-    description="The anatomical site from which the specimen originated, typically at the organ level. "
-    "If no organ can be identified, use an equivalent anatomical region.",
-    opensearch_field="blocks.anatomical_site",
-    multivalued=True,
-)
-BP_FIXATION_TYPE_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
-    id="fixation_type",
-    type="ontologyOrValue",
-    ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
-    ontologyConcept="1388477003",  # Tissue fixative (product)
-    scopes=BP_SPECIMEN_SCOPE,
-    label="Fixation type",
-    description="The type of fixation used in the process of the creation of the specimen.",
-    opensearch_field=OpenSearchOntologyOrValue(
-        concept_value_field="blocks.fixation_type",
-        other_value_field="blocks.fixation_type_text",
-    ),
-)
-BP_SPECIMEN_TYPE_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
-    id="specimen_type",
-    type="ontology",
-    ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
-    ontologyConcept="91720002",  # Body substance (substance)
-    scopes=BP_SPECIMEN_SCOPE,
-    label="Specimen type",
-    description="The type of the specimen.",
-    opensearch_field="blocks.specimen_type",
-)
-BP_AGE_AT_EXTRACTION_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
-    id="age_at_extraction",
-    type="iso8601Range",
-    scopes=BP_SPECIMEN_SCOPE,
-    label="Age at extraction",
-    description="The age of the biological being at the time point of extraction of the specimen.",
-    opensearch_field="blocks.age_at_extraction",
-)
-BP_BLOCK_PREPARATION_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
-    id="block_preparation",
-    type="ontology",
-    ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
-    ontologyConcept=[
-        "311731000",  # Paraffin wax (substance)
-        "433469005",  # Frozen section embedding medium (substance)
-        "61088005",  # Plastic (substance)
-        "10249006",  # Agar (substance)
-        "65345002",  # Epoxy resin (substance)
-        "261712009",  # Acrylic polymer (substance)
-    ],
-    scopes=BP_BLOCK_SCOPE,
-    label="Block preparation",
-    description="The preservation technique used.",
-    opensearch_field="blocks.block_preparation",
-)
-BP_STAINING_TARGET_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
-    id="staining_target",
-    type="keyword",
-    scopes=BP_STAINING_SCOPE,
-    label="Staining target",
-    description="The specific target of the stain",
-    opensearch_field="stains.staining_target",
-)
-BP_STAINING_PROCEDURE_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
-    id="staining_procedure",
-    type="ontologyOrValue",
-    ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
-    ontologyConcept="127790008",  # Staining method (procedure)
-    scopes=BP_STAINING_SCOPE,
-    label="Staining procedure",
-    description="The name of the staining procedure that was performed to stain the slide",
-    opensearch_field=OpenSearchOntologyOrValue(
-        concept_value_field="stains.staining_procedure",
-        other_value_field="stains.staining_procedure_text",
-    ),
-)
-BP_STAINING_SUBSTANCE_FILTERING_TERM = OpenSearchBeaconFilteringTerm(
-    id="staining_substance",
-    type="ontologyOrValue",
-    ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID),
-    ontologyConcept="397165007",  # Stain
-    scopes=BP_STAINING_SCOPE,
-    label="Staining substance",
-    description="The staining substance that binds to parts of the tissues of the slide",
-    opensearch_field=OpenSearchOntologyOrValue(
-        concept_value_field="stains.staining_substance",
-        other_value_field="stains.staining_substance_text",
-    ),
-)
+# Filtering terms and index-only fields are declared in fields.yaml and validated
+# on load. See search_api.api.config.
+_FIELDS_CONFIG_PATH = Path(__file__).resolve().parent / "fields.yaml"
+_fields_config = load_fields_config(_FIELDS_CONFIG_PATH)
 
-BP_ONTOLOGY_FILTERING_TERMS = [
-    BP_SPECIES_FILTERING_TERM,
-    BP_ANATOMICAL_SITE_FILTERING_TERM,
-    BP_FIXATION_TYPE_FILTERING_TERM,
-    BP_SPECIMEN_TYPE_FILTERING_TERM,
-    BP_BLOCK_PREPARATION_FILTERING_TERM,
-    BP_STAINING_PROCEDURE_FILTERING_TERM,
-    BP_STAINING_SUBSTANCE_FILTERING_TERM,
-]
+BP_FILTERING_TERMS = _fields_config.filtering_terms
+BP_NON_FILTERING_FIELDS = _fields_config.non_filtering_fields
 
-BP_FILTERING_TERMS = [
-    BP_DATASET_TITLE_FILTERING_TERM,
-    BP_DATASET_DESCRIPTION_FILTERING_TERM,
-    *BP_ONTOLOGY_FILTERING_TERMS,
-    BP_SEX_FILTERING_TERM,
-    BP_AGE_AT_EXTRACTION_FILTERING_TERM,
-    BP_STAINING_TARGET_FILTERING_TERM,
-]
-
-# Fields that are indexed in OpenSearch but are not filterable, so they have no
-# filtering term.
-BP_NON_FILTERING_FIELDS: list[OpenSearchField] = [
-    OpenSearchField(id="image_id", type="keyword", opensearch_field="image_id"),
-    OpenSearchField(id="dataset_id", type="keyword", opensearch_field="dataset_id"),
-    OpenSearchField(
-        id="dataset_image_cnt", type="integer", opensearch_field="dataset_image_cnt"
-    ),
-    OpenSearchField(
-        id="dataset_short_name", type="text", opensearch_field="dataset_short_name"
-    ),
-]
+# Filtering term lookup by id.
+BP_FILTERING_TERM_BY_ID = {term.id: term for term in BP_FILTERING_TERMS}
 
 
 def _document_fields() -> dict[str, OpenSearchField]:
-    """Returns a dict of OpenSearch fields keyed by field name."""
+    """Returns a dict of OpenSearch document fields keyed by field name (the id)."""
 
-    def field_name(path: str) -> str:
+    def leaf(path: str) -> str:
         return path.rsplit(".", 1)[-1]
+
+    def group(path: str) -> str | None:
+        prefix, _, _ = path.rpartition(".")
+        return prefix or None
 
     fields: dict[str, OpenSearchField] = {}
 
-    def add_field(name: str, field: OpenSearchField) -> None:
-        if name in fields:
+    def add_field(field: OpenSearchField) -> None:
+        if field.id in fields:
             raise SystemException(
-                f"Field name {name!r} is used by both {fields[name].id!r} and {field.id!r}"
+                f"Document field {field.id!r} is defined by more than one OpenSearch field."
             )
-        fields[name] = field
+        fields[field.id] = field
 
     for field in BP_NON_FILTERING_FIELDS:
-        add_field(field_name(field.opensearch_field), field)
+        add_field(field)
 
     for term in BP_FILTERING_TERMS:
         osf = term.opensearch_field
         if isinstance(osf, OpenSearchOntologyOrValue):
             # Concept ID and free text are stored in separate fields.
             add_field(
-                field_name(osf.concept_value_field),
                 OpenSearchField(
-                    id=field_name(osf.concept_value_field),
+                    id=leaf(osf.concept_value_field),
                     type="ontology",
-                    opensearch_field=osf.concept_value_field,
-                ),
+                    group=group(osf.concept_value_field),
+                )
             )
             add_field(
-                field_name(osf.other_value_field),
                 OpenSearchField(
-                    id=field_name(osf.other_value_field),
+                    id=leaf(osf.other_value_field),
                     type="keyword",
-                    opensearch_field=osf.other_value_field,
-                ),
+                    group=group(osf.other_value_field),
+                )
             )
         else:
-            add_field(term.id, term)
+            add_field(term)
     return fields
 
 

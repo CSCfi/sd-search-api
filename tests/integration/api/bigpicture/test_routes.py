@@ -65,7 +65,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
                 "sex": "Female",
                 "anatomical_site": [BREAST_CONCEPT_ID],
                 "fixation_type": FFPE_CONCEPT_ID,
-                "fixation_type_text": "Formalin",
+                "fixation_type_other": "Formalin",
                 "block_preparation": PARAFFIN_CONCEPT_ID,
                 "specimen_type": SPECIMEN_TYPE_CONCEPT_ID,
                 "age_at_extraction": {"gte": 16425, "lte": 18250},
@@ -74,7 +74,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
         "stains": [
             {
                 "staining_procedure": HE_CONCEPT_ID,
-                "staining_procedure_text": "Haematoxylin and eosin stain",
+                "staining_procedure_other": "Haematoxylin and eosin stain",
             }
         ],
     },
@@ -91,7 +91,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
                 "sex": "Female",
                 "anatomical_site": [BREAST_CONCEPT_ID],
                 "fixation_type": FFPE_CONCEPT_ID,
-                "fixation_type_text": "Formalin",
+                "fixation_type_other": "Formalin",
                 "block_preparation": PARAFFIN_CONCEPT_ID,
                 "specimen_type": SPECIMEN_TYPE_CONCEPT_ID,
                 "age_at_extraction": {"gte": 20075, "lte": 21900},
@@ -100,9 +100,9 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
         "stains": [
             {
                 "staining_procedure": IHC_CONCEPT_ID,
-                "staining_procedure_text": "Immunohistochemical staining",
+                "staining_procedure_other": "Immunohistochemical staining",
                 "staining_substance": "antibody",
-                "staining_substance_text": "antibody",
+                "staining_substance_other": "antibody",
                 "staining_target": "pan Cytokeratin",
             }
         ],
@@ -120,7 +120,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
                 "sex": "Male",
                 "anatomical_site": [PELVIS_CONCEPT_ID, KIDNEY_CONCEPT_ID],
                 "fixation_type": FFPE_CONCEPT_ID,
-                "fixation_type_text": "Formalin",
+                "fixation_type_other": "Formalin",
                 "block_preparation": PARAFFIN_CONCEPT_ID,
                 "specimen_type": SPECIMEN_TYPE_CONCEPT_ID,
                 "age_at_extraction": {"gte": 23725, "lte": 25550},
@@ -129,7 +129,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
         "stains": [
             {
                 "staining_procedure": HE_CONCEPT_ID,
-                "staining_procedure_text": "Haematoxylin and eosin stain",
+                "staining_procedure_other": "Haematoxylin and eosin stain",
             }
         ],
     },
@@ -146,7 +146,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
                 "sex": "Male",
                 "anatomical_site": [KIDNEY_CONCEPT_ID],
                 "fixation_type": FROZEN_FIX_CONCEPT_ID,
-                "fixation_type_text": "Custom fix",
+                "fixation_type_other": "Custom fix",
                 "block_preparation": FROZEN_PREP_CONCEPT_ID,
                 "specimen_type": SPECIMEN_TYPE_CONCEPT_ID,
                 "age_at_extraction": {"gte": 0, "lte": 365},
@@ -155,7 +155,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
         "stains": [
             {
                 "staining_procedure": HE_CONCEPT_ID,
-                "staining_procedure_text": "Haematoxylin and eosin stain",
+                "staining_procedure_other": "Haematoxylin and eosin stain",
             }
         ],
     },
@@ -172,7 +172,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
                 "sex": "Female",
                 "anatomical_site": [KIDNEY_CONCEPT_ID],
                 "fixation_type": FFPE_CONCEPT_ID,
-                "fixation_type_text": "Formalin",
+                "fixation_type_other": "Formalin",
                 "block_preparation": PARAFFIN_CONCEPT_ID,
                 "specimen_type": SPECIMEN_TYPE_CONCEPT_ID,
                 "age_at_extraction": {"gte": 0, "lte": 365},
@@ -181,9 +181,9 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
         "stains": [
             {
                 "staining_procedure": ISH_CONCEPT_ID,
-                "staining_procedure_text": "In situ hybridization",
+                "staining_procedure_other": "In situ hybridization",
                 "staining_substance": "Double-stranded DNA",
-                "staining_substance_text": "Double-stranded DNA",
+                "staining_substance_other": "Double-stranded DNA",
             }
         ],
     },

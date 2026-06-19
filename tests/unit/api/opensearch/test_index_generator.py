@@ -3,19 +3,18 @@ from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorSe
 from search_api.api.opensearch.models import (
     OpenSearchBeaconFilteringTerm,
     OpenSearchField,
-    OpenSearchOntologyOrValue,
 )
 
 
-def _filtering_term(field_id, type_, opensearch_field) -> OpenSearchBeaconFilteringTerm:
+def _filtering_term(field_id, type_, group=None) -> OpenSearchBeaconFilteringTerm:
     is_ontology = type_ in ("ontology", "ontologyOrValue")
     return OpenSearchBeaconFilteringTerm(
         id=field_id,
         type=type_,
+        group=group,
         scopes=["test"],
         label=field_id,
         description=field_id,
-        opensearch_field=opensearch_field,
         ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID)
         if is_ontology
         else None,
@@ -30,14 +29,12 @@ def _generate(*fields: OpenSearchField) -> dict:
 
 
 def test_generate_top_level_field_mapped_at_root():
-    props = _generate(_filtering_term("dataset_title", "text", "dataset_title"))
+    props = _generate(_filtering_term("dataset_title", "text"))
     assert props["dataset_title"] == {"type": "text", "analyzer": "english_text"}
 
 
 def test_generate_nested_field_wrapped_in_nested_container():
-    props = _generate(
-        _filtering_term("animal_species", "ontology", "blocks.animal_species")
-    )
+    props = _generate(_filtering_term("animal_species", "ontology", "blocks"))
     assert props["blocks"] == {
         "type": "nested",
         "properties": {"animal_species": {"type": "keyword"}},
@@ -46,16 +43,14 @@ def test_generate_nested_field_wrapped_in_nested_container():
 
 def test_generate_multiple_nested_fields_share_container():
     props = _generate(
-        _filtering_term("animal_species", "ontology", "blocks.animal_species"),
-        _filtering_term("sex", "controlledValue", "blocks.sex"),
+        _filtering_term("animal_species", "ontology", "blocks"),
+        _filtering_term("sex", "controlledValue", "blocks"),
     )
     assert set(props["blocks"]["properties"]) == {"animal_species", "sex"}
 
 
 def test_generate_deeply_nested_field_creates_a_container_per_level():
-    props = _generate(
-        _filtering_term("deep", "keyword", "blocks.specimen.anatomical_site")
-    )
+    props = _generate(_filtering_term("anatomical_site", "keyword", "blocks.specimen"))
     assert props["blocks"] == {
         "type": "nested",
         "properties": {
@@ -69,9 +64,9 @@ def test_generate_deeply_nested_field_creates_a_container_per_level():
 
 def test_generate_nested_fields_at_different_depths_share_containers():
     props = _generate(
-        _filtering_term("site", "keyword", "blocks.specimen.anatomical_site"),
-        _filtering_term("fixation", "keyword", "blocks.specimen.fixation_type"),
-        _filtering_term("species", "ontology", "blocks.animal_species"),
+        _filtering_term("anatomical_site", "keyword", "blocks.specimen"),
+        _filtering_term("fixation_type", "keyword", "blocks.specimen"),
+        _filtering_term("animal_species", "ontology", "blocks"),
     )
     blocks = props["blocks"]["properties"]
     assert set(blocks) == {"specimen", "animal_species"}
@@ -83,11 +78,11 @@ def test_generate_nested_fields_at_different_depths_share_containers():
 
 def test_generate_type_to_opensearch_mapping():
     props = _generate(
-        _filtering_term("kw", "keyword", "stains.kw"),
-        _filtering_term("cv", "controlledValue", "stains.cv"),
-        _filtering_term("onto", "ontology", "stains.onto"),
-        _filtering_term("age", "iso8601Range", "stains.age"),
-        OpenSearchField(id="cnt", type="integer", opensearch_field="cnt"),
+        _filtering_term("kw", "keyword", "stains"),
+        _filtering_term("cv", "controlledValue", "stains"),
+        _filtering_term("onto", "ontology", "stains"),
+        _filtering_term("age", "iso8601Range", "stains"),
+        OpenSearchField(id="cnt", type="integer"),
     )
     fields = props["stains"]["properties"]
     assert fields["kw"] == {"type": "keyword"}
@@ -98,36 +93,23 @@ def test_generate_type_to_opensearch_mapping():
 
 
 def test_generate_ontology_or_value_expands_to_two_keyword_fields():
-    props = _generate(
-        _filtering_term(
-            "fixation_type",
-            "ontologyOrValue",
-            OpenSearchOntologyOrValue(
-                concept_value_field="blocks.fixation_type",
-                other_value_field="blocks.fixation_type_text",
-            ),
-        )
-    )
+    props = _generate(_filtering_term("fixation_type", "ontologyOrValue", "blocks"))
     assert props["blocks"]["properties"] == {
         "fixation_type": {"type": "keyword"},
-        "fixation_type_text": {"type": "keyword"},
+        "fixation_type_other": {"type": "keyword"},
     }
 
 
 def test_generate_non_filtering_field_included():
     props = _generate(
-        _filtering_term("dataset_title", "text", "dataset_title"),
-        OpenSearchField(id="image_id", type="keyword", opensearch_field="image_id"),
+        _filtering_term("dataset_title", "text"),
+        OpenSearchField(id="image_id", type="keyword"),
     )
     assert props["image_id"] == {"type": "keyword"}
 
 
 def test_generate_non_filtering_field_nested():
-    props = _generate(
-        OpenSearchField(
-            id="image_id", type="keyword", opensearch_field="blocks.image_id"
-        ),
-    )
+    props = _generate(OpenSearchField(id="image_id", type="keyword", group="blocks"))
     assert props["blocks"] == {
         "type": "nested",
         "properties": {"image_id": {"type": "keyword"}},

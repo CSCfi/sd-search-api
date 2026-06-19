@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Generic, Literal, Sequence, TypeVar
 
 BEACON_API_VERSION = "v2.0"
@@ -163,6 +163,9 @@ class BeaconInfoMeta(BaseModel):
 
 class BeaconFilteringOntology(BaseModel):
     # Beacon V2 ontology filtering extension.
+
+    # Reject unknown keys so config errors surface.
+    model_config = ConfigDict(extra="forbid")
 
     id: str
     rootTerms: list[str] | None = None

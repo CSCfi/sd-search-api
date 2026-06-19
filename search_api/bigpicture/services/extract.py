@@ -46,7 +46,7 @@ class BigpictureSampleSpecimenFields(BaseModel):
         default_factory=frozenset
     )
     fixation_type: BigpictureCodeAttributeValue | None = None
-    fixation_type_text: str | None = None  # Free text alternative
+    fixation_type_other: str | None = None  # Free text alternative
     specimen_type: BigpictureCodeAttributeValue | None = None
     age_at_extraction: tuple[str, str] | None = None
 
@@ -82,9 +82,9 @@ class BigpictureStainingFields(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     staining_procedure: BigpictureCodeAttributeValue | None = None
-    staining_procedure_text: str | None = None  # Free text alternative
+    staining_procedure_other: str | None = None  # Free text alternative
     staining_substance: BigpictureCodeAttributeValue | None = None
-    staining_substance_text: str | None = None  # Free text alternative
+    staining_substance_other: str | None = None  # Free text alternative
     staining_target: str | None = None
 
 
@@ -500,7 +500,7 @@ def _extract_sample_specimen_fields(xml: ElementTree) -> BigpictureSampleSpecime
     return BigpictureSampleSpecimenFields(
         anatomical_site=_extract_anatomical_sites(xml),
         fixation_type=fixation_type,
-        fixation_type_text=fixation_type_text,
+        fixation_type_other=fixation_type_text,
         specimen_type=_extract_code_attribute_value(xml, "specimen_type"),
         age_at_extraction=_extract_age_at_extraction_range(xml),
     )
@@ -514,7 +514,7 @@ def _extract_staining_fields(xml: ElementTree) -> list[BigpictureStainingFields]
                 staining_procedure=_extract_code_attribute_value(
                     procedure_xml, "staining_procedure", is_attributes=False
                 ),
-                staining_procedure_text=_extract_string_attribute_value(
+                staining_procedure_other=_extract_string_attribute_value(
                     procedure_xml, "staining_procedure", is_attributes=False
                 ),
             )
@@ -544,7 +544,7 @@ def _extract_staining_fields(xml: ElementTree) -> list[BigpictureStainingFields]
                 staining_procedure=_extract_code_attribute_value(
                     stain_xml, "staining_procedure", is_attributes=False
                 ),
-                staining_procedure_text=_extract_string_attribute_value(
+                staining_procedure_other=_extract_string_attribute_value(
                     stain_xml, "staining_procedure", is_attributes=False
                 ),
                 staining_substance=_extract_code_attribute_value(
@@ -552,7 +552,7 @@ def _extract_staining_fields(xml: ElementTree) -> list[BigpictureStainingFields]
                 )
                 if is_chemical_stain
                 else None,
-                staining_substance_text=_extract_string_attribute_value(
+                staining_substance_other=_extract_string_attribute_value(
                     stain_xml, "staining_compound", is_attributes=False
                 )
                 if is_chemical_stain

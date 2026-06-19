@@ -8,16 +8,24 @@ from search_api.api.bigpicture.domain import BP_DOMAIN
 from search_api.api.domain import Domain, make_lifespan
 from search_api.api.exception_handlers import register_exception_handlers
 from search_api.conf import admin_config, deployment_config
+from search_api.exceptions import SystemException
 
 # uvicorn search_api.main:app --reload
 
-# A deployment is associated with a domain.
+# Deployment registry: maps a DEPLOYMENT_TYPE to its domain. Register new
+# deployments here.
 _DOMAINS: dict[str, Domain] = {
     "Bigpicture": BP_DOMAIN,
 }
 
 _deployment = deployment_config()
-_domain = _DOMAINS[_deployment.DEPLOYMENT_TYPE]
+try:
+    _domain = _DOMAINS[_deployment.DEPLOYMENT_TYPE]
+except KeyError:
+    raise SystemException(
+        f"Unknown deployment type {_deployment.DEPLOYMENT_TYPE!r}. "
+        f"Registered deployments: {', '.join(sorted(_DOMAINS))}."
+    )
 
 app = FastAPI(
     title=f"CSC {_domain.name.capitalize()} Beacon",

@@ -7,8 +7,9 @@ from pydantic_settings import BaseSettings
 class DeploymentConfiguration(BaseSettings):
     """Deployment configuration."""
 
-    DEPLOYMENT_TYPE: Literal["Bigpicture"] = Field(
-        description="Deployment type. Determines which router and database are used."
+    DEPLOYMENT_TYPE: str = Field(
+        description="Deployment name. Must match a domain registered in the deployment "
+        "registry. Determines which fields are indexed."
     )
     DEPLOYMENT_ENV: Literal["prod", "test", "dev", "staging"] = Field(
         default="dev",

@@ -49,13 +49,13 @@ def test_extract_fields():
     assert block["age_at_extraction"] == {"gte": 14600, "lte": 14965}
     stain = payload["stains"][0]
     assert stain["staining_procedure"] == "6"
-    assert stain["staining_procedure_text"] == "test6"
+    assert stain["staining_procedure_other"] == "test6"
     assert "staining_target" not in stain
 
     payload2 = build_document(docs["image_2"].values)
     stain2 = payload2["stains"][0]
     assert stain2["staining_procedure"] == "7"
-    assert stain2["staining_procedure_text"] == "test7"
+    assert stain2["staining_procedure_other"] == "test7"
     assert stain2["staining_target"] == "pan Cytokeratin"
 
 

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from search_api.api.beacon.models import BeaconFilteringTerm
 
@@ -16,9 +16,11 @@ OpenSearchFieldType = Literal[
     "integer",
 ]
 
+ONTOLOGY_OTHER_VALUE_FIELD_SUFFIX = "_other"
+
 
 class OpenSearchOntologyOrValue(BaseModel):
-    """OpenSearch field mapping for ontologyOrValue filtering terms.
+    """The two physical OpenSearch fields backing an ontologyOrValue term.
 
     Concept IDs are routed to ``concept_value_field``
     while other values are routed to ``other_value_field``.
@@ -29,31 +31,48 @@ class OpenSearchOntologyOrValue(BaseModel):
 
 
 class OpenSearchField(BaseModel):
-    """A field that is indexed in OpenSearch and searchable."""
+    """A field that is indexed in OpenSearch and searchable.
+
+    The indexed path is ``<group>.<id>`` when ``group`` names a nested container
+    (e.g. ``blocks`` ), or just ``<id>`` for a top-level field.
+    """
+
+    # Reject unknown keys so config typos surface as errors.
+    model_config = ConfigDict(extra="forbid")
 
     id: str
     type: OpenSearchFieldType
 
-    # Excluded from /filtering_terms responses.
-    opensearch_field: str = Field(exclude=True)
+    # Excluded from responses.
+    group: str | None = Field(default=None, exclude=True)
     multivalued: bool = Field(default=False, exclude=True)
+
+    @property
+    def opensearch_field(self) -> str:
+        """The full indexed path: ``<group>.<id>``, or ``id`` at the top level."""
+        return f"{self.group}.{self.id}" if self.group else self.id
 
 
 class OpenSearchBeaconFilteringTerm(BeaconFilteringTerm, OpenSearchField):
     """Beacon filtering term."""
 
-    # Excluded from /filtering_terms responses.
-    opensearch_field: str | OpenSearchOntologyOrValue = Field(exclude=True)  # type: ignore[assignment]
+    # Reject unknown keys so config typos surface as errors.
+    model_config = ConfigDict(extra="forbid")
+
+    @property
+    def opensearch_field(self) -> str | OpenSearchOntologyOrValue:  # type: ignore[override]
+        # ontologyOrValue terms span two physical fields: the concept-id field
+        # (<group>.<id>) and the free-text field (<group>.<id>_other).
+        base = super().opensearch_field
+        if self.type == "ontologyOrValue":
+            return OpenSearchOntologyOrValue(
+                concept_value_field=base,
+                other_value_field=f"{base}{ONTOLOGY_OTHER_VALUE_FIELD_SUFFIX}",
+            )
+        return base
 
     @model_validator(mode="after")
-    def validate_opensearch_field(self) -> "OpenSearchBeaconFilteringTerm":
-        if self.type == "ontologyOrValue" and not isinstance(
-            self.opensearch_field, OpenSearchOntologyOrValue
-        ):
-            raise ValueError(
-                f"Field '{self.id}' has type 'ontologyOrValue' so opensearch_field "
-                f"type must be OpenSearchOntologyOrValue."
-            )
+    def _validate_ontology_or_value(self) -> "OpenSearchBeaconFilteringTerm":
         if self.type == "ontologyOrValue" and self.multivalued:
             raise ValueError(
                 f"Field '{self.id}' has type 'ontologyOrValue' which does not support multivalued=True."

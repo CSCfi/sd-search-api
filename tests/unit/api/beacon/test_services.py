@@ -7,6 +7,7 @@ from search_api.api.beacon.services import (
     build_opensearch_query,
 )
 from search_api.api.bigpicture.models import BP_FILTERING_TERMS
+from search_api.api.opensearch.models import ONTOLOGY_OTHER_VALUE_FIELD_SUFFIX
 
 
 def get_term(field_id: str):
@@ -90,7 +91,7 @@ def test_build_opensearch_query_ontology_or_value_concept_ids_only():
     """ontologyOrValue with concept IDs only."""
     term = get_term(
         "fixation_type"
-    )  # maps to blocks.fixation_type + blocks.fixation_type_text
+    )  # maps to blocks.fixation_type + blocks.fixation_type_other
     result = build_opensearch_query(term, ["123", "456"])
     assert result == {
         "bool": {
@@ -104,13 +105,19 @@ def test_build_opensearch_query_ontology_or_value_mixed_values():
     """ontologyOrValue with mixed concept IDs and other values."""
     term = get_term(
         "fixation_type"
-    )  # maps to blocks.fixation_type + blocks.fixation_type_text
+    )  # maps to blocks.fixation_type + blocks.fixation_type_other
     result = build_opensearch_query(term, ["123", "Formalin"])
     assert result == {
         "bool": {
             "should": [
                 {"terms": {"blocks.fixation_type": ["123"]}},
-                {"terms": {"blocks.fixation_type_text": ["Formalin"]}},
+                {
+                    "terms": {
+                        f"blocks.fixation_type{ONTOLOGY_OTHER_VALUE_FIELD_SUFFIX}": [
+                            "Formalin"
+                        ]
+                    }
+                },
             ],
             "minimum_should_match": 1,
         }
@@ -121,12 +128,19 @@ def test_build_opensearch_query_ontology_or_value_free_text_only():
     """ontologyOrValue with non-concept IDs only."""
     term = get_term(
         "fixation_type"
-    )  # maps to blocks.fixation_type + blocks.fixation_type_text
+    )  # maps to blocks.fixation_type + blocks.fixation_type_other
     result = build_opensearch_query(term, ["Formalin", "Glutaraldehyde"])
     assert result == {
         "bool": {
             "should": [
-                {"terms": {"blocks.fixation_type_text": ["Formalin", "Glutaraldehyde"]}}
+                {
+                    "terms": {
+                        f"blocks.fixation_type{ONTOLOGY_OTHER_VALUE_FIELD_SUFFIX}": [
+                            "Formalin",
+                            "Glutaraldehyde",
+                        ]
+                    }
+                }
             ],
             "minimum_should_match": 1,
         }

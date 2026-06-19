@@ -1,7 +1,7 @@
 """Integration tests for the SNOMED CT service."""
 
 import pytest
-from search_api.api.bigpicture.models import BP_SPECIES_FILTERING_TERM
+from search_api.api.bigpicture.models import BP_FILTERING_TERM_BY_ID
 from search_api.services.snomed import SnomedService
 
 
@@ -10,7 +10,7 @@ async def test_find_concept():
     service = SnomedService()
     for term in ("human", "Homo sapiens", "337915000"):
         concept = await service.find_concept(
-            term, ecl=BP_SPECIES_FILTERING_TERM.snomed_ecl
+            term, ecl=BP_FILTERING_TERM_BY_ID["animal_species"].snomed_ecl
         )
         assert concept is not None
         assert concept.concept_id == "337915000"

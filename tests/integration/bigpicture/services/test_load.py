@@ -48,7 +48,7 @@ async def test_load_and_sync_fields():
                 animal_species=get_code("1"),
                 anatomical_site=frozenset([get_code("2")]),
                 fixation_type=get_code("3"),
-                fixation_type_text="test_fixation",
+                fixation_type_other="test_fixation",
                 block_preparation=get_code("4"),
                 specimen_type=get_code("5"),
                 age_at_extraction=("P10Y", "P20Y"),
@@ -57,9 +57,9 @@ async def test_load_and_sync_fields():
         stains={
             BigpictureStainingFields(
                 staining_procedure=get_code("11"),
-                staining_procedure_text="test_procedure",
+                staining_procedure_other="test_procedure",
                 staining_substance=get_code("12"),
-                staining_substance_text="test_compound",
+                staining_substance_other="test_compound",
                 staining_target="test_target",
             )
         },

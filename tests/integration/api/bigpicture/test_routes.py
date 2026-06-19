@@ -18,7 +18,7 @@ from search_api.api.bigpicture.models import (
 )
 from search_api.api.models import FieldValue
 from search_api.database.repository import get_connection
-from search_api.services.snomed_term import SNOMED_TABLE
+from search_api.services.ontology_term import SNOMED_TABLE
 
 os.environ.setdefault("POSTGRES_DB", os.environ["BP_POSTGRES_DB"])
 os.environ.setdefault("POSTGRES_PORT", os.environ["BP_POSTGRES_PORT"])

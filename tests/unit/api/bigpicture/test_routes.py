@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from search_api.api.beacon.models import (
+    SNOMED_ONTOLOGY_ID,
     BeaconQuery,
     BeaconQueryRequest,
     BeaconBooleanResponse,
@@ -30,12 +31,12 @@ from search_api.api.bigpicture.models import (
 from search_api.api.bigpicture.domain import BP_DOMAIN
 from search_api.api.beacon.routes import (
     get_beacon_service,
-    get_snomed_term_service,
+    get_ontology_term_services,
     make_beacon_router,
 )
 from search_api.api.exception_handlers import register_exception_handlers
 from search_api.api.models import FieldValue, IndexedFieldValueCounts
-from search_api.services.snomed_term import SnomedTermCacheService
+from search_api.services.ontology_term import OntologyTermCacheService
 
 app = FastAPI()
 app.include_router(make_beacon_router(BP_DOMAIN))
@@ -101,7 +102,7 @@ PREFERRED_TERMS: dict[str, str] = {
 }
 
 
-class MockSnomedTermCacheService(SnomedTermCacheService):
+class MockOntologyTermCacheService(OntologyTermCacheService):
     @override
     async def load(self) -> None:
         pass
@@ -191,7 +192,9 @@ def suggestions_values_client():
     app.dependency_overrides[get_beacon_service] = lambda: (
         MockSuggestionsAndValuesBeaconService(BP_FILTERING_TERMS)
     )
-    app.dependency_overrides[get_snomed_term_service] = MockSnomedTermCacheService
+    app.dependency_overrides[get_ontology_term_services] = lambda: {
+        SNOMED_ONTOLOGY_ID: MockOntologyTermCacheService()
+    }
     yield TestClient(app)
     app.dependency_overrides.clear()
     app.dependency_overrides.update(saved)
@@ -384,7 +387,7 @@ def test_filtering_term_values_sorted_by_count(suggestions_values_client):
     assert counts == sorted(counts, reverse=True)
 
 
-class OnlyHomoSapiensCacheService(MockSnomedTermCacheService):
+class OnlyHomoSapiensCacheService(MockOntologyTermCacheService):
     """Returns only Homo sapiens as valid for animal_species."""
 
     @override
@@ -401,7 +404,9 @@ def test_filtering_term_values_excludes_unexpected():
     app.dependency_overrides[get_beacon_service] = lambda: (
         MockSuggestionsAndValuesBeaconService(BP_FILTERING_TERMS)
     )
-    app.dependency_overrides[get_snomed_term_service] = OnlyHomoSapiensCacheService
+    app.dependency_overrides[get_ontology_term_services] = lambda: {
+        SNOMED_ONTOLOGY_ID: OnlyHomoSapiensCacheService()
+    }
     try:
         resp = TestClient(app).get("/filtering_terms/animal_species/values")
     finally:
@@ -419,7 +424,9 @@ def test_filtering_term_suggestions_excludes_unexpected():
     app.dependency_overrides[get_beacon_service] = lambda: (
         MockSuggestionsAndValuesBeaconService(BP_FILTERING_TERMS)
     )
-    app.dependency_overrides[get_snomed_term_service] = OnlyHomoSapiensCacheService
+    app.dependency_overrides[get_ontology_term_services] = lambda: {
+        SNOMED_ONTOLOGY_ID: OnlyHomoSapiensCacheService()
+    }
     try:
         resp = TestClient(app).get(
             "/filtering_terms/animal_species/suggestions", params={"term": "su"}

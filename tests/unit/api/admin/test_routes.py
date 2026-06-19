@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from search_api.api.admin.routes import router
+from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
 from search_api.api.bigpicture.models import BP_FILTERING_TERMS
 from search_api.api.exception_handlers import register_exception_handlers
 from search_api.api.models import FieldValue, IndexedFieldValueCounts
@@ -28,7 +29,7 @@ def snomed_term_service():
     service.load = AsyncMock()
     service.refresh = AsyncMock()
     service.get_preferred_terms = AsyncMock(return_value={})
-    app.state.snomed_term_service = service
+    app.state.ontology_term_services = {SNOMED_ONTOLOGY_ID: service}
     return service
 
 
@@ -86,15 +87,13 @@ def test_refresh_requires_auth_header(snomed_term_service, client):
     assert resp.status_code == 401
 
 
-def test_invalid_concepts_unknown_field(beacon_service, snomed_term_service, client):
+def test_invalid_concepts_unknown_field(beacon_service, client):
     resp = client.get("/admin/snomed/fields/unknown/invalid_concepts", headers=_auth())
     assert resp.status_code == 400
     assert resp.json()["detail"] == "Unknown field: 'unknown'."
 
 
-def test_invalid_concepts_non_ontology_field(
-    beacon_service, snomed_term_service, client
-):
+def test_invalid_concepts_non_ontology_field(beacon_service, client):
     resp = client.get(
         "/admin/snomed/fields/dataset_title/invalid_concepts", headers=_auth()
     )
@@ -104,7 +103,7 @@ def test_invalid_concepts_non_ontology_field(
     )
 
 
-def test_invalid_concepts(beacon_service, snomed_term_service, client):
+def test_invalid_concepts(beacon_service, client):
     beacon_service.get_indexed_field_value_counts = AsyncMock(
         return_value=IndexedFieldValueCounts(
             counts={"410607006": 10, "invalid1": 6, "invalid2": 2}
@@ -120,7 +119,7 @@ def test_invalid_concepts(beacon_service, snomed_term_service, client):
     ]
 
 
-def test_unexpected_concepts_unknown_field(beacon_service, snomed_term_service, client):
+def test_unexpected_concepts_unknown_field(client):
     resp = client.get(
         "/admin/snomed/fields/invalid/unexpected_concepts", headers=_auth()
     )
@@ -128,9 +127,7 @@ def test_unexpected_concepts_unknown_field(beacon_service, snomed_term_service, 
     assert resp.json()["detail"] == "Unknown field: 'invalid'."
 
 
-def test_unexpected_concepts_non_ontology_field(
-    beacon_service, snomed_term_service, client
-):
+def test_unexpected_concepts_non_ontology_field(client):
     resp = client.get(
         "/admin/snomed/fields/dataset_title/unexpected_concepts", headers=_auth()
     )

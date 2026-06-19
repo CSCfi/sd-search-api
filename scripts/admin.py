@@ -17,7 +17,7 @@ from search_api.services.load import LoadService
 from search_api.services.sync import SyncService
 from search_api.database.repository import get_cursor
 from search_api.services.snomed import SnomedService
-from search_api.services.snomed_term import PostgresSnomedTermCacheService
+from search_api.services.ontology_term import SnomedPostgresOntologyTermCacheService
 
 
 def _index_path(domain: Domain) -> Path:
@@ -49,11 +49,8 @@ async def _load(domain: Domain, args: argparse.Namespace) -> None:
         logging.info("%d document(s) extracted without loading them.", count)
         return
 
-    snomed_term_service = PostgresSnomedTermCacheService()
-    snomed_service = SnomedService()
-
     logging.info("Loading documents into the database.")
-    load_service = LoadService(snomed_term_service, snomed_service)
+    load_service = LoadService(SnomedPostgresOntologyTermCacheService(), domain.filtering_terms)
     await load_service.store_documents(docs_iter)
 
     if args.sync:
@@ -66,7 +63,7 @@ async def _load(domain: Domain, args: argparse.Namespace) -> None:
 
 
 async def _snomed_refresh() -> None:
-    snomed_term_service = PostgresSnomedTermCacheService()
+    snomed_term_service = SnomedPostgresOntologyTermCacheService()
     snomed_service = SnomedService()
     logging.info("Refreshing SNOMED preferred terms.")
     await snomed_term_service.refresh(snomed_service)
@@ -77,7 +74,6 @@ def _generate_index(domain: Domain) -> None:
     path = _index_path(domain)
     path.write_text(json.dumps(body, indent=2) + "\n")
     logging.info("Wrote OpenSearch index to %s.", path)
-
 
 
 if __name__ == "__main__":

@@ -1,45 +1,59 @@
-"""Generic load service: store extracted documents and cache SNOMED preferred terms."""
+"""Generic load service: store extracted documents and cache ontology preferred terms."""
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 
 from psycopg import AsyncCursor
 
+from search_api.api.beacon.models import BeaconFilteringTerm
 from search_api.api.opensearch.document import build_document
 from search_api.api.opensearch.models import ExtractedDocument, OpenSearchFieldValue
 from search_api.database.document import get_modified_at, upsert_document
 from search_api.database.repository import get_cursor
-from search_api.services.snomed import SnomedService, is_concept_id
-from search_api.services.snomed_term import SnomedTermCacheService
+from search_api.services.ontology import OntologyService, get_ontology_service
+from search_api.services.ontology_term import OntologyTermCacheService
 
 logger = logging.getLogger(__name__)
 
 
+def ontology_services_by_field(
+    filtering_terms: Sequence[BeaconFilteringTerm],
+) -> dict[str, OntologyService]:
+    """Map each ontology field id to its provider, selected by ``ontology.id``."""
+    return {
+        t.id: get_ontology_service(t.ontology.id)
+        for t in filtering_terms
+        if t.type in ("ontology", "ontologyOrValue") and t.ontology is not None
+    }
+
+
 def concept_ids_from_values(
     values: list[OpenSearchFieldValue],
+    ontology_by_field: dict[str, OntologyService],
 ) -> dict[str, set[str]]:
-    """Return SNOMED CT concept IDs grouped by field id, from ontology field values."""
+    """Return concept IDs grouped by field id, from ontology field values."""
     result: dict[str, set[str]] = {}
     for fv in values:
+        provider = ontology_by_field.get(fv.field.id)
         if (
-            fv.field.type in ("ontology", "ontologyOrValue")
+            provider is not None
             and isinstance(fv.value, str)
-            and is_concept_id(fv.value)
+            and provider.is_concept_id(fv.value)
         ):
             result.setdefault(fv.field.id, set()).add(fv.value)
     return result
 
 
 class LoadService:
-    """Store extracted documents and cache their SNOMED preferred terms."""
+    """Store extracted documents and cache their ontology preferred terms."""
 
     def __init__(
         self,
-        snomed_term_service: SnomedTermCacheService,
-        snomed_service: SnomedService,
+        term_cache: OntologyTermCacheService,
+        filtering_terms: Sequence[BeaconFilteringTerm],
     ) -> None:
-        self._snomed_term_service = snomed_term_service
-        self._snomed_service = snomed_service
+        self._term_cache = term_cache
+        self._ontology_by_field = ontology_services_by_field(filtering_terms)
 
     @staticmethod
     async def store_document(cur: AsyncCursor, doc: ExtractedDocument) -> None:
@@ -50,12 +64,12 @@ class LoadService:
         """
         Store extracted documents to the database.
 
-        Documents that are not newer than what is already stored are skipped. Preferred terms for
-        SNOMED CT concepts are stored in the SNOMED term cache.
+        Documents that are not newer than what is already stored are skipped.
+        Preferred terms for ontology concepts are stored in the term cache.
 
         :param docs_iter: Iterator of extracted documents.
         """
-        await self._snomed_term_service.load()
+        await self._term_cache.load()
 
         loaded = 0
         skipped = 0
@@ -77,10 +91,10 @@ class LoadService:
                 logger.info("Loaded document %s.", doc.id)
 
                 for field_id, concept_ids in concept_ids_from_values(
-                    doc.values
+                    doc.values, self._ontology_by_field
                 ).items():
-                    await self._snomed_term_service.cache_preferred_terms(
-                        field_id, concept_ids, self._snomed_service
+                    await self._term_cache.cache_preferred_terms(
+                        field_id, concept_ids, self._ontology_by_field[field_id]
                     )
 
         logger.info("Done — loaded %d, skipped %d document(s).", loaded, skipped)

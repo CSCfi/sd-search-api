@@ -14,8 +14,10 @@ from search_api.api.opensearch.models import (
     OpenSearchField,
 )
 from search_api.api.opensearch.services import create_search
-from search_api.conf import snomed_term_cache_config
-from search_api.services.snomed_term import PostgresSnomedTermCacheService
+from search_api.services.ontology_term import (
+    OntologyTermCacheService,
+    create_term_caches,
+)
 
 LoadOptionsT = TypeVar("LoadOptionsT")
 
@@ -43,11 +45,21 @@ class Domain:
     beacon_name: str
     schemas: Sequence[str]  # Beacon entity types (returnedSchemas).
     result_sets_response_model: type[BeaconResultSetsResponse[Any]]
+    ai_assistant_description: str
 
     @property
     def opensearch_fields(self) -> list[OpenSearchField]:
         """All indexed fields (non-filtering first, then filtering terms)."""
         return [*self.non_filtering_fields, *self.filtering_terms]
+
+    @property
+    def ontology_ids(self) -> set[str]:
+        """Distinct ontology ids referenced by the filtering terms."""
+        return {
+            t.ontology.id
+            for t in self.filtering_terms
+            if t.type in ("ontology", "ontologyOrValue") and t.ontology is not None
+        }
 
 
 def make_lifespan(domain: Domain) -> Callable[[FastAPI], Any]:
@@ -60,16 +72,20 @@ def make_lifespan(domain: Domain) -> Callable[[FastAPI], Any]:
         app.state.filtering_terms = domain.filtering_terms
         app.state.beacon_service = domain.beacon_service_factory(app.state.search)
 
-        snomed_term_service = PostgresSnomedTermCacheService(
-            refresh_interval=snomed_term_cache_config().SNOMED_CACHE_REFRESH,
+        # One term cache per ontology created automatically from the
+        # registered providers.
+        ontology_term_services: dict[str, OntologyTermCacheService] = (
+            create_term_caches(domain.ontology_ids)
         )
-        await snomed_term_service.load()
-        snomed_term_service.start()
-        app.state.snomed_term_service = snomed_term_service
+        for term_service in ontology_term_services.values():
+            await term_service.load()
+            term_service.start()
+        app.state.ontology_term_services = ontology_term_services
 
         yield
 
-        snomed_term_service.stop()
+        for term_service in ontology_term_services.values():
+            term_service.stop()
         await app.state.search.close()
 
     return lifespan

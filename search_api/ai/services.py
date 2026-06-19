@@ -12,8 +12,8 @@ from search_api.api.beacon.services import BeaconService
 from search_api.conf import ai_config as _ai_config
 
 
-_SYSTEM_PROMPT = """\
-You are a biomedical image search assistant for the Bigpicture digital pathology dataset.
+_SYSTEM_PROMPT_TEMPLATE = """\
+You are {assistant_description}.
 Always respond in the same language as the user's query, or in English if uncertain.
 
 Your job is to translate a natural language query into Beacon V2 filters and search the
@@ -33,7 +33,11 @@ OpenSearch image index. Follow these steps for every query:
 
 
 class AIService:
-    def __init__(self, filtering_terms: Sequence[BeaconFilteringTerm]) -> None:
+    def __init__(
+        self,
+        filtering_terms: Sequence[BeaconFilteringTerm],
+        assistant_description: str,
+    ) -> None:
         cfg = _ai_config()
         model = OpenAIChatModel(
             # These models are too small to construct filters correctly: "qwen2.5:3b",
@@ -45,7 +49,9 @@ class AIService:
             model=model,
             deps_type=BeaconService,  # type: ignore[type-abstract]
             output_type=AISearchResult,
-            system_prompt=_SYSTEM_PROMPT,
+            system_prompt=_SYSTEM_PROMPT_TEMPLATE.format(
+                assistant_description=assistant_description
+            ),
             output_retries=3,
         )
 

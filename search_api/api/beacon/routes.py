@@ -10,6 +10,7 @@ from search_api.ai.services import AIService
 from search_api.api.beacon.models import (
     BeaconBooleanResponse,
     BeaconCountResponse,
+    BeaconFilteringTerm,
     BeaconFilteringTerms,
     BeaconFilteringTermsResponse,
     BeaconInfo,
@@ -26,8 +27,8 @@ from search_api.api.domain import Domain
 from search_api.api.models import AIQueryRequest, FieldValue
 from search_api.conf import feature_config
 from search_api.exceptions import SystemException, UserException
-from search_api.services.snomed import SnomedService
-from search_api.services.snomed_term import SnomedTermCacheService
+from search_api.services.ontology import get_ontology_service
+from search_api.services.ontology_term import OntologyTermCacheService
 
 
 # Dependency providers are module-level so tests can override them by identity
@@ -40,15 +41,25 @@ def get_beacon_service(request: Request) -> BeaconService:
 
 def get_ai_service(request: Request) -> AIService:
     domain: Domain = request.app.state.domain
-    return AIService(domain.filtering_terms)
+    return AIService(domain.filtering_terms, domain.ai_assistant_description)
 
 
-def get_snomed_service() -> SnomedService:
-    return SnomedService()
+def get_ontology_term_services(
+    request: Request,
+) -> dict[str, OntologyTermCacheService]:
+    return request.app.state.ontology_term_services
 
 
-def get_snomed_term_service(request: Request) -> SnomedTermCacheService:
-    return request.app.state.snomed_term_service
+def _ontology_term_service(
+    filtering_term: BeaconFilteringTerm,
+    services: dict[str, OntologyTermCacheService],
+) -> OntologyTermCacheService:
+    """Resolve the term cache for an ontology filtering term by its ontology id."""
+    if filtering_term.ontology is None:
+        raise SystemException(
+            f"Filtering term '{filtering_term.id}' has no ontology configured."
+        )
+    return services[filtering_term.ontology.id]
 
 
 def make_beacon_router(domain: Domain) -> APIRouter:
@@ -100,28 +111,33 @@ def make_beacon_router(domain: Domain) -> APIRouter:
     async def query(
         request: BeaconQueryRequest,
         beacon_service: BeaconService = Depends(get_beacon_service),
-        snomed_service: SnomedService = Depends(get_snomed_service),
     ):
-        ontology_field_ids = {
-            t.id
-            for t in domain.filtering_terms
-            if t.type in ("ontology", "ontologyOrValue")
-        }
+        # Map ontology field IDs to their provider ID (enforced non-None by config validation).
+        ontology_provider_by_field: dict[str, str] = {}
+        for t in domain.filtering_terms:
+            if t.type in ("ontology", "ontologyOrValue"):
+                if t.ontology is None:
+                    raise SystemException(
+                        f"Filtering term '{t.id}' has no ontology configured."
+                    )
+                ontology_provider_by_field[t.id] = t.ontology.id
+
         ontology_filters = [
-            f for f in request.query.filters if f.id in ontology_field_ids
+            f for f in request.query.filters if f.id in ontology_provider_by_field
         ]
         other_filters = [
-            f for f in request.query.filters if f.id not in ontology_field_ids
+            f for f in request.query.filters if f.id not in ontology_provider_by_field
         ]
 
-        # Resolve ontology filter values to concept IDs, and optionally expand to descendants.
+        # Resolve ontology filter values to concept IDs, and optionally expand to
+        # descendants. The provider is selected per term by its ``ontology.id``.
         try:
             resolved_ontology_filters = list(
                 await asyncio.gather(
                     *[
-                        snomed_service.prepare_ontology_filter(
-                            f, domain.filtering_terms
-                        )
+                        get_ontology_service(
+                            ontology_provider_by_field[f.id]
+                        ).prepare_ontology_filter(f, domain.filtering_terms)
                         for f in ontology_filters
                     ]
                 )
@@ -197,7 +213,9 @@ def make_beacon_router(domain: Domain) -> APIRouter:
             description="When True, include free-text ontology field values.",
         ),
         beacon_service: BeaconService = Depends(get_beacon_service),
-        snomed_term_service: SnomedTermCacheService = Depends(get_snomed_term_service),
+        ontology_term_services: dict[str, OntologyTermCacheService] = Depends(
+            get_ontology_term_services
+        ),
     ) -> list[FieldValue]:
         """Return value suggestions for a given field and search term."""
         filtering_term = next(
@@ -240,7 +258,8 @@ def make_beacon_router(domain: Domain) -> APIRouter:
 
         field_counts = await beacon_service.get_indexed_field_value_counts(field_id)
         counts = field_counts.counts
-        preferred_terms = await snomed_term_service.get_preferred_terms(
+        term_service = _ontology_term_service(filtering_term, ontology_term_services)
+        preferred_terms = await term_service.get_preferred_terms(
             field_id, set(counts.keys())
         )
         results = [
@@ -281,7 +300,9 @@ def make_beacon_router(domain: Domain) -> APIRouter:
             description="When True, include free-text ontology field values.",
         ),
         beacon_service: BeaconService = Depends(get_beacon_service),
-        snomed_term_service: SnomedTermCacheService = Depends(get_snomed_term_service),
+        ontology_term_services: dict[str, OntologyTermCacheService] = Depends(
+            get_ontology_term_services
+        ),
     ) -> list[FieldValue]:
         """Return the values for a given field, ordered by count."""
         filtering_term = next(
@@ -318,7 +339,8 @@ def make_beacon_router(domain: Domain) -> APIRouter:
                 sorted_values = sorted(counts.items(), key=lambda x: x[1], reverse=True)
             return [FieldValue(value=v, count=c) for v, c in sorted_values]
 
-        preferred_terms = await snomed_term_service.get_preferred_terms(
+        term_service = _ontology_term_service(filtering_term, ontology_term_services)
+        preferred_terms = await term_service.get_preferred_terms(
             field_id, set(counts.keys())
         )
         results: list[tuple[str, int, str | None]] = [

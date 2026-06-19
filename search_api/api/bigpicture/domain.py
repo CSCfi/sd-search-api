@@ -92,4 +92,7 @@ BP_DOMAIN = Domain(
     beacon_name=BP_BEACON_NAME,
     schemas=BP_SCHEMAS,
     result_sets_response_model=BigpictureBeaconResultSetsResponse,
+    ai_assistant_description=(
+        "a biomedical image search assistant for the Bigpicture digital pathology dataset"
+    ),
 )

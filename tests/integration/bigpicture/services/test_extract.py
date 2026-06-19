@@ -10,6 +10,7 @@ from crypt4gh.keys.c4gh import generate as c4gh_generate
 from crypt4gh.lib import encrypt as c4gh_encrypt
 from nacl.public import PrivateKey
 
+from search_api.api.bigpicture.domain import BP_DOMAIN
 from search_api.bigpicture.services.extract import extract_documents
 from search_api.database.document import DOCUMENT_TABLE, get_document
 from search_api.database.repository import get_connection
@@ -54,10 +55,10 @@ async def delete_images():
 @pytest.mark.asyncio
 async def test_extract_and_load_fields_plain():
     """Plain XML files from the fixture directory are extracted and loaded into the database."""
-    snomed_term_service = MagicMock(load=AsyncMock(), cache_preferred_terms=AsyncMock())
+    term_cache = MagicMock(load=AsyncMock(), cache_preferred_terms=AsyncMock())
     await LoadService(
-        snomed_term_service=snomed_term_service,
-        snomed_service=MagicMock(),
+        term_cache=term_cache,
+        filtering_terms=BP_DOMAIN.filtering_terms,
     ).store_documents(extract_documents(root=str(_XML_DIR), single_dir=False))
 
     async with get_connection() as conn:
@@ -93,10 +94,10 @@ async def test_extract_and_load_fields_c4gh(tmp_path):
                 outfile,
             )
 
-    snomed_term_service = MagicMock(load=AsyncMock(), cache_preferred_terms=AsyncMock())
+    term_cache = MagicMock(load=AsyncMock(), cache_preferred_terms=AsyncMock())
     await LoadService(
-        snomed_term_service=snomed_term_service,
-        snomed_service=MagicMock(),
+        term_cache=term_cache,
+        filtering_terms=BP_DOMAIN.filtering_terms,
     ).store_documents(
         extract_documents(
             root=str(tmp_path),

@@ -1,18 +1,25 @@
 """SNOMED CT concept lookup via the Snowstorm terminology server."""
 
 import asyncio
+from collections.abc import Sequence
 
 import httpx
 from aiocache import cached  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field
-from typing import TYPE_CHECKING
 
+from search_api.api.beacon.models import (
+    SNOMED_ONTOLOGY_ID,
+    BeaconFilteringTerm,
+    BeaconQueryFilter,
+)
+from search_api.conf import snomed_term_cache_config
 from search_api.conf import snowstorm_config as _snowstorm_config
-
-if TYPE_CHECKING:
-    from typing import Sequence
-
-    from search_api.api.beacon.models import BeaconFilteringTerm, BeaconQueryFilter
+from search_api.services.ontology import OntologyService, register_ontology_service
+from search_api.services.ontology_term import (
+    OntologyTermCacheService,
+    SnomedPostgresOntologyTermCacheService,
+    register_term_cache,
+)
 
 _PAGE_SIZE = 1000
 _CACHE_TTL = 60 * 60 * 24 * 30  # 30 days
@@ -207,11 +214,15 @@ async def _fetch_all_concepts(ecl: str, branch: str) -> list[SnomedConcept]:
     ]
 
 
-class SnomedService:
+class SnomedService(OntologyService):
     """SNOMED CT concept lookup service."""
 
     def __init__(self) -> None:
         pass
+
+    def is_concept_id(self, value: str) -> bool:
+        """Return True if value is a SNOMED CT concept ID."""
+        return is_concept_id(value)
 
     async def find_concept(
         self,
@@ -273,8 +284,8 @@ class SnomedService:
         """
         return await _fetch_all_concepts(f"< {concept_id}", branch)
 
-    @staticmethod
     async def get_preferred_terms(
+        self,
         concept_ids: set[str],
         branch: str = "MAIN",
     ) -> dict[str, str]:
@@ -381,10 +392,10 @@ class SnomedService:
 
     async def prepare_ontology_filter(
         self,
-        query_filter: "BeaconQueryFilter",
-        filtering_terms: "Sequence[BeaconFilteringTerm]",
+        query_filter: BeaconQueryFilter,
+        filtering_terms: Sequence[BeaconFilteringTerm],
         branch: str = "MAIN",
-    ) -> "BeaconQueryFilter":
+    ) -> BeaconQueryFilter:
         """Resolve and optionally expand ontology filter values to concept IDs.
 
         Each value is resolved to a SNOMED CT concept ID via Snowstorm. When
@@ -459,3 +470,14 @@ class SnomedService:
 
         # Return a new filter with resolved concept IDs replacing the original values.
         return query_filter.model_copy(update={"value": prepared_values})
+
+
+def _term_cache() -> OntologyTermCacheService:
+    return SnomedPostgresOntologyTermCacheService(
+        refresh_interval=snomed_term_cache_config().SNOMED_CACHE_REFRESH
+    )
+
+
+# Register the SNOMED ontology service and prefreed term cache.
+register_ontology_service(SNOMED_ONTOLOGY_ID, SnomedService())
+register_term_cache(SNOMED_ONTOLOGY_ID, _term_cache)

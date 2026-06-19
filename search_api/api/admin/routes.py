@@ -1,18 +1,24 @@
 from fastapi import APIRouter, Depends, Request
 
 from search_api.api.admin.auth import require_admin
-from search_api.api.beacon.models import BeaconFilteringTerm
+from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID, BeaconFilteringTerm
 from search_api.api.models import FieldValue
 from search_api.exceptions import UserException
+from search_api.services.ontology_term import OntologyTermCacheService
 from search_api.services.snomed import SnomedService, is_concept_id
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)])
 
 
+def _snomed_term_service(request: Request) -> OntologyTermCacheService:
+    """Return the SNOMED CT term cache from app state."""
+    return request.app.state.ontology_term_services[SNOMED_ONTOLOGY_ID]
+
+
 @router.post("/snomed/reload", status_code=204)
 async def reload_snomed_cache(request: Request) -> None:
     """Reload the in-memory SNOMED CT preferred term cache from the database."""
-    await request.app.state.snomed_term_service.load()
+    await _snomed_term_service(request).load()
 
 
 @router.post("/snomed/refresh", status_code=204)
@@ -22,7 +28,7 @@ async def refresh_snomed_terms(request: Request) -> None:
     Use after a SNOMED release to update preferred terms. Also, updates the
     in-memory SNOMED preferred term cache.
     """
-    await request.app.state.snomed_term_service.refresh(SnomedService())
+    await _snomed_term_service(request).refresh(SnomedService())
 
 
 def _get_ontology_filtering_term(
@@ -75,7 +81,7 @@ async def unexpected_concepts(field_id: str, request: Request) -> list[FieldValu
     if not valid_format:
         return []
 
-    in_cache = await request.app.state.snomed_term_service.get_preferred_terms(
+    in_cache = await _snomed_term_service(request).get_preferred_terms(
         field_id, set(valid_format.keys())
     )
     results = [

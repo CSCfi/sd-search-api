@@ -6,7 +6,10 @@ from search_api.bigpicture.services.extract import (
     BigpictureStainingFields,
     to_opensearch_field_values,
 )
-from search_api.services.load import concept_ids_from_values
+from search_api.api.bigpicture.domain import BP_DOMAIN
+from search_api.services.load import concept_ids_from_values, ontology_services_by_field
+
+_ONTOLOGY_BY_FIELD = ontology_services_by_field(BP_DOMAIN.filtering_terms)
 
 _SPECIES = "337915000"
 _BREAST = "80248007"
@@ -54,7 +57,9 @@ def _code(code: str) -> BigpictureCodeAttributeValue:
 
 
 def _concept_ids(fields: BigpictureFields) -> dict[str, set[str]]:
-    return concept_ids_from_values(to_opensearch_field_values(fields))
+    return concept_ids_from_values(
+        to_opensearch_field_values(fields), _ONTOLOGY_BY_FIELD
+    )
 
 
 def test_concept_ids_from_values_animal_species():

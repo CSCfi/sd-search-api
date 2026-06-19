@@ -8,7 +8,10 @@ import pytest_asyncio
 
 from search_api.database.repository import get_connection
 from search_api.services.snomed import SnomedService
-from search_api.services.snomed_term import SNOMED_TABLE, PostgresSnomedTermCacheService
+from search_api.services.ontology_term import (
+    SNOMED_TABLE,
+    SnomedPostgresOntologyTermCacheService,
+)
 
 os.environ.setdefault("POSTGRES_DB", os.environ["BP_POSTGRES_DB"])
 os.environ.setdefault("POSTGRES_PORT", os.environ["BP_POSTGRES_PORT"])
@@ -53,7 +56,7 @@ async def _clear_cache():
 
 
 @pytest_asyncio.fixture
-async def fill_cache() -> PostgresSnomedTermCacheService:
+async def fill_cache() -> SnomedPostgresOntologyTermCacheService:
     async with get_connection() as conn:
         async with conn.cursor() as cur:
             await cur.executemany(
@@ -61,7 +64,7 @@ async def fill_cache() -> PostgresSnomedTermCacheService:
                 "VALUES (%s, %s, %s, now())",
                 [(cid, _FIELD_ID, term) for cid, term in CACHED_TERMS.items()],
             )
-    service = PostgresSnomedTermCacheService()
+    service = SnomedPostgresOntologyTermCacheService()
     await service.load()
     return service
 
@@ -76,7 +79,7 @@ async def test_load():
                 [(cid, _FIELD_ID, term) for cid, term in CACHED_TERMS.items()],
             )
 
-    service = PostgresSnomedTermCacheService()
+    service = SnomedPostgresOntologyTermCacheService()
     assert service._cache == {}
 
     await service.load()
@@ -88,7 +91,7 @@ async def test_load():
 @pytest.mark.asyncio
 async def test_load_does_not_raise_on_empty_table():
     """load() completes without error even when snomed has no rows for these IDs."""
-    service = PostgresSnomedTermCacheService()
+    service = SnomedPostgresOntologyTermCacheService()
     await service.load()
     for cid in CACHED_TERMS:
         assert service._cache.get(_FIELD_ID, {}).get(cid) is None
@@ -115,7 +118,7 @@ async def test_get_preferred_terms_empty_set(fill_cache):
 
 @pytest.mark.asyncio
 async def test_cache_preferred_terms_skips_existing_ids():
-    service = PostgresSnomedTermCacheService()
+    service = SnomedPostgresOntologyTermCacheService()
     service._cache = {_FIELD_ID: dict(CACHED_TERMS)}
 
     mock_snomed = AsyncMock()
@@ -130,7 +133,7 @@ async def test_cache_preferred_terms_skips_existing_ids():
 
 @pytest.mark.asyncio
 async def test_cache_preferred_terms_stores_new_terms():
-    service = PostgresSnomedTermCacheService()
+    service = SnomedPostgresOntologyTermCacheService()
     await service.load()
 
     mock_snomed = AsyncMock()
@@ -146,7 +149,7 @@ async def test_cache_preferred_terms_stores_new_terms():
 
 @pytest.mark.asyncio
 async def test_cache_preferred_terms_skip_when_snowstorm_returns_empty():
-    service = PostgresSnomedTermCacheService()
+    service = SnomedPostgresOntologyTermCacheService()
     await service.load()
 
     mock_snomed = AsyncMock()
@@ -160,7 +163,7 @@ async def test_cache_preferred_terms_skip_when_snowstorm_returns_empty():
 
 @pytest.mark.asyncio
 async def test_cache_preferred_terms_resolves_via_snowstorm():
-    service = PostgresSnomedTermCacheService()
+    service = SnomedPostgresOntologyTermCacheService()
     await service.load()
 
     await service.cache_preferred_terms(_FIELD_ID, {"337915000"}, SnomedService())
@@ -195,7 +198,7 @@ async def test_has_changes_since():
                     ],
                 )
 
-        service = PostgresSnomedTermCacheService()
+        service = SnomedPostgresOntologyTermCacheService()
         await service.load()
 
         assert service._last_refreshed is not None

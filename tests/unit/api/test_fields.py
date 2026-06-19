@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from search_api.api.config import load_fields_config
+from search_api.api.fields import load_fields_config
 from search_api.exceptions import ConfigurationException
 
 _VALID_TERM = """\

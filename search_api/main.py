@@ -4,28 +4,14 @@ import uvicorn
 
 from search_api.api.admin.routes import router as admin_router
 from search_api.api.beacon.routes import make_beacon_router
-from search_api.api.bigpicture.domain import BP_DOMAIN
-from search_api.api.domain import Domain, make_lifespan
+from search_api.api.deployments import get_domain
+from search_api.api.domain import make_lifespan
 from search_api.api.exception_handlers import register_exception_handlers
 from search_api.conf import admin_config, deployment_config
-from search_api.exceptions import SystemException
 
 # uvicorn search_api.main:app --reload
 
-# Deployment registry: maps a DEPLOYMENT_TYPE to its domain. Register new
-# deployments here.
-_DOMAINS: dict[str, Domain] = {
-    "Bigpicture": BP_DOMAIN,
-}
-
-_deployment = deployment_config()
-try:
-    _domain = _DOMAINS[_deployment.DEPLOYMENT_TYPE]
-except KeyError:
-    raise SystemException(
-        f"Unknown deployment type {_deployment.DEPLOYMENT_TYPE!r}. "
-        f"Registered deployments: {', '.join(sorted(_DOMAINS))}."
-    )
+_domain = get_domain(deployment_config().DEPLOYMENT_TYPE)
 
 app = FastAPI(
     title=f"CSC {_domain.name.capitalize()} Beacon",

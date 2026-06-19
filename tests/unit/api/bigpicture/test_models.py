@@ -81,7 +81,7 @@ def test_extracted_fields_match_filtering_terms():
 def test_committed_index_matches_generated():
     """The committed index JSON must equal a fresh generation.
 
-    Run ``python scripts/bigpicture.py generate-index`` after changing the
+    Run ``python scripts/admin.py Bigpicture generate-index`` after changing the
     filtering terms or index-only fields.
     """
     generated = OpenSearchIndexGeneratorService(

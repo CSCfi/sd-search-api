@@ -1,19 +1,32 @@
-from collections.abc import Callable, Sequence
+import argparse
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Generic, TypeVar
 
 from fastapi import FastAPI
 
 from search_api.api.beacon.models import BeaconResultSetsResponse
 from search_api.api.beacon.services import BeaconService
 from search_api.api.opensearch.models import (
+    ExtractedDocument,
     OpenSearchBeaconFilteringTerm,
     OpenSearchField,
 )
 from search_api.api.opensearch.services import create_search
 from search_api.conf import snomed_term_cache_config
 from search_api.services.snomed_term import PostgresSnomedTermCacheService
+
+LoadOptionsT = TypeVar("LoadOptionsT")
+
+
+@dataclass(frozen=True)
+class Loader(Generic[LoadOptionsT]):
+    """How a deployment loads its source data, parameterised by its options."""
+
+    add_load_options: Callable[[argparse.ArgumentParser], None]
+    parse_load_options: Callable[[argparse.Namespace], LoadOptionsT]
+    extract: Callable[[LoadOptionsT], Iterator[ExtractedDocument]]
 
 
 @dataclass(frozen=True)
@@ -24,6 +37,7 @@ class Domain:
     opensearch_index: str
     filtering_terms: Sequence[OpenSearchBeaconFilteringTerm]
     non_filtering_fields: Sequence[OpenSearchField]
+    loader: Loader[Any]
     beacon_service_factory: Callable[[Any], BeaconService]
     beacon_id: str
     beacon_name: str

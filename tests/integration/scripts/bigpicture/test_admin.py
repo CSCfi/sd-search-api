@@ -11,7 +11,8 @@ from crypt4gh.keys.c4gh import generate as c4gh_generate
 from crypt4gh.lib import encrypt as c4gh_encrypt
 from nacl.public import PrivateKey
 
-from scripts.bigpicture import _load
+from scripts.admin import _load
+from search_api.api.bigpicture.domain import BP_DOMAIN
 from search_api.services.load import LoadService
 from search_api.database.document import DOCUMENT_TABLE, get_document
 from search_api.database.repository import get_connection
@@ -66,7 +67,7 @@ async def test_load_extract_only():
     with patch.object(
         LoadService, "store_document", new_callable=AsyncMock
     ) as load_spy:
-        await _load(_args(load=False))
+        await _load(BP_DOMAIN, _args(load=False))
         load_spy.assert_not_called()
 
     async with get_connection() as conn:
@@ -81,7 +82,7 @@ async def test_load_extract_only():
 @pytest.mark.asyncio
 async def test_load_plain_files():
     """The load command processes plain XML files and inserts them into the database."""
-    await _load(_args(load=True))
+    await _load(BP_DOMAIN, _args(load=True))
 
     async with get_connection() as conn:
         async with conn.cursor() as cur:
@@ -115,11 +116,12 @@ async def test_load_c4gh_files(tmp_path):
             )
 
     await _load(
+        BP_DOMAIN,
         _args(
             directory=str(tmp_path),
             load=True,
             c4gh_key_file=str(seckey_path),
-        )
+        ),
     )
 
     async with get_connection() as conn:

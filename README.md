@@ -230,13 +230,13 @@ Example output:
 Load a single dataset directory (default):
 
 ```bash
-uv run python scripts/bigpicture.py load /path/to/dataset/ --load
+uv run python scripts/admin.py Bigpicture load /path/to/dataset/ --load
 ```
 
 Load from a parent directory containing multiple dataset subdirectories:
 
 ```bash
-uv run python scripts/bigpicture.py load /path/to/datasets/ --multi-dir --load
+uv run python scripts/admin.py Bigpicture load /path/to/datasets/ --multi-dir --load
 ```
 
 Omit `--load` parse XMLs without loading them to the database.
@@ -244,7 +244,7 @@ Omit `--load` parse XMLs without loading them to the database.
 To also sync to OpenSearch immediately after loading, add `--sync`:
 
 ```bash
-uv run python scripts/bigpicture.py load /path/to/datasets/ --multi-dir --load --sync
+uv run python scripts/admin.py Bigpicture load /path/to/datasets/ --multi-dir --load --sync
 ```
 
 #### Refresh SNOMED CT preferred terms
@@ -252,7 +252,7 @@ uv run python scripts/bigpicture.py load /path/to/datasets/ --multi-dir --load -
 After a new SNOMED CT release, update the stored preferred terms to match the new release:
 
 ```bash
-uv run python scripts/bigpicture.py snomed refresh
+uv run python scripts/admin.py Bigpicture snomed refresh
 ```
 
 #### Generate the OpenSearch index
@@ -263,7 +263,7 @@ and types stay in sync with them.
 After changing them, regenerate and commit the file:
 
 ```bash
-uv run python scripts/bigpicture.py generate-index
+uv run python scripts/admin.py Bigpicture generate-index
 ```
 
 An unit test fails if this file is different from a freshy generated one.

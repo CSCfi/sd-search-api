@@ -13,7 +13,7 @@ from search_api.api.beacon.models import (
     BeaconSchema,
     BeaconInfo,
 )
-from search_api.api.config import load_fields_config
+from search_api.api.fields import load_fields_config
 from search_api.exceptions import SystemException
 from search_api.api.opensearch.models import (
     OpenSearchField,
@@ -59,7 +59,7 @@ BP_SCHEMAS = [
 ]
 
 # Filtering terms and index-only fields are declared in fields.yaml and validated
-# on load. See search_api.api.config.
+# on load.
 _FIELDS_CONFIG_PATH = Path(__file__).resolve().parent / "fields.yaml"
 _fields_config = load_fields_config(_FIELDS_CONFIG_PATH)
 

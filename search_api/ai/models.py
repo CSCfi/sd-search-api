@@ -1,5 +1,3 @@
-"""AI search result models."""
-
 from pydantic import BaseModel
 
 
@@ -11,17 +9,11 @@ class AIQueryFilter(BaseModel):
     # includeDescendantTerms: bool = True
 
 
-class AIDatasetResult(BaseModel):
-    dataset_id: str
-    dataset_title: str | None = None
-    matching_image_count: int
-    total_image_count: int
-
-
 class AISearchResult(BaseModel):
-    """Structured result returned by the AI search agent."""
+    """Generic AI search result.
+
+    A deployment should subclass this to describe its own result shape.
+    """
 
     interpretation: str
     filters: list[AIQueryFilter]
-    dataset_count: int
-    datasets: list[AIDatasetResult]

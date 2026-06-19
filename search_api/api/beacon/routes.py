@@ -41,7 +41,12 @@ def get_beacon_service(request: Request) -> BeaconService:
 
 def get_ai_service(request: Request) -> AIService:
     domain: Domain = request.app.state.domain
-    return AIService(domain.filtering_terms, domain.ai_assistant_description)
+    return AIService(
+        domain.filtering_terms,
+        domain.ai_assistant_description,
+        domain.ai_result_model,
+        domain.ai_result_instructions,
+    )
 
 
 def get_ontology_term_services(
@@ -184,7 +189,7 @@ def make_beacon_router(domain: Domain) -> APIRouter:
 
         @router.post(
             "/ai/query",
-            response_model=AISearchResult,
+            response_model=domain.ai_result_model,
         )
         async def ai_query(
             request: AIQueryRequest,

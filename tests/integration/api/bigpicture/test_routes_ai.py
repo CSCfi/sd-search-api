@@ -3,11 +3,8 @@
 import httpx
 import pytest
 
-from search_api.ai.models import (
-    AIDatasetResult,
-    AIQueryFilter,
-    AISearchResult,
-)
+from search_api.ai.models import AIQueryFilter
+from search_api.api.bigpicture.ai import BigpictureAISearchResult
 
 skip = pytest.mark.skip(reason="Requires Ollama")
 
@@ -24,7 +21,7 @@ def test_ai_query_returns_result(client: httpx.Client):
         "/ai/query", json={"query": "images for human females"}, timeout=60.0
     )
     assert resp.status_code == 200
-    result = AISearchResult.model_validate(resp.json())
+    result = BigpictureAISearchResult.model_validate(resp.json())
     assert isinstance(result.interpretation, str)
     assert len(result.interpretation) > 0
     assert result.dataset_count >= 0
@@ -32,7 +29,7 @@ def test_ai_query_returns_result(client: httpx.Client):
 
     assert result.dataset_count == 1
     assert len(result.datasets) == 1
-    dataset: AIDatasetResult = result.datasets[0]
+    dataset: BigpictureAISearchResult.Dataset = result.datasets[0]
     assert dataset.dataset_id == "testDataset"
     assert dataset.dataset_title == "testTitle"
     assert dataset.total_image_count == 1

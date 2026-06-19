@@ -6,6 +6,7 @@ from typing import Any, Generic, TypeVar
 
 from fastapi import FastAPI
 
+from search_api.ai.models import AISearchResult
 from search_api.api.beacon.models import BeaconResultSetsResponse
 from search_api.api.beacon.services import BeaconService
 from search_api.api.opensearch.models import (
@@ -46,6 +47,8 @@ class Domain:
     schemas: Sequence[str]  # Beacon entity types (returnedSchemas).
     result_sets_response_model: type[BeaconResultSetsResponse[Any]]
     ai_assistant_description: str
+    ai_result_model: type[AISearchResult]
+    ai_result_instructions: str
 
     @property
     def opensearch_fields(self) -> list[OpenSearchField]:

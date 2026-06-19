@@ -14,6 +14,11 @@ from search_api.api.bigpicture.models import (
     BP_SCHEMAS,
     BigpictureBeaconResultSetsResponse,
 )
+from search_api.api.bigpicture.ai import (
+    BP_AI_ASSISTANT_DESCRIPTION,
+    BP_AI_RESULT_INSTRUCTIONS,
+    BigpictureAISearchResult,
+)
 from search_api.api.bigpicture.opensearch import BigpictureOpenSearchBeaconService
 from search_api.api.domain import Domain, Loader
 from search_api.api.opensearch.models import ExtractedDocument
@@ -92,7 +97,7 @@ BP_DOMAIN = Domain(
     beacon_name=BP_BEACON_NAME,
     schemas=BP_SCHEMAS,
     result_sets_response_model=BigpictureBeaconResultSetsResponse,
-    ai_assistant_description=(
-        "a biomedical image search assistant for the Bigpicture digital pathology dataset"
-    ),
+    ai_assistant_description=BP_AI_ASSISTANT_DESCRIPTION,
+    ai_result_model=BigpictureAISearchResult,
+    ai_result_instructions=BP_AI_RESULT_INSTRUCTIONS,
 )

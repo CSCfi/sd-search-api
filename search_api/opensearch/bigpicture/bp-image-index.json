@@ -41,29 +41,32 @@
           "anatomical_site": {
             "type": "keyword"
           },
-          "fixation_type": {
-            "type": "keyword"
-          },
-          "fixation_type_other": {
-            "type": "keyword"
-          },
-          "specimen_type": {
-            "type": "keyword"
-          },
-          "block_preparation": {
-            "type": "keyword"
-          },
           "sex": {
             "type": "keyword"
           },
           "age_at_extraction": {
             "type": "integer_range"
+          },
+          "block_preparation": {
+            "type": "keyword"
+          },
+          "specimen_type": {
+            "type": "keyword"
+          },
+          "fixation_type": {
+            "type": "keyword"
+          },
+          "fixation_type_other": {
+            "type": "keyword"
           }
         }
       },
       "stains": {
         "type": "nested",
         "properties": {
+          "staining_target": {
+            "type": "keyword"
+          },
           "staining_procedure": {
             "type": "keyword"
           },
@@ -74,9 +77,6 @@
             "type": "keyword"
           },
           "staining_substance_other": {
-            "type": "keyword"
-          },
-          "staining_target": {
             "type": "keyword"
           }
         }

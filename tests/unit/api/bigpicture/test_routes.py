@@ -24,6 +24,7 @@ from search_api.api.opensearch.models import (
     OpenSearchOntologyOrValue,
 )
 from search_api.api.bigpicture.models import (
+    BP_FILTERING_GROUPS,
     BP_FILTERING_TERMS,
     BP_INFO_RESPONSE,
     BP_FILTERING_TERMS_RESPONSE,
@@ -184,6 +185,19 @@ def test_filtering_terms(client: TestClient):
     assert json.dumps(response.json()) == json.dumps(
         BP_FILTERING_TERMS_RESPONSE.model_dump(exclude_none=True)
     )
+
+
+def test_filtering_groups(client: TestClient):
+    response = client.get("/filtering_groups")
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+    assert len(data) == len(BP_FILTERING_GROUPS)
+    ids = [g["id"] for g in data]
+    assert ids == [g.id for g in BP_FILTERING_GROUPS]
+    for group in data:
+        assert "id" in group
+        assert "label" in group
 
 
 @pytest.fixture()

@@ -13,7 +13,7 @@ from search_api.exceptions import ConfigurationException
 
 
 class FieldsConfig(BaseModel):
-    """Schema of a deployment fields YAML file."""
+    """Schema of fields configuration YAML file."""
 
     # Reject unknown keys so config errors surface.
     model_config = ConfigDict(extra="forbid")

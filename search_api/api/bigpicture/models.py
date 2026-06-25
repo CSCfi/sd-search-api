@@ -4,6 +4,7 @@ from pathlib import Path
 from pydantic import Field
 
 from search_api.api.beacon.models import (
+    BeaconFilteringGroup,
     BeaconFilteringTermsResponse,
     BeaconFilteringTerms,
     BeaconInfoResponse,
@@ -14,6 +15,7 @@ from search_api.api.beacon.models import (
     BeaconInfo,
 )
 from search_api.api.fields import load_fields_config
+from search_api.api.groups import load_groups_config, validate_ui_groups
 from search_api.exceptions import SystemException
 from search_api.api.opensearch.models import (
     OpenSearchField,
@@ -58,13 +60,21 @@ BP_SCHEMAS = [
     BP_STAINING_SCHEMA,
 ]
 
-# Filtering terms and index-only fields are declared in fields.yaml and validated
-# on load.
+# Filtering terms, groups, and index-only fields are declared in YAML files and
+# validated on load.
 _FIELDS_CONFIG_PATH = Path(__file__).resolve().parent / "fields.yaml"
 _fields_config = load_fields_config(_FIELDS_CONFIG_PATH)
 
 BP_FILTERING_TERMS = _fields_config.filtering_terms
 BP_NON_FILTERING_FIELDS = _fields_config.non_filtering_fields
+
+_GROUPS_CONFIG_PATH = Path(__file__).resolve().parent / "groups.yaml"
+BP_FILTERING_GROUPS: list[BeaconFilteringGroup] = load_groups_config(
+    _GROUPS_CONFIG_PATH
+).filtering_groups
+
+
+validate_ui_groups(BP_FILTERING_TERMS, BP_FILTERING_GROUPS, _FIELDS_CONFIG_PATH)
 
 # Filtering term lookup by id.
 BP_FILTERING_TERM_BY_ID = {term.id: term for term in BP_FILTERING_TERMS}

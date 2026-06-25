@@ -1,0 +1,16 @@
+filtering_groups:
+  - id: description
+    label: "Description"
+    description: ""
+  - id: subject
+    label: "Subject & specimen"
+    description: ""
+  - id: sample
+    label: "Sample & block"
+    description: ""
+  - id: staining
+    label: "Staining"
+    description: ""
+  # - id: clinical
+  #   label: "Clinical diagnostics"
+  #   description: ""

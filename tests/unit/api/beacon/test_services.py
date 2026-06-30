@@ -31,7 +31,7 @@ def test_build_opensearch_query_controlled_value_single():
     result = build_opensearch_query(term, "Male")
     assert result == {
         "bool": {
-            "should": [{"terms": {"blocks.sex": ["Male"]}}],
+            "should": [{"terms": {"specimen.sex": ["Male"]}}],
             "minimum_should_match": 1,
         }
     }
@@ -43,7 +43,7 @@ def test_build_opensearch_query_controlled_value_multi():
     result = build_opensearch_query(term, ["Male", "Female"])
     assert result == {
         "bool": {
-            "should": [{"terms": {"blocks.sex": ["Male", "Female"]}}],
+            "should": [{"terms": {"specimen.sex": ["Male", "Female"]}}],
             "minimum_should_match": 1,
         }
     }
@@ -55,7 +55,7 @@ def test_build_opensearch_query_keyword_single():
     result = build_opensearch_query(term, "Ki-67")
     assert result == {
         "bool": {
-            "should": [{"terms": {"stains.staining_target": ["Ki-67"]}}],
+            "should": [{"terms": {"staining.staining_target": ["Ki-67"]}}],
             "minimum_should_match": 1,
         }
     }
@@ -67,7 +67,7 @@ def test_build_opensearch_query_ontology_single():
     result = build_opensearch_query(term, "410607006")
     assert result == {
         "bool": {
-            "should": [{"terms": {"blocks.animal_species": ["410607006"]}}],
+            "should": [{"terms": {"specimen.animal_species": ["410607006"]}}],
             "minimum_should_match": 1,
         }
     }
@@ -80,7 +80,7 @@ def test_build_opensearch_query_ontology_multi():
     assert result == {
         "bool": {
             "should": [
-                {"terms": {"blocks.animal_species": ["123456789", "987654321"]}}
+                {"terms": {"specimen.animal_species": ["123456789", "987654321"]}}
             ],
             "minimum_should_match": 1,
         }
@@ -91,11 +91,11 @@ def test_build_opensearch_query_ontology_or_value_concept_ids_only():
     """ontologyOrValue with concept IDs only."""
     term = get_term(
         "fixation_type"
-    )  # maps to blocks.fixation_type + blocks.fixation_type_other
+    )  # maps to specimen.fixation_type + specimen.fixation_type_other
     result = build_opensearch_query(term, ["123", "456"])
     assert result == {
         "bool": {
-            "should": [{"terms": {"blocks.fixation_type": ["123", "456"]}}],
+            "should": [{"terms": {"specimen.fixation_type": ["123", "456"]}}],
             "minimum_should_match": 1,
         }
     }
@@ -105,15 +105,15 @@ def test_build_opensearch_query_ontology_or_value_mixed_values():
     """ontologyOrValue with mixed concept IDs and other values."""
     term = get_term(
         "fixation_type"
-    )  # maps to blocks.fixation_type + blocks.fixation_type_other
+    )  # maps to specimen.fixation_type + specimen.fixation_type_other
     result = build_opensearch_query(term, ["123", "Formalin"])
     assert result == {
         "bool": {
             "should": [
-                {"terms": {"blocks.fixation_type": ["123"]}},
+                {"terms": {"specimen.fixation_type": ["123"]}},
                 {
                     "terms": {
-                        f"blocks.fixation_type{ONTOLOGY_OTHER_VALUE_FIELD_SUFFIX}": [
+                        f"specimen.fixation_type{ONTOLOGY_OTHER_VALUE_FIELD_SUFFIX}": [
                             "Formalin"
                         ]
                     }
@@ -128,14 +128,14 @@ def test_build_opensearch_query_ontology_or_value_free_text_only():
     """ontologyOrValue with non-concept IDs only."""
     term = get_term(
         "fixation_type"
-    )  # maps to blocks.fixation_type + blocks.fixation_type_other
+    )  # maps to specimen.fixation_type + specimen.fixation_type_other
     result = build_opensearch_query(term, ["Formalin", "Glutaraldehyde"])
     assert result == {
         "bool": {
             "should": [
                 {
                     "terms": {
-                        f"blocks.fixation_type{ONTOLOGY_OTHER_VALUE_FIELD_SUFFIX}": [
+                        f"specimen.fixation_type{ONTOLOGY_OTHER_VALUE_FIELD_SUFFIX}": [
                             "Formalin",
                             "Glutaraldehyde",
                         ]
@@ -191,7 +191,7 @@ def test_build_opensearch_query_iso8601range_single():
     assert result == {
         "bool": {
             "should": [
-                {"range": {"blocks.age_at_extraction": {"gte": 3650, "lte": 7300}}}
+                {"range": {"specimen.age_at_extraction": {"gte": 3650, "lte": 7300}}}
             ],
             "minimum_should_match": 1,
         }
@@ -205,8 +205,8 @@ def test_build_opensearch_query_iso8601range_multi():
     assert result == {
         "bool": {
             "should": [
-                {"range": {"blocks.age_at_extraction": {"gte": 3650, "lte": 7300}}},
-                {"range": {"blocks.age_at_extraction": {"gte": 10950, "lte": 14600}}},
+                {"range": {"specimen.age_at_extraction": {"gte": 3650, "lte": 7300}}},
+                {"range": {"specimen.age_at_extraction": {"gte": 10950, "lte": 14600}}},
             ],
             "minimum_should_match": 1,
         }
@@ -255,14 +255,14 @@ def test_get_query_nested_block_filter():
             "must": [
                 {
                     "nested": {
-                        "path": "blocks",
+                        "path": "specimen",
                         "query": {
                             "bool": {
                                 "filter": [
                                     {
                                         "bool": {
                                             "should": [
-                                                {"terms": {"blocks.sex": ["Female"]}}
+                                                {"terms": {"specimen.sex": ["Female"]}}
                                             ],
                                             "minimum_should_match": 1,
                                         }
@@ -283,7 +283,7 @@ def test_get_query_nested_stain_filter():
             "must": [
                 {
                     "nested": {
-                        "path": "stains",
+                        "path": "staining",
                         "query": {
                             "bool": {
                                 "filter": [
@@ -292,7 +292,7 @@ def test_get_query_nested_stain_filter():
                                             "should": [
                                                 {
                                                     "terms": {
-                                                        "stains.staining_target": [
+                                                        "staining.staining_target": [
                                                             "Ki-67"
                                                         ]
                                                     }
@@ -311,20 +311,20 @@ def test_get_query_nested_stain_filter():
     }
 
 
-def test_get_query_multiple_nested_blocks_filter():
+def test_get_query_multiple_nested_specimen_filter():
     assert get_query(("sex", "Female"), ("animal_species", "337915000")) == {
         "bool": {
             "must": [
                 {
                     "nested": {
-                        "path": "blocks",
+                        "path": "specimen",
                         "query": {
                             "bool": {
                                 "filter": [
                                     {
                                         "bool": {
                                             "should": [
-                                                {"terms": {"blocks.sex": ["Female"]}}
+                                                {"terms": {"specimen.sex": ["Female"]}}
                                             ],
                                             "minimum_should_match": 1,
                                         }
@@ -334,7 +334,7 @@ def test_get_query_multiple_nested_blocks_filter():
                                             "should": [
                                                 {
                                                     "terms": {
-                                                        "blocks.animal_species": [
+                                                        "specimen.animal_species": [
                                                             "337915000"
                                                         ]
                                                     }
@@ -356,8 +356,8 @@ def test_get_query_multiple_nested_blocks_filter():
 def test_get_query_all_filter_scopes():
     assert get_query(
         ("dataset_title", "cancer"),  # top-level
-        ("sex", "Female"),  # blocks
-        ("staining_target", "Ki-67"),  # stains
+        ("sex", "Female"),  # specimen
+        ("staining_target", "Ki-67"),  # staining
     ) == {
         "bool": {
             "must": [
@@ -369,14 +369,14 @@ def test_get_query_all_filter_scopes():
                 },
                 {
                     "nested": {
-                        "path": "blocks",
+                        "path": "specimen",
                         "query": {
                             "bool": {
                                 "filter": [
                                     {
                                         "bool": {
                                             "should": [
-                                                {"terms": {"blocks.sex": ["Female"]}}
+                                                {"terms": {"specimen.sex": ["Female"]}}
                                             ],
                                             "minimum_should_match": 1,
                                         }
@@ -388,7 +388,7 @@ def test_get_query_all_filter_scopes():
                 },
                 {
                     "nested": {
-                        "path": "stains",
+                        "path": "staining",
                         "query": {
                             "bool": {
                                 "filter": [
@@ -397,7 +397,7 @@ def test_get_query_all_filter_scopes():
                                             "should": [
                                                 {
                                                     "terms": {
-                                                        "stains.staining_target": [
+                                                        "staining.staining_target": [
                                                             "Ki-67"
                                                         ]
                                                     }

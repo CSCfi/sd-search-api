@@ -65,13 +65,13 @@ class BigpictureSampleBlockFields(BaseModel):
     block_preparation: BigpictureCodeAttributeValue | None = None
 
 
-class BigpictureBlockFields(
+class BigpictureSpecimenFields(
     BigpictureSampleBiologicalBeingFields,
     BigpictureSampleSpecimenFields,
     BigpictureSampleBlockFields,
     BaseModel,
 ):
-    """Bigpicture block search field."""
+    """Bigpicture specimen search fields (see grouping rationale in fields.yaml)."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -99,8 +99,17 @@ class BigpictureFields(BaseModel):
     dataset_description: str | None = None
     # Newest file modification date in the dataset.
     dataset_modified_at: datetime | None = None
-    blocks: set[BigpictureBlockFields] = Field(default_factory=set)
-    stains: set[BigpictureStainingFields] = Field(default_factory=set)
+    specimens: set[BigpictureSpecimenFields] = Field(default_factory=set)
+    stainings: set[BigpictureStainingFields] = Field(default_factory=set)
+
+
+def _has_value(value: Any) -> bool:
+    """Whether a parsed field carries an indexable value."""
+    if value is None:
+        return False
+    if isinstance(value, frozenset):
+        return len(value) > 0
+    return True
 
 
 def to_opensearch_field_values(fields: BigpictureFields) -> list[OpenSearchFieldValue]:
@@ -108,7 +117,7 @@ def to_opensearch_field_values(fields: BigpictureFields) -> list[OpenSearchField
     values: list[OpenSearchFieldValue] = []
 
     def add_value(index: int, field_name: str, value: Any) -> None:
-        if value is None:
+        if not _has_value(value):
             return
         field = BP_DOCUMENT_FIELDS.get(field_name)
         if field is None:
@@ -136,8 +145,8 @@ def to_opensearch_field_values(fields: BigpictureFields) -> list[OpenSearchField
         if field_name in BP_DOCUMENT_FIELDS:
             add_value(0, field_name, getattr(fields, field_name))
 
-    # Add nested blocks and stains fields.
-    for items in (fields.blocks, fields.stains):
+    # Add nested fields.
+    for items in (fields.specimens, fields.stainings):
         index = 0
         for item in items:
             before = len(values)
@@ -255,8 +264,6 @@ def extract_documents(
             map_block_to_slide_ids: dict[str, set[str]] = {}
             map_staining_to_slide_ids: dict[str, set[str]] = {}
             map_specimen_to_block_ids: dict[str, set[str]] = {}
-            map_case_to_specimen_ids: dict[str, set[str]] = {}
-            map_biological_being_to_case_ids: dict[str, set[str]] = {}
             map_biological_being_to_specimen_ids: dict[str, set[str]] = {}
 
             map_block_id_to_fields: dict[str, BigpictureSampleBlockFields] = {}
@@ -278,22 +285,12 @@ def extract_documents(
             def add_specimen_id_mapping(_specimen_id: str, _block_id: str) -> None:
                 map_specimen_to_block_ids.setdefault(_specimen_id, set()).add(_block_id)
 
-            def add_case_id_mapping(_case_id: str, _specimen_id: str) -> None:
-                map_case_to_specimen_ids.setdefault(_case_id, set()).add(_specimen_id)
-
             def add_biological_being_id_to_specimen_mapping(
                 _biological_being_id: str, _specimen_id: str
             ):
                 map_biological_being_to_specimen_ids.setdefault(
                     _biological_being_id, set()
                 ).add(_specimen_id)
-
-            def add_biological_being_id_to_case_mapping(
-                _biological_being_id: str, _case_id: str
-            ):
-                map_biological_being_to_case_ids.setdefault(
-                    _biological_being_id, set()
-                ).add(_case_id)
 
             # Read dataset XML.
             #
@@ -366,22 +363,11 @@ def extract_documents(
                 map_specimen_id_to_fields[specimen_id] = (
                     _extract_sample_specimen_fields(xml)
                 )
-                for case_id in xml.xpath(f"./PART_OF_CASE_REF/@{id_attribute}"):
-                    add_case_id_mapping(case_id, specimen_id)
                 for biological_being_id in xml.xpath(
                     f"./EXTRACTED_FROM_REF/@{id_attribute}"
                 ):
                     add_biological_being_id_to_specimen_mapping(
                         biological_being_id, specimen_id
-                    )
-
-            for xml in sample_xml.xpath("/CASE | /SAMPLE_SET/CASE"):
-                case_id = xml.get(id_attribute)
-                for biological_being_id in xml.xpath(
-                    f"./BIOLOGICAL_BEING_REF/@{id_attribute}"
-                ):
-                    add_biological_being_id_to_case_mapping(
-                        biological_being_id, case_id
                     )
 
             for xml in sample_xml.xpath(
@@ -406,9 +392,6 @@ def extract_documents(
 
             # Finished reading XMLs.
 
-            # Add search fields for each image.
-            #
-
             # Add dataset fields.
             fields: dict[str, BigpictureFields] = {}
             dataset_image_cnt = len(image_ids)
@@ -423,32 +406,27 @@ def extract_documents(
                     dataset_modified_at=dataset_modified_at,
                 )
 
-            # Add block fields.
+            # Add specimen fields. A specimen is extracted from exactly one
+            # biological being, and its block has a single field, so both are
+            # flattened into the specimen.
             for (
                 biological_being_id,
                 biological_being_fields,
             ) in map_biological_being_id_to_fields.items():
-                specimen_ids = set()
-                for case_id in map_biological_being_to_case_ids[biological_being_id]:
-                    for specimen_id in map_case_to_specimen_ids[case_id]:
-                        specimen_ids.add(specimen_id)
                 for specimen_id in map_biological_being_to_specimen_ids[
                     biological_being_id
                 ]:
-                    specimen_ids.add(specimen_id)
-
-                for specimen_id in specimen_ids:
                     for block_id in map_specimen_to_block_ids[specimen_id]:
                         for slide_id in map_block_to_slide_ids[block_id]:
                             for image_id in map_slide_to_image_ids[slide_id]:
-                                f = BigpictureBlockFields(
+                                specimen = BigpictureSpecimenFields(
                                     **map_block_id_to_fields[block_id].model_dump(),
                                     **map_specimen_id_to_fields[
                                         specimen_id
                                     ].model_dump(),
                                     **biological_being_fields.model_dump(),
                                 )
-                                fields[image_id].blocks.add(f)
+                                fields[image_id].specimens.add(specimen)
 
             # Add staining fields.
             for staining_id, staining_fields_list in map_staining_id_to_fields.items():
@@ -458,11 +436,9 @@ def extract_documents(
                     ):
                         for slide_id in map_staining_to_slide_ids[staining_id]:
                             for image_id in map_slide_to_image_ids[slide_id]:
-                                fields[image_id].stains.add(staining_fields)
+                                fields[image_id].stainings.add(staining_fields)
 
             # Return iterator of extracted documents.
-            #
-
             for image_id in image_ids:
                 bp_fields = fields[image_id]
                 yield ExtractedDocument(

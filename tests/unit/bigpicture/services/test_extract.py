@@ -39,21 +39,24 @@ def test_extract_fields():
     assert payload["image_id"] == "image_1"
     assert payload["dataset_id"] == "dataset_1"
     assert payload["dataset_description"] == "test_description"
-    block = payload["blocks"][0]
-    assert block["animal_species"] == "1"
-    assert block["block_preparation"] == "5"
-    assert block["sex"] == "Male"
-    assert block["anatomical_site"] == ["2"]
-    assert block["fixation_type"] == "3"
-    assert block["specimen_type"] == "4"
-    assert block["age_at_extraction"] == {"gte": 14600, "lte": 14965}
-    stain = payload["stains"][0]
+
+    # The block and biological being are flattened to specimen.
+    specimen = payload["specimen"][0]
+    assert specimen["block_preparation"] == "5"
+    assert specimen["anatomical_site"] == ["2"]
+    assert specimen["fixation_type"] == "3"
+    assert specimen["specimen_type"] == "4"
+    assert specimen["age_at_extraction"] == {"gte": 14600, "lte": 14965}
+    assert specimen["animal_species"] == "1"
+    assert specimen["sex"] == "Male"
+
+    stain = payload["staining"][0]
     assert stain["staining_procedure"] == "6"
     assert stain["staining_procedure_other"] == "test6"
     assert "staining_target" not in stain
 
     payload2 = build_document(docs["image_2"].values)
-    stain2 = payload2["stains"][0]
+    stain2 = payload2["staining"][0]
     assert stain2["staining_procedure"] == "7"
     assert stain2["staining_procedure_other"] == "test7"
     assert stain2["staining_target"] == "pan Cytokeratin"

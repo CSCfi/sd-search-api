@@ -32,7 +32,7 @@
         "type": "text",
         "analyzer": "english_text"
       },
-      "blocks": {
+      "specimen": {
         "type": "nested",
         "properties": {
           "animal_species": {
@@ -61,7 +61,7 @@
           }
         }
       },
-      "stains": {
+      "staining": {
         "type": "nested",
         "properties": {
           "staining_target": {

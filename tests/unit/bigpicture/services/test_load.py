@@ -1,6 +1,6 @@
 from search_api.api.opensearch.document import build_document
 from search_api.bigpicture.services.extract import (
-    BigpictureBlockFields,
+    BigpictureSpecimenFields,
     BigpictureCodeAttributeValue,
     BigpictureFields,
     BigpictureStainingFields,
@@ -28,15 +28,15 @@ def _fields(**kwargs) -> BigpictureFields:
 def test_to_opensearch_field_values():
     fields = _fields(
         dataset_title="A title",
-        blocks={
-            BigpictureBlockFields(
+        specimens={
+            BigpictureSpecimenFields(
                 animal_species=_code(_SPECIES),
                 anatomical_site=frozenset([_code(_BREAST), _code(_AXILLA)]),
                 age_at_extraction=("P40Y", "P41Y"),
                 sex="Female",
             )
         },
-        stains={BigpictureStainingFields(staining_target="Nucleus")},
+        stainings={BigpictureStainingFields(staining_target="Nucleus")},
     )
     payload = build_document(to_opensearch_field_values(fields))
 
@@ -44,12 +44,12 @@ def test_to_opensearch_field_values():
     assert payload["dataset_id"] == "ds"
     assert payload["dataset_image_cnt"] == 1
     assert payload["dataset_title"] == "A title"
-    block = payload["blocks"][0]
-    assert block["animal_species"] == _SPECIES
-    assert sorted(block["anatomical_site"]) == sorted([_BREAST, _AXILLA])
-    assert block["age_at_extraction"] == {"gte": 14600, "lte": 14965}
-    assert block["sex"] == "Female"
-    assert payload["stains"][0]["staining_target"] == "Nucleus"
+    specimen = payload["specimen"][0]
+    assert specimen["animal_species"] == _SPECIES
+    assert sorted(specimen["anatomical_site"]) == sorted([_BREAST, _AXILLA])
+    assert specimen["age_at_extraction"] == {"gte": 14600, "lte": 14965}
+    assert specimen["sex"] == "Female"
+    assert payload["staining"][0]["staining_target"] == "Nucleus"
 
 
 def _code(code: str) -> BigpictureCodeAttributeValue:
@@ -64,39 +64,39 @@ def _concept_ids(fields: BigpictureFields) -> dict[str, set[str]]:
 
 def test_concept_ids_from_values_animal_species():
     result = _concept_ids(
-        _fields(blocks={BigpictureBlockFields(animal_species=_code(_SPECIES))})
+        _fields(specimens={BigpictureSpecimenFields(animal_species=_code(_SPECIES))})
     )
     assert _SPECIES in result.get("animal_species", set())
 
 
 def test_concept_ids_from_values_anatomical_site():
-    block = BigpictureBlockFields(
+    specimen = BigpictureSpecimenFields(
         anatomical_site=frozenset([_code(_BREAST), _code(_AXILLA)])
     )
-    result = _concept_ids(_fields(blocks={block}))
+    result = _concept_ids(_fields(specimens={specimen}))
     assert {_BREAST, _AXILLA} <= result.get("anatomical_site", set())
 
 
 def test_concept_ids_from_values_fixation_type():
     result = _concept_ids(
-        _fields(blocks={BigpictureBlockFields(fixation_type=_code(_FFPE))})
+        _fields(specimens={BigpictureSpecimenFields(fixation_type=_code(_FFPE))})
     )
     assert _FFPE in result.get("fixation_type", set())
 
-    block = BigpictureBlockFields(fixation_type=_code("Formalin"))
-    result = _concept_ids(_fields(blocks={block}))
+    specimen = BigpictureSpecimenFields(fixation_type=_code("Formalin"))
+    result = _concept_ids(_fields(specimens={specimen}))
     assert "Formalin" not in result.get("fixation_type", set())
 
 
 def test_concept_ids_from_values_staining_procedure():
     stain = BigpictureStainingFields(staining_procedure=_code(_HE))
-    result = _concept_ids(_fields(stains={stain}))
+    result = _concept_ids(_fields(stainings={stain}))
     assert _HE in result.get("staining_procedure", set())
 
 
-def test_concept_ids_from_values_multiple_blocks():
-    block1 = BigpictureBlockFields(animal_species=_code(_SPECIES))
-    block2 = BigpictureBlockFields(block_preparation=_code(_PARAFFIN))
-    result = _concept_ids(_fields(blocks={block1, block2}))
+def test_concept_ids_from_values_multiple_specimens():
+    specimen1 = BigpictureSpecimenFields(animal_species=_code(_SPECIES))
+    specimen2 = BigpictureSpecimenFields(block_preparation=_code(_PARAFFIN))
+    result = _concept_ids(_fields(specimens={specimen1, specimen2}))
     assert _SPECIES in result.get("animal_species", set())
     assert _PARAFFIN in result.get("block_preparation", set())

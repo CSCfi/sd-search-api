@@ -6,9 +6,21 @@
 #
 # Conventions:
 #   - The field name is the "id".
-#   - "group" is the nested OpenSearch container path (e.g. "blocks");
-#     omit it for a top-level field. The full OpenSearch index path is
-#     "<group>.<id>".
+#   - "group" is the OpenSearch nested container a field lives in; omit it for a
+#     top-level field. The full index path is "<group>.<id>".
+#
+#     Grouping follows the source XML hierarchy but nested containers are created only
+#     when needed. A nested container is required when an object can repeat within
+#     an image and has several correlated fields.
+#     Only two objects meet this requirement:
+#       - specimen: a block can be sampled from many specimens, and a specimen has
+#         several correlated fields. A specimen is extracted from exactly one
+#         biological being, so the biological being's fields can be flattened in
+#         the specimen. The block has a single field (block_preparation)
+#         with nothing to correlate and can also be flattened in the specimen.
+#       - staining: a slide carries several stains, each with correlated fields.
+#     The slide and case have no searchable fields and do not need to be
+#     represented as nested containers.
 #   - "ui_group" is the UI group id this term belongs to.
 #   - "ui_display" controls whether the term is shown in the UI.
 #   - Quote ontology concept codes (e.g. "410607006"). Unquoted, they are parsed
@@ -34,7 +46,7 @@ filtering_terms:
 
   - id: animal_species
     type: ontology
-    group: blocks
+    group: specimen
     scopes: [ biological_being ]
     label: "Biological species"
     description: "Species of the biological being"
@@ -46,7 +58,7 @@ filtering_terms:
 
   - id: anatomical_site
     type: ontology
-    group: blocks
+    group: specimen
     scopes: [ specimen ]
     label: "Anatomical site"
     description: >-
@@ -61,7 +73,7 @@ filtering_terms:
 
   - id: sex
     type: controlledValue
-    group: blocks
+    group: specimen
     scopes: [ biological_being ]
     label: "Sex"
     description: "The sex of the biological being"
@@ -70,7 +82,7 @@ filtering_terms:
 
   - id: age_at_extraction
     type: iso8601Range
-    group: blocks
+    group: specimen
     scopes: [ specimen ]
     label: "Age at extraction"
     description: "The age of the biological being at the time point of extraction of the specimen."
@@ -78,7 +90,7 @@ filtering_terms:
 
   - id: block_preparation
     type: ontology
-    group: blocks
+    group: specimen
     scopes: [ block ]
     label: "Block preparation"
     description: "The preservation technique used."
@@ -95,7 +107,7 @@ filtering_terms:
 
   - id: specimen_type
     type: ontology
-    group: blocks
+    group: specimen
     scopes: [ specimen ]
     label: "Specimen type"
     description: "The type of the specimen."
@@ -106,7 +118,7 @@ filtering_terms:
 
   - id: fixation_type
     type: ontologyOrValue
-    group: blocks
+    group: specimen
     scopes: [ specimen ]
     label: "Fixation type"
     description: "The type of fixation used in the process of the creation of the specimen."
@@ -117,7 +129,7 @@ filtering_terms:
 
   - id: staining_target
     type: keyword
-    group: stains
+    group: staining
     scopes: [ staining ]
     label: "Staining target"
     description: "The specific target of the stain"
@@ -125,7 +137,7 @@ filtering_terms:
 
   - id: staining_procedure
     type: ontologyOrValue
-    group: stains
+    group: staining
     scopes: [ staining ]
     label: "Staining procedure"
     description: "The name of the staining procedure that was performed to stain the slide"
@@ -136,7 +148,7 @@ filtering_terms:
 
   - id: staining_substance
     type: ontologyOrValue
-    group: stains
+    group: staining
     scopes: [ staining ]
     label: "Staining substance"
     description: "The staining substance that binds to parts of the tissues of the slide"

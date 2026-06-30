@@ -59,7 +59,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
         "dataset_short_name": "Breast-HE",
         "dataset_title": "Human Breast Tissue Collection",
         "dataset_description": "FFPE breast tissue sections stained with haematoxylin and eosin.",
-        "blocks": [
+        "specimen": [
             {
                 "animal_species": HUMAN_CONCEPT_ID,
                 "sex": "Female",
@@ -71,7 +71,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
                 "age_at_extraction": {"gte": 16425, "lte": 18250},
             }
         ],
-        "stains": [
+        "staining": [
             {
                 "staining_procedure": HE_CONCEPT_ID,
                 "staining_procedure_other": "Haematoxylin and eosin stain",
@@ -85,7 +85,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
         "dataset_short_name": "Breast-HE",
         "dataset_title": "Human Breast Tissue Collection",
         "dataset_description": "FFPE breast tissue sections stained with haematoxylin and eosin.",
-        "blocks": [
+        "specimen": [
             {
                 "animal_species": HUMAN_CONCEPT_ID,
                 "sex": "Female",
@@ -97,7 +97,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
                 "age_at_extraction": {"gte": 20075, "lte": 21900},
             }
         ],
-        "stains": [
+        "staining": [
             {
                 "staining_procedure": IHC_CONCEPT_ID,
                 "staining_procedure_other": "Immunohistochemical staining",
@@ -114,7 +114,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
         "dataset_short_name": "Breast-HE",
         "dataset_title": "Human Breast Tissue Collection",
         "dataset_description": "FFPE breast tissue sections stained with haematoxylin and eosin.",
-        "blocks": [
+        "specimen": [
             {
                 "animal_species": HUMAN_CONCEPT_ID,
                 "sex": "Male",
@@ -126,7 +126,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
                 "age_at_extraction": {"gte": 23725, "lte": 25550},
             }
         ],
-        "stains": [
+        "staining": [
             {
                 "staining_procedure": HE_CONCEPT_ID,
                 "staining_procedure_other": "Haematoxylin and eosin stain",
@@ -140,7 +140,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
         "dataset_short_name": "Mouse-Kidney",
         "dataset_title": "Mouse Kidney Study",
         "dataset_description": "Kidney tissue from Mus musculus prepared by fresh frozen and paraffin embedding.",
-        "blocks": [
+        "specimen": [
             {
                 "animal_species": MOUSE_CONCEPT_ID,
                 "sex": "Male",
@@ -152,7 +152,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
                 "age_at_extraction": {"gte": 0, "lte": 365},
             }
         ],
-        "stains": [
+        "staining": [
             {
                 "staining_procedure": HE_CONCEPT_ID,
                 "staining_procedure_other": "Haematoxylin and eosin stain",
@@ -166,7 +166,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
         "dataset_short_name": "Mouse-Kidney",
         "dataset_title": "Mouse Kidney Study",
         "dataset_description": "Kidney tissue from Mus musculus prepared by fresh frozen and paraffin embedding.",
-        "blocks": [
+        "specimen": [
             {
                 "animal_species": MOUSE_CONCEPT_ID,
                 "sex": "Female",
@@ -178,7 +178,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
                 "age_at_extraction": {"gte": 0, "lte": 365},
             }
         ],
-        "stains": [
+        "staining": [
             {
                 "staining_procedure": ISH_CONCEPT_ID,
                 "staining_procedure_other": "In situ hybridization",

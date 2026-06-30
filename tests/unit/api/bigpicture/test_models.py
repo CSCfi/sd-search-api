@@ -17,18 +17,18 @@ from search_api.api.bigpicture.models import (
 from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorService
 from search_api.api.opensearch.models import OpenSearchOntologyOrValue
 from search_api.bigpicture.services.extract import (
-    BigpictureBlockFields,
     BigpictureCodeAttributeValue,
     BigpictureFields,
+    BigpictureSpecimenFields,
     BigpictureStainingFields,
 )
 from search_api.services.validate import validate_json
 
-# OpenSearch containers.
+# Map each OpenSearch nested-container path to the model that holds its fields.
 _CONTAINER_MODELS = {
     "": BigpictureFields,
-    "blocks": BigpictureBlockFields,
-    "stains": BigpictureStainingFields,
+    "specimen": BigpictureSpecimenFields,
+    "staining": BigpictureStainingFields,
 }
 
 _BP_INDEX_PATH = (
@@ -52,7 +52,7 @@ def test_ontology_model_fields_match_filtering_terms():
         }
 
     model_field_ids = ontology_field_names(
-        BigpictureBlockFields
+        BigpictureSpecimenFields
     ) | ontology_field_names(BigpictureStainingFields)
     filtering_term_ids = {
         t.id for t in BP_FILTERING_TERMS if t.type in ("ontology", "ontologyOrValue")

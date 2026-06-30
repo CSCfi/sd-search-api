@@ -8,7 +8,7 @@ from search_api.bigpicture.services.extract import (
     BigpictureCodeAttributeValue,
     BigpictureFields,
     BigpictureStainingFields,
-    BigpictureBlockFields,
+    BigpictureSpecimenFields,
     to_opensearch_field_values,
 )
 from search_api.api.bigpicture.models import BP_OPENSEARCH_INDEX
@@ -42,8 +42,8 @@ async def test_load_and_sync_fields():
         dataset_short_name=dataset_short_name,
         dataset_title=dataset_title,
         dataset_description=dataset_description,
-        blocks={
-            BigpictureBlockFields(
+        specimens={
+            BigpictureSpecimenFields(
                 sex="Male",
                 animal_species=get_code("1"),
                 anatomical_site=frozenset([get_code("2")]),
@@ -54,7 +54,7 @@ async def test_load_and_sync_fields():
                 age_at_extraction=("P10Y", "P20Y"),
             )
         },
-        stains={
+        stainings={
             BigpictureStainingFields(
                 staining_procedure=get_code("11"),
                 staining_procedure_other="test_procedure",
@@ -83,8 +83,8 @@ async def test_load_and_sync_fields():
             assert payload["dataset_short_name"] == dataset_short_name
             assert payload["dataset_title"] == dataset_title
             assert payload["dataset_description"] == dataset_description
-            assert len(payload.get("blocks", [])) == 1
-            assert len(payload.get("stains", [])) == 1
+            assert len(payload.get("specimen", [])) == 1
+            assert len(payload.get("staining", [])) == 1
 
             await sync_service.sync_fields(cur, image_id)
 

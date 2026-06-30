@@ -16,3 +16,6 @@ CLAUDE.local.md
 .ruff_cache/
 .tox/
 .pytest_cache/
+
+# MacOS
+.DS_Store

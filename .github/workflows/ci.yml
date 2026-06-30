@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        tox-env: [ruff, mypy, pytest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Install tox
+        run: uv tool install tox --with tox-uv
+
+      - name: Run ${{ matrix.tox-env }}
+        run: tox -e ${{ matrix.tox-env }}
+
+  integration:
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Install dependencies
+        run: uv sync --extra tox
+
+      - name: Start backend, Postgres, OpenSearch
+        run: docker compose --env-file tests/integration/.env --profile dev up --build -d
+
+      - name: Wait for backend to be healthy
+        run: |
+          for i in $(seq 1 30); do
+            status=$(docker inspect --format='{{.State.Health.Status}}' "$(docker compose ps -q bp-sd-search-api)" 2>/dev/null || echo "starting")
+            if [ "$status" = "healthy" ]; then
+              echo "backend healthy"
+              exit 0
+            fi
+            echo "waiting for backend ($status)..."
+            sleep 5
+          done
+          echo "backend did not become healthy in time"
+          docker compose logs
+          exit 1
+
+      - name: Run integration tests
+        run: |
+          set -a
+          source tests/integration/.env
+          set +a
+          uv run pytest tests/integration/
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: docker compose --env-file tests/integration/.env --profile dev logs
+
+      - name: Tear down
+        if: always()
+        run: docker compose --env-file tests/integration/.env --profile dev down -v

@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        tox-env: [ruff, mypy, pytest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Install tox
+        run: uv tool install tox --with tox-uv
+
+      - name: Run ${{ matrix.tox-env }}
+        run: tox -e ${{ matrix.tox-env }}
+
+  integration:
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra tox
+
+      - name: Start backend, Postgres, OpenSearch
+        run: docker compose --env-file tests/integration/.env --profile dev up --build -d --wait
+
+      - name: Run integration tests
+        run: |
+          set -a
+          source tests/integration/.env
+          set +a
+          uv run pytest tests/integration/
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: docker compose --env-file tests/integration/.env --profile dev logs
+
+      - name: Tear down
+        if: always()
+        run: docker compose --env-file tests/integration/.env --profile dev down -v

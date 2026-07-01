@@ -20,11 +20,6 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.14"
-
       - name: Install tox
         run: uv tool install tox --with tox-uv
 
@@ -42,31 +37,11 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.14"
-
       - name: Install dependencies
         run: uv sync --extra tox
 
       - name: Start backend, Postgres, OpenSearch
-        run: docker compose --env-file tests/integration/.env --profile dev up --build -d
-
-      - name: Wait for backend to be healthy
-        run: |
-          for i in $(seq 1 30); do
-            status=$(docker inspect --format='{{.State.Health.Status}}' "$(docker compose ps -q bp-sd-search-api)" 2>/dev/null || echo "starting")
-            if [ "$status" = "healthy" ]; then
-              echo "backend healthy"
-              exit 0
-            fi
-            echo "waiting for backend ($status)..."
-            sleep 5
-          done
-          echo "backend did not become healthy in time"
-          docker compose logs
-          exit 1
+        run: docker compose --env-file tests/integration/.env --profile dev up --build -d --wait
 
       - name: Run integration tests
         run: |

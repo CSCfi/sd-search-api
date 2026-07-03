@@ -540,6 +540,13 @@ def _extract_staining_fields(xml: ElementTree) -> list[BigpictureStainingFields]
     return fields
 
 
+_XSI_NIL = "{http://www.w3.org/2001/XMLSchema-instance}nil"
+
+
+def _is_nil(elem: Any) -> bool:
+    return elem.get(_XSI_NIL) == "true"
+
+
 def _extract_code_attribute_value(
     elem: ElementTree, tag: str, *, is_attributes=True
 ) -> BigpictureCodeAttributeValue | None:
@@ -548,7 +555,7 @@ def _extract_code_attribute_value(
     else:
         values = elem.xpath(f"CODE_ATTRIBUTE[TAG='{tag}']/VALUE")
 
-    if not values:
+    if not values or _is_nil(values[0]):
         return None
     value = values[0]
 
@@ -576,6 +583,7 @@ def _extract_code_attribute_values(
             scheme_version=v.findtext("SCHEME_VERSION"),
         )
         for v in values
+        if not _is_nil(v)
     )
 
 

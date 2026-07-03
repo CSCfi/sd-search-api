@@ -12,6 +12,11 @@ COPY pyproject.toml uv.lock .python-version ./
 COPY README.md .
 COPY search_api ./search_api
 
-RUN uv sync --frozen
+RUN uv sync --frozen && \
+    chgrp -R 0 /app && \
+    chmod -R g=u /app
+
+ENV HOME=/app \
+    UV_CACHE_DIR=/app/.cache/uv
 
 ENTRYPOINT ["uv", "run", "sd_search_api"]

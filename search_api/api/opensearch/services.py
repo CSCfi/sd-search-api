@@ -28,6 +28,29 @@ def create_search() -> AsyncOpenSearch:
     )
 
 
+async def create_index(
+    search: AsyncOpenSearch, index: str, body: dict[str, Any]
+) -> None:
+    """Create an OpenSearch index with the given settings and mappings.
+
+    Raises SystemException if the index already exists. OpenSearch cannot change
+    an existing field's type, so an index created with the wrong (e.g. dynamic)
+    mapping must be deleted and recreated deliberately rather than silently left
+    in place.
+
+    :param search: The OpenSearch client.
+    :param index: The OpenSearch index name.
+    :param body: The index body (settings and mappings) to create it with.
+    """
+    if await search.indices.exists(index=index):
+        raise SystemException(
+            f"Index '{index}' already exists. Delete it explicitly first if you "
+            "intend to recreate it (e.g. `curl -X DELETE .../<index>`), then rerun "
+            "this command and resync."
+        )
+    await search.indices.create(index=index, body=body)
+
+
 async def index_document(
     search: AsyncOpenSearch,
     index: str,

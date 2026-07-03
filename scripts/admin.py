@@ -13,6 +13,7 @@ import search_api
 from search_api.api.deployments import DOMAINS
 from search_api.api.domain import Domain
 from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorService
+from search_api.api.opensearch.services import create_index, create_search
 from search_api.services.load import LoadService
 from search_api.services.sync import SyncService
 from search_api.database.repository import get_cursor
@@ -81,6 +82,16 @@ def _generate_index(domain: Domain) -> None:
     logging.info("Wrote OpenSearch index to %s.", path)
 
 
+async def _create_index(domain: Domain) -> None:
+    body = OpenSearchIndexGeneratorService(domain.opensearch_fields).generate()
+    search = create_search()
+    try:
+        await create_index(search, domain.opensearch_index, body)
+        logging.info("Created OpenSearch index %s.", domain.opensearch_index)
+    finally:
+        await search.close()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Search admin CLI.")
     parser.add_argument(
@@ -128,6 +139,16 @@ if __name__ == "__main__":
             "generate-index", help="Generate the OpenSearch JSON index."
         )
 
+        # create-index
+        commands.add_parser(
+            "create-index",
+            help=(
+                "Create the OpenSearch index in the cluster from the generated "
+                "mapping. Required once per environment before the first --sync; "
+                "fails if the index already exists."
+            ),
+        )
+
     # snomed (deployment-independent)
     snomed_commands = groups.add_parser(
         "snomed", help="Manage the shared SNOMED CT preferred terms cache."
@@ -152,3 +173,5 @@ if __name__ == "__main__":
             asyncio.run(_load(domain, args))
         elif args.command == "generate-index":
             _generate_index(domain)
+        elif args.command == "create-index":
+            asyncio.run(_create_index(domain))

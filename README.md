@@ -239,7 +239,7 @@ Load from a parent directory containing multiple dataset subdirectories:
 uv run python scripts/admin.py Bigpicture load /path/to/datasets/ --multi-dir --load
 ```
 
-Omit `--load` parse XMLs without loading them to the database.
+Omit `--load` to parse XMLs without loading them to the database.
 
 To also sync to OpenSearch immediately after loading, add `--sync`:
 
@@ -269,6 +269,34 @@ uv run python scripts/admin.py Bigpicture generate-index
 ```
 
 An unit test fails if this file is different from a freshy generated one.
+
+#### Create the OpenSearch index in a new environment
+
+`generate-index` only writes the mapping to a local file — it does not create the index in
+OpenSearch. **A new OpenSearch instance needs the index created from that mapping before the
+first `--sync`.** If documents are synced into an index that doesn't exist yet, OpenSearch
+silently auto-creates it with a dynamic mapping (e.g. `keyword` fields become `text`, and
+`nested` fields become plain objects), which breaks aggregations and nested queries in ways
+that only surface later, disconnected from the actual cause.
+
+Create the index explicitly:
+
+```bash
+uv run python scripts/admin.py --env-file <env> Bigpicture create-index
+```
+
+This fails loudly if the index already exists, rather than silently leaving a stale mapping in
+place. If an index was already auto-created with the wrong mapping, OpenSearch cannot change an
+existing field's type in place, so it must be deleted and recreated, and previously-synced
+documents must be resynced:
+
+```bash
+curl -X DELETE https://<opensearch-host>:9200/bp-image-index -u <user>:<password>
+uv run python scripts/admin.py --env-file <env> Bigpicture create-index
+# Reset sync state so the next --sync repopulates the recreated index:
+#   UPDATE document SET synced_at = NULL;
+uv run python scripts/admin.py --env-file <env> Bigpicture load <dir> --load --sync
+```
 
 ## LLM search
 

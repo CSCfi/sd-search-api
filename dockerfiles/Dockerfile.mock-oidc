@@ -1,2 +1,3 @@
-FROM cscfi/sd-search-api
+FROM ghcr.io/astral-sh/uv:python3.14-trixie
+RUN uv pip install --system "pyjwt[crypto]"
 COPY tests/integration/oidc_mock.py ./tests/integration/oidc_mock.py

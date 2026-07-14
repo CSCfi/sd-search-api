@@ -1,4 +1,11 @@
 services:
+  mock-oidc:
+    profiles: [ "dev" ]
+    build:
+      dockerfile: ./dockerfiles/Dockerfile.mock-oidc
+      context: .
+    image: cscfi/sd-search-api-mock-oidc
+    entrypoint: [ "uv", "run", "python", "tests/integration/oidc_mock.py" ]
   bp-sd-search-api:
     profiles: [ "dev" ]
     build:
@@ -21,11 +28,19 @@ services:
       - ADMIN_KEY=${ADMIN_KEY}
       - LLM_BASE_URL=${LLM_BASE_URL}
       - LLM_API_KEY=${LLM_API_KEY}
+      - BASE_URL=${BASE_URL}
+      - OIDC_URL=http://mock-oidc:8998
+      - OIDC_CLIENT_ID=${OIDC_CLIENT_ID}
+      - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET}
+      - OIDC_SECURE_COOKIE=${OIDC_SECURE_COOKIE:-true}
+      - JWT_KEY=${JWT_KEY}
     depends_on:
       bp-postgres:
         condition: service_healthy
       opensearch:
         condition: service_healthy
+      mock-oidc:
+        condition: service_started
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 10s

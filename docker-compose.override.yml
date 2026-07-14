@@ -1,5 +1,8 @@
 services:
   # Allow connections outside the docker network.
+  mock-oidc:
+    ports:
+      - "127.0.0.1:8998:8998"
   bp-sd-search-api:
     ports:
       - "8000:8000"

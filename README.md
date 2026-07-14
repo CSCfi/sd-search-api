@@ -55,7 +55,7 @@ Integration tests require Postgres and OpenSearch to be running. Start
 them with Docker Compose:
 
 ```bash
-docker compose --env-file tests/integration/.env --profile dev up --build
+docker compose --env-file tests/integration/.env --profile dev up --build -d
 ```
 
 Then run:

@@ -1,0 +1,2 @@
+FROM cscfi/sd-search-api
+COPY tests/integration/oidc_mock.py ./tests/integration/oidc_mock.py

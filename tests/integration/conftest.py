@@ -12,8 +12,38 @@ from opensearchpy import helpers
 load_dotenv(Path(__file__).parent / ".env")
 
 from search_api.api.opensearch.services import create_search  # noqa: E402
+from tests.integration.oidc_mock import MockOIDCProvider  # noqa: E402
 
 bp_search = create_search()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _mock_oidc_provider():
+    """Start the mock OIDC identity provider used by the `client` login fixtures.
+
+    Session-scoped and autouse because the actual sd-search-api server under test
+    runs out-of-process (started separately, see CLAUDE.md); nothing in-process can
+    be monkeypatched, so idpyoidc RPHandler needs a real, reachable IdP to talk
+    to for the duration of the whole test session.
+
+    Skip starting if already running (e.g. from docker-compose's mock-oidc container).
+    """
+    import socket
+
+    # Check if mock OIDC is already listening on localhost:8998
+    try:
+        s = socket.create_connection(("127.0.0.1", 8998), timeout=1)
+        s.close()
+        yield
+        return
+    except OSError, socket.error:
+        pass
+
+    # Start the mock provider if not already running
+    provider = MockOIDCProvider()
+    provider.start()
+    yield
+    provider.stop()
 
 
 @pytest_asyncio.fixture(scope="session", autouse=True)

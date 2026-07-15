@@ -605,6 +605,19 @@ wheels = [
 ]
 
 [[package]]
+name = "cryptojwt"
+version = "1.11.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "requests" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/73/85/6de1cadaa68324def632982a983f8498a329c2fe29302e9a3d3bec75bdf5/cryptojwt-1.11.0.tar.gz", hash = "sha256:515a345d3fb091606f293834736d9a72cff932a021a1962f8a8bc6dc0358cfb0", size = 153243, upload-time = "2026-03-24T08:48:21.664Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a4/f3/815c5e1e110e918c2c431cc9ee0abe79ac24c6a1f012215eb266c5627cad/cryptojwt-1.11.0-py3-none-any.whl", hash = "sha256:156e56b341bb3633e3a0234bab29b3076e3490899510e13b0551dcf0418c814a", size = 90812, upload-time = "2026-03-24T08:48:20.21Z" },
+]
+
+[[package]]
 name = "cssselect"
 version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1279,6 +1292,23 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/6f/6d/0703ccc57f3a7233505399edb88de3cbd678da106337b9fcde432b65ed60/idna-3.11.tar.gz", hash = "sha256:795dafcc9c04ed0c1fb032c2aa73654d8e8c5023a7df64a53f39190ada629902", size = 194582, upload-time = "2025-10-12T14:55:20.501Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0e/61/66938bbb5fc52dbdf84594873d5b51fb1f7c7794e9c0f5bd885f30bc507b/idna-3.11-py3-none-any.whl", hash = "sha256:771a87f49d9defaf64091e6e6fe9c18d4833f140bd19464795bc32d966ca37ea", size = 71008, upload-time = "2025-10-12T14:55:18.883Z" },
+]
+
+[[package]]
+name = "idpyoidc"
+version = "5.0.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptojwt" },
+    { name = "filelock" },
+    { name = "jinja2" },
+    { name = "pyopenssl" },
+    { name = "pyyaml" },
+    { name = "responses" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b3/0d/cb409d1404bfa29afb6ca4a01a1c8b4fb6fd24b1fc41afbd3c8dcff021d6/idpyoidc-5.0.0.tar.gz", hash = "sha256:1a14c34abc8d620abce00df94d3718a7d453b8b0b1429186506d91db52466f04", size = 391639, upload-time = "2024-09-15T08:36:17.354Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a6/20/26bb49aed85801cc54c49e80b28025d3a5ea136e4340abb45e91182e290f/idpyoidc-5.0.0-py3-none-any.whl", hash = "sha256:7baae537663e55cce11f8151c1a234f1a8b218762aab2edd9d07bc8d16174776", size = 281871, upload-time = "2024-09-15T08:36:15.61Z" },
 ]
 
 [[package]]
@@ -2553,6 +2583,18 @@ wheels = [
 ]
 
 [[package]]
+name = "pyopenssl"
+version = "26.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1a/51/27a5ad5f939d08f690a326ef9582cda7140555180db71695f6fb747d6a36/pyopenssl-26.2.0.tar.gz", hash = "sha256:8c6fcecd1183a7fc897548dfe388b0cdb7f37e018200d8409cf33959dbe35387", size = 182195, upload-time = "2026-05-04T23:06:09.72Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/73/b8/a0e2790ae249d6f38c9f66de7a211621a7ab2650217bcd04e1262f578a56/pyopenssl-26.2.0-py3-none-any.whl", hash = "sha256:4f9d971bc5298b8bc1fab282803da04bf000c755d4ad9d99b52de2569ca19a70", size = 55823, upload-time = "2026-05-04T23:06:08.395Z" },
+]
+
+[[package]]
 name = "pyperclip"
 version = "1.11.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2834,6 +2876,20 @@ wheels = [
 ]
 
 [[package]]
+name = "responses"
+version = "0.26.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyyaml" },
+    { name = "requests" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f0/1a/4af3e6d659394b809838490b144e4ab8d7ed3b9fecc7ca78f5d2f79b1a3d/responses-0.26.2.tar.gz", hash = "sha256:9c9259b46a8349197edebf43cfa68a87e1a2802ef503ff8b2fecbabc0b45afd8", size = 84030, upload-time = "2026-07-03T16:44:50.325Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7c/28/693e1d9ebf72baa062ded80d837a035b86ce75eda5a269379e9e2b1008a8/responses-0.26.2-py3-none-any.whl", hash = "sha256:6fdfeabd58e5ec473b98dfe02e6d46d3173bd8dd573eff2ccccf1a05a5135364", size = 35609, upload-time = "2026-07-03T16:44:49.1Z" },
+]
+
+[[package]]
 name = "rich"
 version = "15.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2943,6 +2999,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "fsspec" },
     { name = "httpx" },
+    { name = "idpyoidc" },
     { name = "isodate" },
     { name = "jsonschema" },
     { name = "lxml" },
@@ -2951,6 +3008,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-ai" },
     { name = "pydantic-settings" },
+    { name = "pyjwt" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
     { name = "types-jsonschema" },
@@ -2988,6 +3046,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.136.1" },
     { name = "fsspec", specifier = ">=2026.2.0" },
     { name = "httpx", specifier = ">=0.28.1" },
+    { name = "idpyoidc", specifier = ">=5.0.0" },
     { name = "isodate", specifier = ">=0.7.2" },
     { name = "jsonschema", specifier = ">=4.26.0" },
     { name = "lxml", specifier = ">=6.0.2" },
@@ -2997,6 +3056,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.12.5" },
     { name = "pydantic-ai", specifier = ">=0.3.0" },
     { name = "pydantic-settings", specifier = ">=2.9.1" },
+    { name = "pyjwt", specifier = ">=2.13.0" },
     { name = "pytest", marker = "extra == 'tox'", specifier = "==9.0.2" },
     { name = "pytest-cov", marker = "extra == 'tox'", specifier = "==7.0.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },

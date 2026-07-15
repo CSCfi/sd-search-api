@@ -1,6 +1,8 @@
+import base64
 from typing import Literal
+from urllib.parse import urljoin
 
-from pydantic import Field
+from pydantic import Field, computed_field, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -81,6 +83,77 @@ class AIConfiguration(BaseSettings):
     LLM_API_KEY: str = Field(description="LLM API key.")
 
 
+class OIDCConfiguration(BaseSettings):
+    """OIDC relying party configuration."""
+
+    BASE_URL: str = Field(description="Public base URL this API is served at.")
+    OIDC_URL: str = Field(description=("OIDC issuer URL."))
+    OIDC_CLIENT_ID: str = Field(
+        description="OIDC client ID registered with the issuer."
+    )
+    OIDC_CLIENT_SECRET: str = Field(
+        description="OIDC client secret registered with the issuer."
+    )
+    OIDC_REDIRECT_URL: str | None = Field(
+        default=None,
+        description=(
+            "OIDC redirect URL to send the user to after login/logout. Defaults to "
+            "/docs endpoint when unset."
+        ),
+    )
+    OIDC_SCOPE: str = Field(
+        default="openid profile email", description="OIDC scopes to request."
+    )
+    OIDC_SECURE_COOKIE: bool = Field(
+        default=True,
+        description=(
+            "Set the Secure attribute on session/login cookies. Disable only for "
+            "plain-HTTP deployments (e.g. local development without TLS)."
+        ),
+    )
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def callback_url(self) -> str:
+        """OIDC callback URL registered with the issuer."""
+        return urljoin(self.BASE_URL, "/callback")
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def redirect_url(self) -> str:
+        """URL to send the user to after login/logout."""
+        return self.OIDC_REDIRECT_URL or urljoin(self.BASE_URL, "/docs")
+
+
+class JWTConfiguration(BaseSettings):
+    """Session JWT configuration."""
+
+    JWT_KEY: str = Field(
+        description="Base64-encoded secret key used to sign session JWTs."
+    )
+    JWT_ISSUER: str = Field(
+        default="sd-search-api", description="Session JWT issuer claim."
+    )
+    JWT_ALGORITHM: str = Field(
+        default="HS256", description="Session JWT signing algorithm."
+    )
+
+    @field_validator("JWT_KEY")
+    @classmethod
+    def decode_jwt_key(cls, value: str) -> str:
+        """Decode JWT key from base64-encoded environment variable."""
+        try:
+            decoded = base64.b64decode(value, validate=True)
+            key = decoded.decode("utf-8")
+        except Exception as exc:
+            raise ValueError("JWT_KEY must be a valid base64-encoded string") from exc
+        if len(decoded) < 32:
+            raise ValueError(
+                "JWT_KEY must decode to at least 32 bytes (256 bits) for HS256 signing"
+            )
+        return key
+
+
 def deployment_config() -> DeploymentConfiguration:
     """Get deployment configuration."""
     return DeploymentConfiguration()
@@ -119,3 +192,13 @@ def feature_config() -> FeatureConfiguration:
 def ai_config() -> AIConfiguration:
     """Get AI configuration."""
     return AIConfiguration()
+
+
+def oidc_config() -> OIDCConfiguration:
+    """Get OIDC configuration."""
+    return OIDCConfiguration()
+
+
+def jwt_config() -> JWTConfiguration:
+    """Get JWT configuration."""
+    return JWTConfiguration()

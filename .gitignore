@@ -1,5 +1,6 @@
 .idea/
 /.coverage
+.env*
 
 # Python
 __pycache__/
@@ -9,6 +10,7 @@ __pycache__/
 ### Claude ###
 .claude/
 CLAUDE.local.md
+openspec
 
 # Tools
 .venv/

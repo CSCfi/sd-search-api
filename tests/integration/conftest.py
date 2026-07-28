@@ -12,7 +12,7 @@ from opensearchpy import helpers
 load_dotenv(Path(__file__).parent / ".env")
 
 from search_api.api.opensearch.services import create_search  # noqa: E402
-from tests.integration.oidc_mock import MockOIDCProvider  # noqa: E402
+from tests.integration.mockauth import MockAuthProvider  # noqa: E402
 
 bp_search = create_search()
 
@@ -26,7 +26,7 @@ def _mock_oidc_provider():
     be monkeypatched, so idpyoidc RPHandler needs a real, reachable IdP to talk
     to for the duration of the whole test session.
 
-    Skip starting if already running (e.g. from docker-compose's mock-oidc container).
+    Skip starting if already running (e.g. from docker-compose's mockauth container).
     """
     import socket
 
@@ -40,7 +40,7 @@ def _mock_oidc_provider():
         pass
 
     # Start the mock provider if not already running
-    provider = MockOIDCProvider()
+    provider = MockAuthProvider()
     provider.start()
     yield
     provider.stop()

@@ -40,13 +40,13 @@ def _b64url_uint(value: int) -> str:
     return base64.urlsafe_b64encode(value.to_bytes(length, "big")).rstrip(b"=").decode()
 
 
-class MockOIDCServer(ThreadingHTTPServer):
+class MockAuthServer(ThreadingHTTPServer):
     """Owns the mock IdP's signing key, JWKS, and in-flight authorization codes."""
 
     daemon_threads = True
 
     def __init__(self) -> None:
-        super().__init__((HOST, PORT), MockOIDCRequestHandler)
+        super().__init__((HOST, PORT), MockAuthRequestHandler)
 
         private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         public_numbers = private_key.public_key().public_numbers()
@@ -73,8 +73,8 @@ class MockOIDCServer(ThreadingHTTPServer):
         self.codes: dict[str, str] = {}
 
 
-class MockOIDCRequestHandler(BaseHTTPRequestHandler):
-    server: MockOIDCServer
+class MockAuthRequestHandler(BaseHTTPRequestHandler):
+    server: MockAuthServer
 
     def log_message(self, format_str: str, *args: object) -> None:
         pass
@@ -82,7 +82,7 @@ class MockOIDCRequestHandler(BaseHTTPRequestHandler):
     def _get_issuer_url(self) -> str:
         """Derive the issuer URL from the incoming request's Host header.
 
-        This lets the same server be reached as both ``mock-oidc:8998`` (from the
+        This lets the same server be reached as both ``mockauth:8998`` (from the
         API container via the docker network) and ``127.0.0.1:8998`` (from the test
         host), and return a discovery document whose ``issuer`` matches the URL the
         caller used — so idpyoidc's RPHandler always sees a consistent issuer.
@@ -210,11 +210,11 @@ class MockOIDCRequestHandler(BaseHTTPRequestHandler):
         )
 
 
-class MockOIDCProvider:
+class MockAuthProvider:
     """Starts/stops the mock IdP HTTP server in a background thread."""
 
     def __init__(self) -> None:
-        self._server = MockOIDCServer()
+        self._server = MockAuthServer()
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
 
     def start(self) -> None:
@@ -227,7 +227,7 @@ class MockOIDCProvider:
 
 
 if __name__ == "__main__":
-    provider = MockOIDCProvider()
+    provider = MockAuthProvider()
     print(f"Starting mock OIDC provider on 0.0.0.0:{PORT}...", flush=True)
     provider.start()
     print("Mock OIDC provider is running", flush=True)

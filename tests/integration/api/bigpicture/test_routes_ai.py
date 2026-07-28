@@ -7,7 +7,7 @@ import pytest
 
 from search_api.ai.models import AIQueryFilter
 from search_api.api.bigpicture.ai import BigpictureAISearchResult
-from tests.integration.oidc_mock import PORT as OIDC_MOCK_PORT
+from tests.integration.mockauth import PORT as OIDC_MOCK_PORT
 
 skip = pytest.mark.skip(reason="Requires Ollama")
 
@@ -21,7 +21,7 @@ def client() -> httpx.Client:
         assert login_resp.status_code == 303
         auth_url = login_resp.headers["location"]
 
-        # Step 2: The auth URL may use the docker-network hostname (mock-oidc:8998),
+        # Step 2: The auth URL may use the docker-network hostname (mockauth:8998),
         # which isn't resolvable from the test host. Rewrite to 127.0.0.1 for the
         # host-accessible port binding.
         parsed_auth = urlparse(auth_url)

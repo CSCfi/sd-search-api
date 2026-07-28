@@ -66,6 +66,24 @@ uv run pytest tests/integration/
 
 Environmental variables are defined in `tests/integration/.env`.
 
+### Running the API and UI locally
+
+The UI component of SD Search is available at: https://github.com/CSCfi/sd-search-ui
+
+To run them both locally at the same time, first start the API stack, redirecting the OIDC login flow back to the UI instead of the API itself:
+
+```bash
+OIDC_REDIRECT_URL=http://localhost:8081/search BASE_URL=http://localhost:8081 docker compose --env-file tests/integration/.env --profile dev up --build -d
+```
+
+Then, from the `sd-search-ui` repository, start the UI joined to the same Compose project so it can reach the API in the same Docker network:
+
+```bash
+COMPOSE_PROJECT_NAME=sd-search-api docker compose up --build -d
+```
+
+The UI service will then be available at http://localhost:8081
+
 ## External dependencies
 
 ### Snowstorm

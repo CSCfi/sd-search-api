@@ -1,11 +1,11 @@
 services:
-  mock-oidc:
+  mockauth:
     profiles: [ "dev" ]
     build:
-      dockerfile: ./dockerfiles/Dockerfile.mock-oidc
+      dockerfile: ./dockerfiles/Dockerfile.mockauth
       context: .
-    image: cscfi/sd-search-api-mock-oidc
-    entrypoint: [ "uv", "run", "python", "tests/integration/oidc_mock.py" ]
+    image: cscfi/sd-search-api-mockauth
+    entrypoint: [ "uv", "run", "python", "tests/integration/mockauth.py" ]
   bp-sd-search-api:
     profiles: [ "dev" ]
     build:
@@ -29,9 +29,10 @@ services:
       - LLM_BASE_URL=${LLM_BASE_URL}
       - LLM_API_KEY=${LLM_API_KEY}
       - BASE_URL=${BASE_URL}
-      - OIDC_URL=http://mock-oidc:8998
+      - OIDC_URL=${OIDC_URL:-http://mockauth:8080}
       - OIDC_CLIENT_ID=${OIDC_CLIENT_ID}
       - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET}
+      - OIDC_REDIRECT_URL=${OIDC_REDIRECT_URL}
       - OIDC_SECURE_COOKIE=${OIDC_SECURE_COOKIE:-true}
       - JWT_KEY=${JWT_KEY}
     depends_on:
@@ -39,7 +40,7 @@ services:
         condition: service_healthy
       opensearch:
         condition: service_healthy
-      mock-oidc:
+      mockauth:
         condition: service_started
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]

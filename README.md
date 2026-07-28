@@ -84,6 +84,16 @@ COMPOSE_PROJECT_NAME=sd-search-api docker compose up --build -d
 
 The UI service will then be available at http://localhost:8081
 
+## Deployment
+
+Build the Docker image for deployment and push it to the image container registry used by the OpenShift's ImageStream triggering rollout automatically.
+
+```bash
+docker build --platform=linux/amd64 -f dockerfiles/Dockerfile -t <image-registry-url>/sd-search-api:latest .
+
+docker push <image-registry-url>/sd-search-api:latest
+```
+
 ## External dependencies
 
 ### Snowstorm

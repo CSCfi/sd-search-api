@@ -28,7 +28,7 @@ def _fields(**kwargs) -> BigpictureFields:
 def test_to_opensearch_field_values():
     fields = _fields(
         dataset_title="A title",
-        specimens={
+        specimen={
             BigpictureSpecimenFields(
                 animal_species=_code(_SPECIES),
                 anatomical_site=frozenset([_code(_BREAST), _code(_AXILLA)]),
@@ -36,7 +36,7 @@ def test_to_opensearch_field_values():
                 sex="Female",
             )
         },
-        stainings={BigpictureStainingFields(staining_target="Nucleus")},
+        staining={BigpictureStainingFields(staining_target="Nucleus")},
     )
     payload = build_document(to_opensearch_field_values(fields))
 
@@ -64,7 +64,7 @@ def _concept_ids(fields: BigpictureFields) -> dict[str, set[str]]:
 
 def test_concept_ids_from_values_animal_species():
     result = _concept_ids(
-        _fields(specimens={BigpictureSpecimenFields(animal_species=_code(_SPECIES))})
+        _fields(specimen={BigpictureSpecimenFields(animal_species=_code(_SPECIES))})
     )
     assert _SPECIES in result.get("animal_species", set())
 
@@ -73,30 +73,30 @@ def test_concept_ids_from_values_anatomical_site():
     specimen = BigpictureSpecimenFields(
         anatomical_site=frozenset([_code(_BREAST), _code(_AXILLA)])
     )
-    result = _concept_ids(_fields(specimens={specimen}))
+    result = _concept_ids(_fields(specimen={specimen}))
     assert {_BREAST, _AXILLA} <= result.get("anatomical_site", set())
 
 
 def test_concept_ids_from_values_fixation_type():
     result = _concept_ids(
-        _fields(specimens={BigpictureSpecimenFields(fixation_type=_code(_FFPE))})
+        _fields(specimen={BigpictureSpecimenFields(fixation_type=_code(_FFPE))})
     )
     assert _FFPE in result.get("fixation_type", set())
 
     specimen = BigpictureSpecimenFields(fixation_type=_code("Formalin"))
-    result = _concept_ids(_fields(specimens={specimen}))
+    result = _concept_ids(_fields(specimen={specimen}))
     assert "Formalin" not in result.get("fixation_type", set())
 
 
 def test_concept_ids_from_values_staining_procedure():
     stain = BigpictureStainingFields(staining_procedure=_code(_HE))
-    result = _concept_ids(_fields(stainings={stain}))
+    result = _concept_ids(_fields(staining={stain}))
     assert _HE in result.get("staining_procedure", set())
 
 
 def test_concept_ids_from_values_multiple_specimens():
     specimen1 = BigpictureSpecimenFields(animal_species=_code(_SPECIES))
     specimen2 = BigpictureSpecimenFields(block_preparation=_code(_PARAFFIN))
-    result = _concept_ids(_fields(specimens={specimen1, specimen2}))
+    result = _concept_ids(_fields(specimen={specimen1, specimen2}))
     assert _SPECIES in result.get("animal_species", set())
     assert _PARAFFIN in result.get("block_preparation", set())

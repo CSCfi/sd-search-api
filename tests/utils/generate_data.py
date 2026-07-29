@@ -228,7 +228,7 @@ async def generate_and_load_data(image_cnt: int, dataset_cnt: int) -> None:
                     dataset_short_name=_generate_short_name(),
                     dataset_title=_generate_title(),
                     dataset_description=_generate_description(),
-                    specimens={
+                    specimen={
                         BigpictureSpecimenFields(
                             sex=_generate_sex_value(),
                             animal_species=_generate_code_value(),
@@ -240,7 +240,7 @@ async def generate_and_load_data(image_cnt: int, dataset_cnt: int) -> None:
                             age_at_extraction=_generate_age_at_extraction_range(),
                         )
                     },
-                    stainings={
+                    staining={
                         BigpictureStainingFields(
                             staining_procedure=_generate_code_value(),
                             staining_procedure_other=f"{_generate_code_value().code}",

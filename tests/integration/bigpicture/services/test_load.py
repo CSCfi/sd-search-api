@@ -42,7 +42,7 @@ async def test_load_and_sync_fields():
         dataset_short_name=dataset_short_name,
         dataset_title=dataset_title,
         dataset_description=dataset_description,
-        specimens={
+        specimen={
             BigpictureSpecimenFields(
                 sex="Male",
                 animal_species=get_code("1"),
@@ -54,7 +54,7 @@ async def test_load_and_sync_fields():
                 age_at_extraction=("P10Y", "P20Y"),
             )
         },
-        stainings={
+        staining={
             BigpictureStainingFields(
                 staining_procedure=get_code("11"),
                 staining_procedure_other="test_procedure",

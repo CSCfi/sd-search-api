@@ -98,8 +98,8 @@ class BigpictureFields(BaseModel):
     dataset_short_name: str | None = None
     dataset_title: str | None = None
     dataset_description: str | None = None
-    specimens: set[BigpictureSpecimenFields] = Field(default_factory=set)
-    stainings: set[BigpictureStainingFields] = Field(default_factory=set)
+    specimen: set[BigpictureSpecimenFields] = Field(default_factory=set)
+    staining: set[BigpictureStainingFields] = Field(default_factory=set)
     diagnosis: set[BigpictureCodeAttributeValue] = Field(default_factory=set)
     diagnosis_candidate: set[BigpictureCodeAttributeValue] = Field(default_factory=set)
     # Newest file modification date in the dataset.
@@ -149,7 +149,7 @@ def to_opensearch_field_values(fields: BigpictureFields) -> list[OpenSearchField
             add_value(0, field_name, getattr(fields, field_name))
 
     # Add nested fields.
-    for items in (fields.specimens, fields.stainings):
+    for items in (fields.specimen, fields.staining):
         index = 0
         for item in items:
             before = len(values)
@@ -491,7 +491,7 @@ def extract_documents(
                         for image_id in _images_from_blocks(
                             {block_id}, map_block_to_slide_ids, map_slide_to_image_ids
                         ):
-                            fields[image_id].specimens.add(specimen)
+                            fields[image_id].specimen.add(specimen)
 
             # Add staining fields.
             for staining_id, staining_fields_list in map_staining_id_to_fields.items():
@@ -503,7 +503,7 @@ def extract_documents(
                             map_staining_to_slide_ids[staining_id],
                             map_slide_to_image_ids,
                         ):
-                            fields[image_id].stainings.add(staining_fields)
+                            fields[image_id].staining.add(staining_fields)
 
             # TODO: support non-clinical datasets.
             is_clinical = True

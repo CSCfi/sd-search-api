@@ -1,6 +1,7 @@
 """Bigpicture XML extraction service."""
 
 import logging
+from collections.abc import Set
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Literal, cast
@@ -97,17 +98,19 @@ class BigpictureFields(BaseModel):
     dataset_short_name: str | None = None
     dataset_title: str | None = None
     dataset_description: str | None = None
-    # Newest file modification date in the dataset.
-    dataset_modified_at: datetime | None = None
     specimens: set[BigpictureSpecimenFields] = Field(default_factory=set)
     stainings: set[BigpictureStainingFields] = Field(default_factory=set)
+    diagnosis: set[BigpictureCodeAttributeValue] = Field(default_factory=set)
+    diagnosis_candidate: set[BigpictureCodeAttributeValue] = Field(default_factory=set)
+    # Newest file modification date in the dataset.
+    dataset_modified_at: datetime | None = None
 
 
 def _has_value(value: Any) -> bool:
     """Whether a parsed field carries an indexable value."""
     if value is None:
         return False
-    if isinstance(value, frozenset):
+    if isinstance(value, Set):
         return len(value) > 0
     return True
 
@@ -128,7 +131,7 @@ def to_opensearch_field_values(fields: BigpictureFields) -> list[OpenSearchField
             values.append(
                 OpenSearchFieldValue(field=field, value=value.code, index=index)
             )
-        elif isinstance(value, frozenset):
+        elif isinstance(value, Set):
             for item in value:
                 values.append(
                     OpenSearchFieldValue(field=field, value=item.code, index=index)
@@ -163,6 +166,7 @@ DATASET_XML_FILE = "METADATA/dataset.xml"
 IMAGE_XML_FILE = "METADATA/image.xml"
 SAMPLE_XML_FILE = "METADATA/sample.xml"
 STAINING_XML_FILE = "METADATA/staining.xml"
+OBSERVATION_XML_FILE = "METADATA/observation.xml"
 
 XML_SCHEMA_DIR = (
     Path(__file__).resolve().parent.parent.parent / "schemas" / "bigpicture"
@@ -172,6 +176,72 @@ DATASET_XML_SCHEMA_FILE = "BP.dataset.xsd"
 IMAGE_XML_SCHEMA_FILE = "BP.image.xsd"
 SAMPLE_XML_SCHEMA_FILE = "BP.sample.xsd"
 STAINING_XML_SCHEMA_FILE = "BP.staining.xsd"
+OBSERVATION_XML_SCHEMA_FILE = "BP.observation.xsd"
+
+
+def _is_snomed_scheme(scheme: str | None) -> bool:
+    if scheme is None:
+        return False
+    return "".join(scheme.split()).lower() in {"snomedct", "snomed", "sct"}
+
+
+_OBSERVATION_IMAGE_REF = "IMAGE_REF"
+_OBSERVATION_SLIDE_REF = "SLIDE_REF"
+_OBSERVATION_BLOCK_REF = "BLOCK_REF"
+_OBSERVATION_SPECIMEN_REF = "SPECIMEN_REF"
+_OBSERVATION_BIOLOGICAL_BEING_REF = "BIOLOGICAL_BEING_REF"
+_OBSERVATION_CASE_REF = "CASE_REF"
+
+_OBSERVATION_REFS = (
+    _OBSERVATION_IMAGE_REF,
+    _OBSERVATION_SLIDE_REF,
+    _OBSERVATION_BLOCK_REF,
+    _OBSERVATION_SPECIMEN_REF,
+    _OBSERVATION_BIOLOGICAL_BEING_REF,
+    _OBSERVATION_CASE_REF,
+)
+
+# Maps an entity id to the ids of related entities (e.g. slide id -> image ids).
+type IdMap = dict[str, set[str]]
+
+
+def _images_from_slides(slide_ids: set[str], map_slide_to_image_ids: IdMap) -> set[str]:
+    """Return the images reachable from the given slides."""
+    return {i for s in slide_ids for i in map_slide_to_image_ids.get(s, set())}
+
+
+def _images_from_blocks(
+    block_ids: set[str],
+    map_block_to_slide_ids: IdMap,
+    map_slide_to_image_ids: IdMap,
+) -> set[str]:
+    """Return the images reachable from the given blocks."""
+    return _images_from_slides(
+        {
+            slide_id
+            for block_id in block_ids
+            for slide_id in map_block_to_slide_ids.get(block_id, set())
+        },
+        map_slide_to_image_ids,
+    )
+
+
+def _images_from_specimens(
+    specimen_ids: set[str],
+    map_specimen_to_block_ids: IdMap,
+    map_block_to_slide_ids: IdMap,
+    map_slide_to_image_ids: IdMap,
+) -> set[str]:
+    """Return the images reachable from the given specimens."""
+    return _images_from_blocks(
+        {
+            block_id
+            for specimen_id in specimen_ids
+            for block_id in map_specimen_to_block_ids.get(specimen_id, set())
+        },
+        map_block_to_slide_ids,
+        map_slide_to_image_ids,
+    )
 
 
 def _get_last_modification_time(
@@ -241,14 +311,22 @@ def extract_documents(
             image_file_path = resolve_path(fs, f"{d}/{IMAGE_XML_FILE}")
             sample_file_path = resolve_path(fs, f"{d}/{SAMPLE_XML_FILE}")
             staining_file_path = resolve_path(fs, f"{d}/{STAINING_XML_FILE}")
+            observation_file_path = resolve_path(
+                fs, f"{d}/{OBSERVATION_XML_FILE}", optional=True
+            )
 
             dataset_modified_at = _get_last_modification_time(
                 fs,
                 [
-                    dataset_file_path,
-                    image_file_path,
-                    sample_file_path,
-                    staining_file_path,
+                    file_path
+                    for file_path in (
+                        dataset_file_path,
+                        image_file_path,
+                        sample_file_path,
+                        staining_file_path,
+                        observation_file_path,
+                    )
+                    if file_path is not None
                 ],
             )
 
@@ -260,11 +338,12 @@ def extract_documents(
             # Map other ids to image ids.
 
             image_ids: list[str] = []
-            map_slide_to_image_ids: dict[str, set[str]] = {}
-            map_block_to_slide_ids: dict[str, set[str]] = {}
-            map_staining_to_slide_ids: dict[str, set[str]] = {}
-            map_specimen_to_block_ids: dict[str, set[str]] = {}
-            map_biological_being_to_specimen_ids: dict[str, set[str]] = {}
+            map_slide_to_image_ids: IdMap = {}
+            map_block_to_slide_ids: IdMap = {}
+            map_staining_to_slide_ids: IdMap = {}
+            map_specimen_to_block_ids: IdMap = {}
+            map_biological_being_to_specimen_ids: IdMap = {}
+            map_case_to_specimen_ids: IdMap = {}
 
             map_block_id_to_fields: dict[str, BigpictureSampleBlockFields] = {}
             map_specimen_id_to_fields: dict[str, BigpictureSampleSpecimenFields] = {}
@@ -272,25 +351,6 @@ def extract_documents(
                 str, BigpictureSampleBiologicalBeingFields
             ] = {}
             map_staining_id_to_fields: dict[str, list[BigpictureStainingFields]] = {}
-
-            def add_slide_id_mapping(_slide_id: str, _image_id: str) -> None:
-                map_slide_to_image_ids.setdefault(_slide_id, set()).add(_image_id)
-
-            def add_block_id_mapping(_block_id: str, _slide_id: str) -> None:
-                map_block_to_slide_ids.setdefault(_block_id, set()).add(_slide_id)
-
-            def add_staining_id_mapping(_staining_id: str, _slide_id: str) -> None:
-                map_staining_to_slide_ids.setdefault(_staining_id, set()).add(_slide_id)
-
-            def add_specimen_id_mapping(_specimen_id: str, _block_id: str) -> None:
-                map_specimen_to_block_ids.setdefault(_specimen_id, set()).add(_block_id)
-
-            def add_biological_being_id_to_specimen_mapping(
-                _biological_being_id: str, _specimen_id: str
-            ):
-                map_biological_being_to_specimen_ids.setdefault(
-                    _biological_being_id, set()
-                ).add(_specimen_id)
 
             # Read dataset XML.
             #
@@ -333,7 +393,7 @@ def extract_documents(
                 image_ids.append(image_id)
                 slide_ids = image_xml.xpath(f"./IMAGE_OF/@{id_attribute}")
                 for slide_id in slide_ids:
-                    add_slide_id_mapping(slide_id, image_id)
+                    map_slide_to_image_ids.setdefault(slide_id, set()).add(image_id)
 
             # Read sample XML.
             #
@@ -344,18 +404,22 @@ def extract_documents(
             for xml in sample_xml.xpath("/SLIDE | /SAMPLE_SET/SLIDE"):
                 slide_id = xml.get(id_attribute)
                 for block_id in xml.xpath(f"./CREATED_FROM_REF/@{id_attribute}"):
-                    add_block_id_mapping(block_id, slide_id)
+                    map_block_to_slide_ids.setdefault(block_id, set()).add(slide_id)
                 for staining_id in xml.xpath(
                     f"./STAINING_INFORMATION_REF/@{id_attribute}"
                 ):
-                    add_staining_id_mapping(staining_id, slide_id)
+                    map_staining_to_slide_ids.setdefault(staining_id, set()).add(
+                        slide_id
+                    )
 
             for xml in sample_xml.xpath("/BLOCK | /SAMPLE_SET/BLOCK"):
                 block_id = xml.get(id_attribute)
                 # Extract fields from XML.
                 map_block_id_to_fields[block_id] = _extract_sample_block_fields(xml)
                 for specimen_id in xml.xpath(f"./SAMPLED_FROM_REF/@{id_attribute}"):
-                    add_specimen_id_mapping(specimen_id, block_id)
+                    map_specimen_to_block_ids.setdefault(specimen_id, set()).add(
+                        block_id
+                    )
 
             for xml in sample_xml.xpath("/SPECIMEN | /SAMPLE_SET/SPECIMEN"):
                 specimen_id = xml.get(id_attribute)
@@ -366,9 +430,11 @@ def extract_documents(
                 for biological_being_id in xml.xpath(
                     f"./EXTRACTED_FROM_REF/@{id_attribute}"
                 ):
-                    add_biological_being_id_to_specimen_mapping(
-                        biological_being_id, specimen_id
-                    )
+                    map_biological_being_to_specimen_ids.setdefault(
+                        biological_being_id, set()
+                    ).add(specimen_id)
+                for case_id in xml.xpath(f"./PART_OF_CASE_REF/@{id_attribute}"):
+                    map_case_to_specimen_ids.setdefault(case_id, set()).add(specimen_id)
 
             for xml in sample_xml.xpath(
                 "/BIOLOGICAL_BEING | /SAMPLE_SET/BIOLOGICAL_BEING"
@@ -417,16 +483,15 @@ def extract_documents(
                     biological_being_id
                 ]:
                     for block_id in map_specimen_to_block_ids[specimen_id]:
-                        for slide_id in map_block_to_slide_ids[block_id]:
-                            for image_id in map_slide_to_image_ids[slide_id]:
-                                specimen = BigpictureSpecimenFields(
-                                    **map_block_id_to_fields[block_id].model_dump(),
-                                    **map_specimen_id_to_fields[
-                                        specimen_id
-                                    ].model_dump(),
-                                    **biological_being_fields.model_dump(),
-                                )
-                                fields[image_id].specimens.add(specimen)
+                        specimen = BigpictureSpecimenFields(
+                            **map_block_id_to_fields[block_id].model_dump(),
+                            **map_specimen_id_to_fields[specimen_id].model_dump(),
+                            **biological_being_fields.model_dump(),
+                        )
+                        for image_id in _images_from_blocks(
+                            {block_id}, map_block_to_slide_ids, map_slide_to_image_ids
+                        ):
+                            fields[image_id].specimens.add(specimen)
 
             # Add staining fields.
             for staining_id, staining_fields_list in map_staining_id_to_fields.items():
@@ -434,9 +499,81 @@ def extract_documents(
                     if any(
                         v is not None for v in staining_fields.model_dump().values()
                     ):
-                        for slide_id in map_staining_to_slide_ids[staining_id]:
-                            for image_id in map_slide_to_image_ids[slide_id]:
-                                fields[image_id].stainings.add(staining_fields)
+                        for image_id in _images_from_slides(
+                            map_staining_to_slide_ids[staining_id],
+                            map_slide_to_image_ids,
+                        ):
+                            fields[image_id].stainings.add(staining_fields)
+
+            # TODO: support non-clinical datasets.
+            is_clinical = True
+
+            # Add observation fields.
+            if is_clinical and observation_file_path is not None:
+                image_id_set = set(image_ids)
+
+                def _images_for_ref(_tag: str, ref_id: str) -> set[str]:
+                    if _tag == _OBSERVATION_IMAGE_REF:
+                        return {
+                            ref_id
+                        } & image_id_set  # Check that the image id is in the dataset.
+                    if _tag == _OBSERVATION_SLIDE_REF:
+                        return _images_from_slides({ref_id}, map_slide_to_image_ids)
+                    if _tag == _OBSERVATION_BLOCK_REF:
+                        return _images_from_blocks(
+                            {ref_id}, map_block_to_slide_ids, map_slide_to_image_ids
+                        )
+                    if _tag == _OBSERVATION_SPECIMEN_REF:
+                        return _images_from_specimens(
+                            {ref_id},
+                            map_specimen_to_block_ids,
+                            map_block_to_slide_ids,
+                            map_slide_to_image_ids,
+                        )
+                    if _tag == _OBSERVATION_BIOLOGICAL_BEING_REF:
+                        return _images_from_specimens(
+                            map_biological_being_to_specimen_ids.get(ref_id, set()),
+                            map_specimen_to_block_ids,
+                            map_block_to_slide_ids,
+                            map_slide_to_image_ids,
+                        )
+                    if _tag == _OBSERVATION_CASE_REF:
+                        return _images_from_specimens(
+                            map_case_to_specimen_ids.get(ref_id, set()),
+                            map_specimen_to_block_ids,
+                            map_block_to_slide_ids,
+                            map_slide_to_image_ids,
+                        )
+                    return set()
+
+                observation_xml = parse_xml(read_file(fs, observation_file_path, keys))
+                validate_xml(
+                    observation_xml, XML_SCHEMA_DIR, OBSERVATION_XML_SCHEMA_FILE
+                )
+                for observation in observation_xml.xpath(
+                    "/OBSERVATION | /OBSERVATION_SET/OBSERVATION"
+                ):
+                    statement = observation.find("STATEMENT")
+                    if (
+                        statement is None
+                        or statement.findtext("STATEMENT_TYPE") != "Diagnosis"
+                    ):
+                        continue
+                    codes = _extract_diagnoses(statement)
+                    if not codes:
+                        continue
+                    status = statement.findtext("STATEMENT_STATUS")
+                    for tag in _OBSERVATION_REFS:
+                        ref = observation.find(tag)
+                        if ref is None:
+                            continue
+                        # Diagnosis linked directly to an image is considered distinct
+                        # regardless of statement status.
+                        distinct = tag == _OBSERVATION_IMAGE_REF or status == "Distinct"
+                        field_name = "diagnosis" if distinct else "diagnosis_candidate"
+                        for image_id in _images_for_ref(tag, ref.get(id_attribute)):
+                            getattr(fields[image_id], field_name).update(codes)
+                        break
 
             # Return iterator of extracted documents.
             for image_id in image_ids:
@@ -547,6 +684,15 @@ def _is_nil(elem: Any) -> bool:
     return elem.get(_XSI_NIL) == "true"
 
 
+def _code_attribute_value(value: ElementTree) -> BigpictureCodeAttributeValue:
+    return BigpictureCodeAttributeValue(
+        code=value.findtext("CODE"),
+        scheme=value.findtext("SCHEME"),
+        meaning=value.findtext("MEANING"),
+        scheme_version=value.findtext("SCHEME_VERSION"),
+    )
+
+
 def _extract_code_attribute_value(
     elem: ElementTree, tag: str, *, is_attributes=True
 ) -> BigpictureCodeAttributeValue | None:
@@ -557,14 +703,8 @@ def _extract_code_attribute_value(
 
     if not values or _is_nil(values[0]):
         return None
-    value = values[0]
 
-    return BigpictureCodeAttributeValue(
-        code=value.findtext("CODE"),
-        scheme=value.findtext("SCHEME"),
-        meaning=value.findtext("MEANING"),
-        scheme_version=value.findtext("SCHEME_VERSION"),
-    )
+    return _code_attribute_value(values[0])
 
 
 def _extract_code_attribute_values(
@@ -575,16 +715,18 @@ def _extract_code_attribute_values(
     else:
         values = elem.xpath(f"CODE_ATTRIBUTE[TAG='{tag}']/VALUE")
 
-    return frozenset(
-        BigpictureCodeAttributeValue(
-            code=v.findtext("CODE"),
-            scheme=v.findtext("SCHEME"),
-            meaning=v.findtext("MEANING"),
-            scheme_version=v.findtext("SCHEME_VERSION"),
-        )
-        for v in values
+    return frozenset(_code_attribute_value(v) for v in values if not _is_nil(v))
+
+
+def _extract_diagnoses(
+    statement: ElementTree,
+) -> set[BigpictureCodeAttributeValue]:
+    codes = {
+        _code_attribute_value(v)
+        for v in statement.xpath("CODE_ATTRIBUTES/CODE_ATTRIBUTE/VALUE")
         if not _is_nil(v)
-    )
+    }
+    return {c for c in codes if _is_snomed_scheme(c.scheme)}
 
 
 def _extract_anatomical_sites(

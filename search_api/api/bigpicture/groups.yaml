@@ -11,6 +11,6 @@ filtering_groups:
   - id: staining
     label: "Staining"
     description: ""
-  # - id: clinical
-  #   label: "Clinical diagnostics"
-  #   description: ""
+  - id: clinical
+    label: "Clinical"
+    description: ""

@@ -51,9 +51,11 @@ def test_ontology_model_fields_match_filtering_terms():
             or BigpictureCodeAttributeValue in get_args(info.annotation)
         }
 
-    model_field_ids = ontology_field_names(
-        BigpictureSpecimenFields
-    ) | ontology_field_names(BigpictureStainingFields)
+    model_field_ids = (
+        ontology_field_names(BigpictureSpecimenFields)
+        | ontology_field_names(BigpictureStainingFields)
+        | ontology_field_names(BigpictureFields)  # top-level diagnosis fields
+    )
     filtering_term_ids = {
         t.id for t in BP_FILTERING_TERMS if t.type in ("ontology", "ontologyOrValue")
     }

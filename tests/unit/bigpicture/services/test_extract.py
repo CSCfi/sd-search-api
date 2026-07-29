@@ -62,6 +62,35 @@ def test_extract_fields():
     assert stain2["staining_target"] == "pan Cytokeratin"
 
 
+def test_extract_diagnoses():
+    docs = {doc.id: doc for doc in extract_documents(root=str(TEST_DIR))}
+
+    payload1 = build_document(docs["image_1"].values)
+    payload2 = build_document(docs["image_2"].values)
+
+    # CASE_REF (Distinct, both images)
+    # SPECIMEN_REF (Distinct, both images)
+    # IMAGE_REF (Distinct, image_1)
+    assert sorted(payload1["diagnosis"]) == ["109355002", "254837009", "73211009"]
+    # CASE_REF (Distinct, reaches both)
+    # SPECIMEN_REF (Distinct, reaches both)
+    # SLIDE_REF (Distinct, image_2 only).
+    assert sorted(payload2["diagnosis"]) == ["195967001", "254837009", "73211009"]
+
+    # BIOLOGICAL_BEING_REF (Summary, both images)
+    # BLOCK_REF (Summary, both images)
+    assert sorted(payload1["diagnosis_candidate"]) == ["363346000", "38341003"]
+    assert sorted(payload2["diagnosis_candidate"]) == ["363346000", "38341003"]
+
+    for payload in (payload1, payload2):
+        # non-SNOMED code is ignored.
+        assert "8500/3" not in payload["diagnosis"]
+        assert "8500/3" not in payload["diagnosis_candidate"]
+        # Finding statement is ignored.
+        assert "404684003" not in payload["diagnosis"]
+        assert "404684003" not in payload["diagnosis_candidate"]
+
+
 def test_process_code_attribute():
     xml = """
     <ROOT>

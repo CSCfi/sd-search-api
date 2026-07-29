@@ -1,0 +1,188 @@
+<OBSERVATION_SET xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+    <!-- One observation per reference type (image, slide, block, specimen, biological being,
+         case) while mixing statement statuses (Distinct, Summary).
+
+         Both images share the same specimen, block, biological being, and
+         case — only the slide is different. An observation referencing a
+         specimen, block, biological being, and case is linked to both images.
+         An observation referencing a slide or image is linked to one image.
+    -->
+
+    <!-- CASE_REF, Distinct: reaches both images. Has two codes; the
+         non-SNOMED one is ignored. -->
+    <OBSERVATION alias="1" accession="observation_case">
+        <CASE_REF alias="1" accession="case_1"/>
+        <STATEMENT>
+            <STATEMENT_TYPE>Diagnosis</STATEMENT_TYPE>
+            <STATEMENT_STATUS>Distinct</STATEMENT_STATUS>
+            <CODE_ATTRIBUTES>
+                <CODE_ATTRIBUTE>
+                    <TAG>diagnosis</TAG>
+                    <VALUE>
+                        <CODE>254837009</CODE>
+                        <SCHEME>SNOMED CT</SCHEME>
+                        <MEANING>Malignant neoplasm of breast (disorder)</MEANING>
+                        <SCHEME_VERSION/>
+                    </VALUE>
+                </CODE_ATTRIBUTE>
+                <CODE_ATTRIBUTE>
+                    <TAG>diagnosis</TAG>
+                    <VALUE>
+                        <CODE>8500/3</CODE>
+                        <SCHEME>ICDO</SCHEME>
+                        <MEANING>Infiltrating duct carcinoma, NOS</MEANING>
+                        <SCHEME_VERSION/>
+                    </VALUE>
+                </CODE_ATTRIBUTE>
+            </CODE_ATTRIBUTES>
+            <CUSTOM_ATTRIBUTES xsi:nil="true"/>
+            <FREETEXT xsi:nil="true"/>
+            <ATTRIBUTES xsi:nil="true"/>
+        </STATEMENT>
+        <ATTRIBUTES xsi:nil="true"/>
+    </OBSERVATION>
+
+    <!-- BIOLOGICAL_BEING_REF, Summary: reaches both images. -->
+    <OBSERVATION alias="2" accession="observation_being">
+        <BIOLOGICAL_BEING_REF alias="1" accession="biological_being_1"/>
+        <STATEMENT>
+            <STATEMENT_TYPE>Diagnosis</STATEMENT_TYPE>
+            <STATEMENT_STATUS>Summary</STATEMENT_STATUS>
+            <CODE_ATTRIBUTES>
+                <CODE_ATTRIBUTE>
+                    <TAG>diagnosis</TAG>
+                    <VALUE>
+                        <CODE>363346000</CODE>
+                        <SCHEME>SNOMED CT</SCHEME>
+                        <MEANING>Malignant neoplastic disease (disorder)</MEANING>
+                        <SCHEME_VERSION/>
+                    </VALUE>
+                </CODE_ATTRIBUTE>
+            </CODE_ATTRIBUTES>
+            <CUSTOM_ATTRIBUTES xsi:nil="true"/>
+            <FREETEXT xsi:nil="true"/>
+            <ATTRIBUTES xsi:nil="true"/>
+        </STATEMENT>
+        <ATTRIBUTES xsi:nil="true"/>
+    </OBSERVATION>
+
+    <!-- SPECIMEN_REF, Distinct: reaches both images. -->
+    <OBSERVATION alias="3" accession="observation_specimen">
+        <SPECIMEN_REF alias="1" accession="specimen_1"/>
+        <STATEMENT>
+            <STATEMENT_TYPE>Diagnosis</STATEMENT_TYPE>
+            <STATEMENT_STATUS>Distinct</STATEMENT_STATUS>
+            <CODE_ATTRIBUTES>
+                <CODE_ATTRIBUTE>
+                    <TAG>diagnosis</TAG>
+                    <VALUE>
+                        <CODE>73211009</CODE>
+                        <SCHEME>SNOMED CT</SCHEME>
+                        <MEANING>Diabetes mellitus (disorder)</MEANING>
+                        <SCHEME_VERSION/>
+                    </VALUE>
+                </CODE_ATTRIBUTE>
+            </CODE_ATTRIBUTES>
+            <CUSTOM_ATTRIBUTES xsi:nil="true"/>
+            <FREETEXT xsi:nil="true"/>
+            <ATTRIBUTES xsi:nil="true"/>
+        </STATEMENT>
+        <ATTRIBUTES xsi:nil="true"/>
+    </OBSERVATION>
+
+    <!-- BLOCK_REF, Summary: reaches both images. -->
+    <OBSERVATION alias="4" accession="observation_block">
+        <BLOCK_REF alias="1" accession="block_1"/>
+        <STATEMENT>
+            <STATEMENT_TYPE>Diagnosis</STATEMENT_TYPE>
+            <STATEMENT_STATUS>Summary</STATEMENT_STATUS>
+            <CODE_ATTRIBUTES>
+                <CODE_ATTRIBUTE>
+                    <TAG>diagnosis</TAG>
+                    <VALUE>
+                        <CODE>38341003</CODE>
+                        <SCHEME>SNOMED CT</SCHEME>
+                        <MEANING>Hypertensive disorder, systemic arterial (disorder)</MEANING>
+                        <SCHEME_VERSION/>
+                    </VALUE>
+                </CODE_ATTRIBUTE>
+            </CODE_ATTRIBUTES>
+            <CUSTOM_ATTRIBUTES xsi:nil="true"/>
+            <FREETEXT xsi:nil="true"/>
+            <ATTRIBUTES xsi:nil="true"/>
+        </STATEMENT>
+        <ATTRIBUTES xsi:nil="true"/>
+    </OBSERVATION>
+
+    <!-- SLIDE_REF, Distinct: reaches image_2 only. -->
+    <OBSERVATION alias="5" accession="observation_slide">
+        <SLIDE_REF alias="2" accession="slide_2"/>
+        <STATEMENT>
+            <STATEMENT_TYPE>Diagnosis</STATEMENT_TYPE>
+            <STATEMENT_STATUS>Distinct</STATEMENT_STATUS>
+            <CODE_ATTRIBUTES>
+                <CODE_ATTRIBUTE>
+                    <TAG>diagnosis</TAG>
+                    <VALUE>
+                        <CODE>195967001</CODE>
+                        <SCHEME>SNOMED CT</SCHEME>
+                        <MEANING>Asthma (disorder)</MEANING>
+                        <SCHEME_VERSION/>
+                    </VALUE>
+                </CODE_ATTRIBUTE>
+            </CODE_ATTRIBUTES>
+            <CUSTOM_ATTRIBUTES xsi:nil="true"/>
+            <FREETEXT xsi:nil="true"/>
+            <ATTRIBUTES xsi:nil="true"/>
+        </STATEMENT>
+        <ATTRIBUTES xsi:nil="true"/>
+    </OBSERVATION>
+
+    <!-- IMAGE_REF, Summary: reaches image_1 only and treated as Distinct. -->
+    <OBSERVATION alias="6" accession="observation_image">
+        <IMAGE_REF alias="1" accession="image_1"/>
+        <STATEMENT>
+            <STATEMENT_TYPE>Diagnosis</STATEMENT_TYPE>
+            <STATEMENT_STATUS>Summary</STATEMENT_STATUS>
+            <CODE_ATTRIBUTES>
+                <CODE_ATTRIBUTE>
+                    <TAG>diagnosis</TAG>
+                    <VALUE>
+                        <CODE>109355002</CODE>
+                        <SCHEME>SNOMED CT</SCHEME>
+                        <MEANING>Carcinoma in situ of breast (disorder)</MEANING>
+                        <SCHEME_VERSION/>
+                    </VALUE>
+                </CODE_ATTRIBUTE>
+            </CODE_ATTRIBUTES>
+            <CUSTOM_ATTRIBUTES xsi:nil="true"/>
+            <FREETEXT xsi:nil="true"/>
+            <ATTRIBUTES xsi:nil="true"/>
+        </STATEMENT>
+        <ATTRIBUTES xsi:nil="true"/>
+    </OBSERVATION>
+
+    <!-- Non-diagnosis statement: ignored for clinical datasets -->
+    <OBSERVATION alias="7" accession="observation_finding">
+        <IMAGE_REF alias="2" accession="image_2"/>
+        <STATEMENT>
+            <STATEMENT_TYPE>Finding</STATEMENT_TYPE>
+            <STATEMENT_STATUS>Distinct</STATEMENT_STATUS>
+            <CODE_ATTRIBUTES>
+                <CODE_ATTRIBUTE>
+                    <TAG>finding</TAG>
+                    <VALUE>
+                        <CODE>404684003</CODE>
+                        <SCHEME>SNOMED CT</SCHEME>
+                        <MEANING>Clinical finding (finding)</MEANING>
+                        <SCHEME_VERSION/>
+                    </VALUE>
+                </CODE_ATTRIBUTE>
+            </CODE_ATTRIBUTES>
+            <CUSTOM_ATTRIBUTES xsi:nil="true"/>
+            <FREETEXT xsi:nil="true"/>
+            <ATTRIBUTES xsi:nil="true"/>
+        </STATEMENT>
+        <ATTRIBUTES xsi:nil="true"/>
+    </OBSERVATION>
+</OBSERVATION_SET>

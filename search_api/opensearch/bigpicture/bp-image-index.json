@@ -80,6 +80,12 @@
             "type": "keyword"
           }
         }
+      },
+      "diagnosis": {
+        "type": "keyword"
+      },
+      "diagnosis_candidate": {
+        "type": "keyword"
       }
     }
   }

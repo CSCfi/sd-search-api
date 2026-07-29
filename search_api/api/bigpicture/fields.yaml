@@ -157,6 +157,28 @@ filtering_terms:
     ontologyConcept: "397165007"  # Stain
     ui_group: "staining"
 
+  - id: diagnosis
+    type: ontology
+    scopes: [ image, slide, block, specimen, biological_being, case ]
+    label: "Diagnosis"
+    description: "Diagnosis known to apply to one more image linked to an observation."
+    ontology:
+      id: SCTID
+    ontologyConcept: "138875005"  # SNOMED CT Concept (root)
+    multivalued: true
+    ui_group: "clinical"
+
+  - id: diagnosis_candidate
+    type: ontology
+    scopes: [ image, slide, block, specimen, biological_being, case ]
+    label: "Diagnosis (candidate)"
+    description: "Diagnosis known to apply to at least one, but not necessarily all, images linked to an observation."
+    ontology:
+      id: SCTID
+    ontologyConcept: "138875005"  # SNOMED CT Concept (root)
+    multivalued: true
+    ui_group: "clinical"
+
 
 # Fields that are indexed in OpenSearch but are not filterable.
 # All are top-level (no group).

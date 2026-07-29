@@ -1,6 +1,7 @@
 """Crypt4GH file decryption utilities."""
 
 import io
+from typing import Literal, overload
 
 import fsspec  # type: ignore
 from crypt4gh.keys import get_private_key  # type: ignore[import-untyped]
@@ -18,17 +19,33 @@ def load_c4gh_keys(key_file: str, passphrase: str | None = None) -> list:
     return [(0, private_key, None)]
 
 
-def resolve_path(fs: fsspec.AbstractFileSystem, path: str) -> str:
+@overload
+def resolve_path(
+    fs: fsspec.AbstractFileSystem, path: str, *, optional: Literal[False] = False
+) -> str: ...
+
+
+@overload
+def resolve_path(
+    fs: fsspec.AbstractFileSystem, path: str, *, optional: Literal[True]
+) -> str | None: ...
+
+
+def resolve_path(
+    fs: fsspec.AbstractFileSystem, path: str, *, optional: bool = False
+) -> str | None:
     """Return the resolved path, accepting either a plain file or a ``.c4gh`` variant.
 
-    Tries ``path`` first; falls back to ``path + ".c4gh"``.  Raises ``ValueError`` if
-    neither exists.
+    Tries ``path`` first; falls back to ``path + ".c4gh"``. Raises ``ValueError`` if
+    neither exists, unless ``optional`` is True, in which case None is returned.
     """
     if fs.exists(path):
         return path
     c4gh_path = path + ".c4gh"
     if fs.exists(c4gh_path):
         return c4gh_path
+    if optional:
+        return None
     raise ValueError(f"Missing file: {path}")
 
 

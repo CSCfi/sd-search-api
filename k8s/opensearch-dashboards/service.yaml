@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: opensearch-dashboards
+  namespace: sd-search
+  labels:
+    app: opensearch-dashboards
+spec:
+  ports:
+    - name: http
+      port: 5601
+      targetPort: 5601
+      protocol: TCP
+  selector:
+    app: opensearch-dashboards

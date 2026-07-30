@@ -1,0 +1,41 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sd-search-api-config
+  namespace: sd-search
+data:
+  DEPLOYMENT_TYPE: "Bigpicture"
+  DEPLOYMENT_ENV: "dev"
+
+  # OpenSearch service within the namespace
+  OPENSEARCH_HOST: "opensearch"
+  OPENSEARCH_PORT: "9200"
+  OPENSEARCH_USER: "admin"
+
+  # External PostgreSQL instance
+  POSTGRES_HOST: "postgres.example.com"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "sd_search_bigpicture"
+  POSTGRES_USER: "postgres"
+
+  # Snowstorm SNOMED CT server
+  SNOWSTORM_URL: "https://snowstorm.example.com"
+
+  # SNOMED term cache refresh interval in seconds
+  SNOMED_CACHE_REFRESH: "300"
+
+  # Set to "true" to enable POST /ai/query; also set LLM_* vars in the secret
+  FEATURE_AI: "false"
+
+  # LLM base URL (only used when FEATURE_AI=true)
+  LLM_BASE_URL: ""
+
+  # OIDC Relying Party login (LifeScience AAI)
+  # Must be the UI's own hostname, not the API's — the OIDC callback sets a
+  # host-only session cookie, and the UI's own /api/ calls need to see it.
+  BASE_URL: "https://sd-search-ui.apps.example.com"
+  OIDC_URL: "https://login.aai.example.org"
+  OIDC_SCOPE: "openid profile email"
+  # Send the user back to the UI's search page after login/logout instead of
+  # the default (this API's own /docs).
+  OIDC_REDIRECT_URL: "https://sd-search-ui.apps.example.com/search"

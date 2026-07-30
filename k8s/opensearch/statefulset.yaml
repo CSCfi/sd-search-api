@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: opensearch
+  namespace: sd-search
+  labels:
+    app: opensearch
+spec:
+  serviceName: opensearch
+  replicas: 1
+  selector:
+    matchLabels:
+      app: opensearch
+  template:
+    metadata:
+      labels:
+        app: opensearch
+    spec:
+      serviceAccountName: default
+      containers:
+        - name: opensearch
+          image: your-registry.example.com/sd-search/opensearch:2
+          ports:
+            - containerPort: 9200
+              name: https
+              protocol: TCP
+            - containerPort: 9300
+              name: transport
+              protocol: TCP
+          env:
+            - name: discovery.type
+              value: single-node
+            - name: OPENSEARCH_JAVA_OPTS
+              value: "-Xms1g -Xmx2g"
+            # Security plugin is automatically enabled when this env var is set.
+            - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: opensearch-credentials
+                  key: OPENSEARCH_PASSWORD
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - |
+                  curl -fks https://localhost:9200/_cluster/health \
+                    -u "admin:${OPENSEARCH_INITIAL_ADMIN_PASSWORD}" \
+                    | grep -qv '"status":"red"'
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - |
+                  curl -fks https://localhost:9200/_cluster/health \
+                    -u "admin:${OPENSEARCH_INITIAL_ADMIN_PASSWORD}" \
+                    | grep -qv '"status":"red"'
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "200m"
+            limits:
+              memory: "4Gi"
+              cpu: "1000m"
+          volumeMounts:
+            - name: opensearch-data
+              mountPath: /usr/share/opensearch/data
+  volumeClaimTemplates:
+    - metadata:
+        name: opensearch-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 20Gi
+        # storageClassName: ""  # uncomment and set if a specific StorageClass is required

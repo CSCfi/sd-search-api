@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: opensearch
+  namespace: sd-search
+  labels:
+    app: opensearch
+spec:
+  ports:
+    - name: https
+      port: 9200
+      targetPort: 9200
+      protocol: TCP
+    - name: transport
+      port: 9300
+      targetPort: 9300
+      protocol: TCP
+  selector:
+    app: opensearch

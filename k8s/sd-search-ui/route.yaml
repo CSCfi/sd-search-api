@@ -1,0 +1,19 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: sd-search-ui
+  namespace: sd-search
+  labels:
+    app: sd-search-ui
+spec:
+  host: sd-search-ui.apps.example.com
+  path: /
+  to:
+    kind: Service
+    name: sd-search-ui
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  wildcardPolicy: None

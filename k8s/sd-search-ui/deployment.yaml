@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sd-search-ui
+  namespace: sd-search
+  labels:
+    app: sd-search-ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sd-search-ui
+  template:
+    metadata:
+      labels:
+        app: sd-search-ui
+    spec:
+      containers:
+        - name: sd-search-ui
+          image: your-registry.example.com/sd-search/sd-search-ui:latest
+          ports:
+            - containerPort: 8081
+              protocol: TCP
+          env:
+            # sd-search-api Service, same namespace
+            - name: BACKEND_URL
+              value: http://sd-search-api:8000
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8081
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "150m"
+          imagePullPolicy: IfNotPresent
+          terminationMessagePolicy: File

@@ -94,7 +94,7 @@ class LoadService:
 
                 await LoadService.store_document(cur, doc)
                 loaded += 1
-                logger.info("Loaded document %s.", doc.id)
+                logger.debug("Loaded document %s.", doc.id)
 
                 for field_id, concept_ids in concept_ids_from_values(
                     doc.values, self._ontology_by_field

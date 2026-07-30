@@ -116,7 +116,7 @@ class BigpictureOpenSearchBeaconService(
                         datasetId=dataset_id,
                         datasetTitle=dataset_title,
                         datasetDescription=dataset_description,
-                        datasetUrl=f"https://datasets.bigpicture.eu/datasets/{dataset_id}.html",
+                        datasetUrl=f"https://datasets.bigpicture.eu/datasets/{dataset_id.lower()}.html",
                         totalImageCount=dataset_image_cnt,
                         matchingImageCount=0,
                         imageIds=[],

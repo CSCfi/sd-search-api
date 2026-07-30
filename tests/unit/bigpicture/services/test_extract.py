@@ -1,4 +1,5 @@
 import logging
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -10,8 +11,11 @@ from lxml import etree
 from search_api.api.opensearch.document import build_document
 from search_api.bigpicture.services.extract import (
     BigpictureCodeAttributeValue,
-    extract_documents,
+    ObjectKey,
+    ObjectIds,
+    extract_dataset_documents,
     _add_iso8601_durations,
+    _object_keys,
     _extract_anatomical_sites,
     _extract_code_attribute_value,
     _extract_code_attribute_values,
@@ -21,18 +25,19 @@ from search_api.bigpicture.services.extract import (
     _get_last_modification_time,
 )
 
-TEST_DIR = (
+DATASET_1_DIR = (
     Path(__file__).resolve().parent.parent.parent.parent
     / "files"
     / "bigpicture"
     / "xml"
+    / "dataset_1"
 )
 
 
 def test_extract_fields():
-    # extract_documents yields ExtractedDocument; build the payload to assert on stored values.
+    # extract_dataset_documents yields ExtractedDocument; build the payload to assert on stored values.
     # (Full code-attribute fidelity — scheme/meaning — is covered by the helper tests below.)
-    docs = {doc.id: doc for doc in extract_documents(root=str(TEST_DIR))}
+    docs = {doc.id: doc for doc in extract_dataset_documents(str(DATASET_1_DIR))}
     assert set(docs) == {"image_1", "image_2"}
 
     payload = build_document(docs["image_1"].values)
@@ -63,7 +68,7 @@ def test_extract_fields():
 
 
 def test_extract_diagnoses():
-    docs = {doc.id: doc for doc in extract_documents(root=str(TEST_DIR))}
+    docs = {doc.id: doc for doc in extract_dataset_documents(str(DATASET_1_DIR))}
 
     payload1 = build_document(docs["image_1"].values)
     payload2 = build_document(docs["image_2"].values)
@@ -89,6 +94,105 @@ def test_extract_diagnoses():
         # Finding statement is ignored.
         assert "404684003" not in payload["diagnosis"]
         assert "404684003" not in payload["diagnosis_candidate"]
+
+
+def test_object_ids_id():
+    """The id is the accession when present, otherwise the mandatory alias."""
+    assert ObjectIds(alias="1", accession="slide_1").id == "slide_1"
+    assert ObjectIds(alias="1").id == "1"
+
+
+def test_object_ids_keys():
+    """Both the accession and the alias are keys, tagged by kind so an
+    accession is never confused with an alias."""
+    assert ObjectIds(alias="1", accession="slide_1").keys == [
+        ObjectKey(kind="alias", value="1"),
+        ObjectKey(kind="accession", value="slide_1"),
+    ]
+    assert ObjectIds(alias="1").keys == [ObjectKey(kind="alias", value="1")]
+
+
+def test_object_keys_from_element():
+    assert _object_keys(etree.fromstring('<SLIDE alias="1" accession="slide_1"/>')) == [
+        ObjectKey(kind="accession", value="slide_1"),
+        ObjectKey(kind="alias", value="1"),
+    ]
+    assert _object_keys(etree.fromstring('<SLIDE alias="1"/>')) == [
+        ObjectKey(kind="alias", value="1"),
+    ]
+    assert _object_keys(etree.fromstring('<SLIDE accession="slide_1"/>')) == [
+        ObjectKey(kind="accession", value="slide_1"),
+    ]
+
+
+def test_object_keys_from_object_ids():
+    objects = [ObjectIds(alias="1", accession="slide_1"), ObjectIds(alias="2")]
+    assert _object_keys(objects) == [
+        ObjectKey(kind="alias", value="1"),
+        ObjectKey(kind="accession", value="slide_1"),
+        ObjectKey(kind="alias", value="2"),
+    ]
+
+
+def _copy_xml_dir(tmp_path: Path) -> Path:
+    """Copy the dataset_1 fixture to tmp_path."""
+    dst = tmp_path / "dataset_1"
+    shutil.copytree(DATASET_1_DIR, dst)
+    return dst
+
+
+def _replace_in_xml(path: Path, old: str, new: str) -> None:
+    path.write_text(path.read_text().replace(old, new))
+
+
+def test_extract_requires_dataset_accession(tmp_path):
+    root = _copy_xml_dir(tmp_path)
+    _replace_in_xml(
+        root / "METADATA" / "dataset.xml",
+        '<DATASET alias="1" accession="dataset_1">',
+        '<DATASET alias="1">',
+    )
+
+    with pytest.raises(ValueError, match="Failed to extract dataset accession"):
+        list(extract_dataset_documents(str(root)))
+
+
+def test_extract_image_id_with_accession_and_alias(tmp_path):
+    root = _copy_xml_dir(tmp_path)
+    _replace_in_xml(
+        root / "METADATA" / "image.xml",
+        '<IMAGE alias="2" accession="image_2">',
+        '<IMAGE alias="2">',
+    )
+
+    docs = {doc.id: doc for doc in extract_dataset_documents(str(root))}
+
+    # Only the first image has an accession. The second document id becomes
+    # dataset accession followed by image alias.
+    assert set(docs) == {"image_1", "dataset_1-2"}
+    opensearch_doc = build_document(docs["dataset_1-2"].values)
+    assert opensearch_doc["image_id"] == "2"
+    assert opensearch_doc["dataset_id"] == "dataset_1"
+
+
+def test_extract_diagnosis_with_accession_and_alias(tmp_path):
+    root = _copy_xml_dir(tmp_path)
+    _replace_in_xml(
+        root / "METADATA" / "sample.xml",
+        '<PART_OF_CASE_REF alias="1" accession="case_1"/>',
+        '<PART_OF_CASE_REF alias="1"/>',
+    )
+    _replace_in_xml(
+        root / "METADATA" / "observation.xml",
+        '<CASE_REF alias="1" accession="case_1"/>',
+        '<CASE_REF alias="1"/>',
+    )
+
+    docs = {doc.id: doc for doc in extract_dataset_documents(str(root))}
+
+    for image_id in ("image_1", "image_2"):
+        opensearch_doc = build_document(docs[image_id].values)
+        assert "254837009" in opensearch_doc["diagnosis"], image_id
 
 
 def test_process_code_attribute():

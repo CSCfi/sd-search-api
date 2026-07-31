@@ -9,6 +9,7 @@ import pytest
 from lxml import etree
 
 from search_api.api.opensearch.document import build_document
+from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
 from search_api.bigpicture.services.extract import (
     BigpictureCodeAttributeValue,
     ObjectKey,
@@ -23,6 +24,9 @@ from search_api.bigpicture.services.extract import (
     _extract_string_attribute_value,
     _extract_age_at_extraction_range,
     _get_last_modification_time,
+    _matches_scheme,
+    _require_scheme,
+    _filter_by_scheme,
 )
 
 DATASET_1_DIR = (
@@ -32,6 +36,10 @@ DATASET_1_DIR = (
     / "xml"
     / "dataset_1"
 )
+
+
+def _code(scheme: str | None) -> BigpictureCodeAttributeValue:
+    return BigpictureCodeAttributeValue(code="1", scheme=scheme, meaning="Test")
 
 
 def test_extract_fields():
@@ -195,6 +203,36 @@ def test_extract_diagnosis_with_accession_and_alias(tmp_path):
         assert "254837009" in opensearch_doc["diagnosis"], image_id
 
 
+def test_matches_scheme():
+    assert _matches_scheme("SNOMED CT", SNOMED_ONTOLOGY_ID)
+    assert _matches_scheme("snomedct", SNOMED_ONTOLOGY_ID)
+    assert _matches_scheme(" SCT ", SNOMED_ONTOLOGY_ID)
+    assert not _matches_scheme("ICDO", SNOMED_ONTOLOGY_ID)
+    assert not _matches_scheme(None, SNOMED_ONTOLOGY_ID)
+    assert not _matches_scheme("SNOMED CT", "UNKNOWN")
+
+
+def test_require_scheme():
+    # No value.
+    assert _require_scheme(None, SNOMED_ONTOLOGY_ID) is None
+
+    # Matching scheme.
+    value = _code("SNOMED CT")
+    assert _require_scheme(value, SNOMED_ONTOLOGY_ID) == value
+
+    # Other scheme.
+    value = _code("ICDO")
+    result = _require_scheme(value, SNOMED_ONTOLOGY_ID)
+    assert result is None
+
+
+def test_filter_by_scheme():
+    matching = _code("SNOMED CT")
+    mismatched = _code("ICDO")
+    result = _filter_by_scheme([matching, mismatched], SNOMED_ONTOLOGY_ID)
+    assert result == frozenset([matching])
+
+
 def test_process_code_attribute():
     xml = """
     <ROOT>
@@ -218,7 +256,7 @@ def test_process_code_attribute():
     """
     elem = etree.fromstring(xml)
 
-    attribute = _extract_code_attribute_value(elem, "animal_species")
+    attribute = _extract_code_attribute_value(elem, "animal_species", None)
 
     assert attribute.code == "1"
     assert attribute.meaning == "Cat"
@@ -428,7 +466,7 @@ def test_extract_code_attribute_values_single():
     """
     elem = etree.fromstring(xml)
 
-    values = _extract_code_attribute_values(elem, "anatomical_site")
+    values = _extract_code_attribute_values(elem, "anatomical_site", None)
 
     assert values == frozenset(
         [
@@ -466,7 +504,7 @@ def test_extract_code_attribute_values_from_list():
     """
     elem = etree.fromstring(xml)
 
-    values = _extract_code_attribute_values(elem, "anatomical_site")
+    values = _extract_code_attribute_values(elem, "anatomical_site", None)
 
     assert values == frozenset(
         [
@@ -491,7 +529,7 @@ def test_extract_anatomical_sites_from_set():
                         <TAG>anatomical_site</TAG>
                         <VALUE>
                             <CODE>2</CODE>
-                            <SCHEME>Scheme2</SCHEME>
+                            <SCHEME>SNOMED CT</SCHEME>
                             <MEANING>Test2</MEANING>
                             <SCHEME_VERSION/>
                         </VALUE>
@@ -500,7 +538,7 @@ def test_extract_anatomical_sites_from_set():
                         <TAG>anatomical_site</TAG>
                         <VALUE>
                             <CODE>8</CODE>
-                            <SCHEME>Scheme8</SCHEME>
+                            <SCHEME>SNOMED CT</SCHEME>
                             <MEANING>Test8</MEANING>
                             <SCHEME_VERSION/>
                         </VALUE>
@@ -517,10 +555,10 @@ def test_extract_anatomical_sites_from_set():
     assert sites == frozenset(
         [
             BigpictureCodeAttributeValue(
-                code="2", scheme="Scheme2", meaning="Test2", scheme_version=""
+                code="2", scheme="SNOMED CT", meaning="Test2", scheme_version=""
             ),
             BigpictureCodeAttributeValue(
-                code="8", scheme="Scheme8", meaning="Test8", scheme_version=""
+                code="8", scheme="SNOMED CT", meaning="Test8", scheme_version=""
             ),
         ]
     )
@@ -534,7 +572,7 @@ def test_extract_anatomical_sites_from_list_and_set():
                 <TAG>anatomical_site</TAG>
                 <VALUE>
                     <CODE>1</CODE>
-                    <SCHEME>Scheme1</SCHEME>
+                    <SCHEME>SNOMED CT</SCHEME>
                     <MEANING>Test1</MEANING>
                     <SCHEME_VERSION/>
                 </VALUE>
@@ -546,7 +584,7 @@ def test_extract_anatomical_sites_from_list_and_set():
                         <TAG>anatomical_site</TAG>
                         <VALUE>
                             <CODE>2</CODE>
-                            <SCHEME>Scheme2</SCHEME>
+                            <SCHEME>SNOMED CT</SCHEME>
                             <MEANING>Test2</MEANING>
                             <SCHEME_VERSION/>
                         </VALUE>
@@ -563,10 +601,10 @@ def test_extract_anatomical_sites_from_list_and_set():
     assert sites == frozenset(
         [
             BigpictureCodeAttributeValue(
-                code="1", scheme="Scheme1", meaning="Test1", scheme_version=""
+                code="1", scheme="SNOMED CT", meaning="Test1", scheme_version=""
             ),
             BigpictureCodeAttributeValue(
-                code="2", scheme="Scheme2", meaning="Test2", scheme_version=""
+                code="2", scheme="SNOMED CT", meaning="Test2", scheme_version=""
             ),
         ]
     )
@@ -580,7 +618,7 @@ def test_extract_fixation_type_standard_scheme():
                 <TAG>fixation_type</TAG>
                 <VALUE>
                     <CODE>3</CODE>
-                    <SCHEME>Scheme3</SCHEME>
+                    <SCHEME>SNOMED CT</SCHEME>
                     <MEANING>Test3</MEANING>
                     <SCHEME_VERSION/>
                 </VALUE>
@@ -593,8 +631,31 @@ def test_extract_fixation_type_standard_scheme():
     fixation_type, fixation_type_text = _extract_fixation_type(elem)
 
     assert fixation_type == BigpictureCodeAttributeValue(
-        code="3", scheme="Scheme3", meaning="Test3", scheme_version=""
+        code="3", scheme="SNOMED CT", meaning="Test3", scheme_version=""
     )
+    assert fixation_type_text is None
+
+
+def test_extract_fixation_type_unsupported_scheme():
+    xml = """
+    <ROOT>
+        <ATTRIBUTES>
+            <CODE_ATTRIBUTE>
+                <TAG>fixation_type</TAG>
+                <VALUE>
+                    <CODE>3</CODE>
+                    <SCHEME>ICDO</SCHEME>
+                    <MEANING>Test3</MEANING>
+                    <SCHEME_VERSION/>
+                </VALUE>
+            </CODE_ATTRIBUTE>
+        </ATTRIBUTES>
+    </ROOT>
+    """
+    elem = etree.fromstring(xml)
+
+    fixation_type, fixation_type_text = _extract_fixation_type(elem)
+    assert fixation_type is None
     assert fixation_type_text is None
 
 

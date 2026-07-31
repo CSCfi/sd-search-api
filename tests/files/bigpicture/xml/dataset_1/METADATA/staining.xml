@@ -9,7 +9,7 @@
                 <TAG>staining_procedure</TAG>
                 <VALUE>
                     <CODE>6</CODE>
-                    <SCHEME>Scheme6</SCHEME>
+                    <SCHEME>SNOMED CT</SCHEME>
                     <MEANING>Test6</MEANING>
                     <SCHEME_VERSION/>
                 </VALUE>
@@ -52,7 +52,7 @@
                 <TAG>staining_procedure</TAG>
                 <VALUE>
                     <CODE>7</CODE>
-                    <SCHEME>Scheme7</SCHEME>
+                    <SCHEME>SNOMED CT</SCHEME>
                     <MEANING>Test7</MEANING>
                     <SCHEME_VERSION/>
                 </VALUE>

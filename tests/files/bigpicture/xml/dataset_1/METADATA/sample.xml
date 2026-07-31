@@ -5,7 +5,7 @@
                 <TAG>animal_species</TAG>
                 <VALUE>
                     <CODE>1</CODE>
-                    <SCHEME>Scheme1</SCHEME>
+                    <SCHEME>SNOMED CT</SCHEME>
                     <MEANING>Test1</MEANING>
                     <SCHEME_VERSION/>
                 </VALUE>
@@ -50,7 +50,7 @@
                 <TAG>anatomical_site</TAG>
                 <VALUE>
                     <CODE>2</CODE>
-                    <SCHEME>Scheme2</SCHEME>
+                    <SCHEME>SNOMED CT</SCHEME>
                     <MEANING>Test2</MEANING>
                     <SCHEME_VERSION/>
                 </VALUE>
@@ -59,7 +59,7 @@
                 <TAG>fixation_type</TAG>
                 <VALUE>
                     <CODE>3</CODE>
-                    <SCHEME>Scheme3</SCHEME>
+                    <SCHEME>SNOMED CT</SCHEME>
                     <MEANING>Test3</MEANING>
                     <SCHEME_VERSION/>
                 </VALUE>
@@ -68,7 +68,7 @@
                 <TAG>specimen_type</TAG>
                 <VALUE>
                     <CODE>4</CODE>
-                    <SCHEME>Scheme4</SCHEME>
+                    <SCHEME>SNOMED CT</SCHEME>
                     <MEANING>Test4</MEANING>
                     <SCHEME_VERSION/>
                 </VALUE>
@@ -82,7 +82,7 @@
                 <TAG>block_preparation</TAG>
                 <VALUE>
                     <CODE>5</CODE>
-                    <SCHEME>Scheme5</SCHEME>
+                    <SCHEME>SNOMED CT</SCHEME>
                     <MEANING>Test5</MEANING>
                     <SCHEME_VERSION/>
                 </VALUE>

@@ -11,6 +11,7 @@ import fsspec  # type: ignore
 import isodate  # type: ignore[import-untyped]
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
+from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
 from search_api.api.bigpicture.models import BP_DOCUMENT_FIELDS
 from search_api.exceptions import SystemException
 from search_api.api.opensearch.models import ExtractedDocument, OpenSearchFieldValue
@@ -179,10 +180,58 @@ STAINING_XML_SCHEMA_FILE = "BP.staining.xsd"
 OBSERVATION_XML_SCHEMA_FILE = "BP.observation.xsd"
 
 
-def _is_snomed_scheme(scheme: str | None) -> bool:
+# XML <SCHEME> value(s) for each supported ontology scheme.
+_SCHEME_ALIASES: dict[str, frozenset[str]] = {
+    SNOMED_ONTOLOGY_ID: frozenset({"snomedct", "snomed", "sct"}),
+}
+
+
+def _matches_scheme(scheme: str | None, ontology_id: str) -> bool:
     if scheme is None:
         return False
-    return "".join(scheme.split()).lower() in {"snomedct", "snomed", "sct"}
+    # Case and whitespace insensitive matching.
+    return "".join(scheme.split()).lower() in _SCHEME_ALIASES.get(
+        ontology_id, frozenset()
+    )
+
+
+def _require_scheme(
+    value: BigpictureCodeAttributeValue | None, ontology_id: str | None
+) -> BigpictureCodeAttributeValue | None:
+    """Return the code value only if the schema matches the required ontology."""
+    if (
+        value is None
+        or ontology_id is None
+        or _matches_scheme(value.scheme, ontology_id)
+    ):
+        return value
+    logging.warning(
+        "Ignored code %r with scheme %r; expected %r.",
+        value.code,
+        value.scheme,
+        ontology_id,
+    )
+    return None
+
+
+def _filter_by_scheme(
+    values: Iterable[BigpictureCodeAttributeValue], ontology_id: str | None
+) -> frozenset[BigpictureCodeAttributeValue]:
+    """Return the codes values if the schema matches the required ontology."""
+    values = frozenset(values)
+    if ontology_id is None:
+        return values
+    matched = frozenset(
+        value for value in values if _matches_scheme(value.scheme, ontology_id)
+    )
+    for value in values - matched:
+        logging.warning(
+            "Ignored code %r with scheme %r; expected %r.",
+            value.code,
+            value.scheme,
+            ontology_id,
+        )
+    return matched
 
 
 _OBSERVATION_IMAGE_REF = "IMAGE_REF"
@@ -665,7 +714,9 @@ def extract_dataset_documents(
 
 def _extract_sample_block_fields(xml: ElementTree) -> BigpictureSampleBlockFields:
     return BigpictureSampleBlockFields(
-        block_preparation=_extract_code_attribute_value(xml, "block_preparation")
+        block_preparation=_extract_code_attribute_value(
+            xml, "block_preparation", SNOMED_ONTOLOGY_ID
+        )
     )
 
 
@@ -673,7 +724,9 @@ def _extract_sample_biological_being_fields(
     xml: ElementTree,
 ) -> BigpictureSampleBiologicalBeingFields:
     return BigpictureSampleBiologicalBeingFields(
-        animal_species=_extract_code_attribute_value(xml, "animal_species"),
+        animal_species=_extract_code_attribute_value(
+            xml, "animal_species", SNOMED_ONTOLOGY_ID
+        ),
         sex=cast(
             Literal["Male", "Female", "Not-known", "Other"] | None,
             _extract_string_attribute_value(xml, "sex"),
@@ -688,7 +741,9 @@ def _extract_sample_specimen_fields(xml: ElementTree) -> BigpictureSampleSpecime
         anatomical_site=_extract_anatomical_sites(xml),
         fixation_type=fixation_type,
         fixation_type_other=fixation_type_text,
-        specimen_type=_extract_code_attribute_value(xml, "specimen_type"),
+        specimen_type=_extract_code_attribute_value(
+            xml, "specimen_type", SNOMED_ONTOLOGY_ID
+        ),
         age_at_extraction=_extract_age_at_extraction_range(xml),
     )
 
@@ -699,7 +754,10 @@ def _extract_staining_fields(xml: ElementTree) -> list[BigpictureStainingFields]
         return [
             BigpictureStainingFields(
                 staining_procedure=_extract_code_attribute_value(
-                    procedure_xml, "staining_procedure", is_attributes=False
+                    procedure_xml,
+                    "staining_procedure",
+                    SNOMED_ONTOLOGY_ID,
+                    is_attributes=False,
                 ),
                 staining_procedure_other=_extract_string_attribute_value(
                     procedure_xml, "staining_procedure", is_attributes=False
@@ -716,8 +774,9 @@ def _extract_staining_fields(xml: ElementTree) -> list[BigpictureStainingFields]
         is_chemical_stain = staining_method == "chemical"
         staining_target_text = None
         if not is_chemical_stain:
+            # staining_target is stored as free text regardless of ontology.
             staining_target = _extract_code_attribute_value(
-                stain_xml, "staining_target", is_attributes=False
+                stain_xml, "staining_target", None, is_attributes=False
             )
             if staining_target:
                 staining_target_text = staining_target.meaning
@@ -729,13 +788,19 @@ def _extract_staining_fields(xml: ElementTree) -> list[BigpictureStainingFields]
         fields.append(
             BigpictureStainingFields(
                 staining_procedure=_extract_code_attribute_value(
-                    stain_xml, "staining_procedure", is_attributes=False
+                    stain_xml,
+                    "staining_procedure",
+                    SNOMED_ONTOLOGY_ID,
+                    is_attributes=False,
                 ),
                 staining_procedure_other=_extract_string_attribute_value(
                     stain_xml, "staining_procedure", is_attributes=False
                 ),
                 staining_substance=_extract_code_attribute_value(
-                    stain_xml, "staining_compound", is_attributes=False
+                    stain_xml,
+                    "staining_compound",
+                    SNOMED_ONTOLOGY_ID,
+                    is_attributes=False,
                 )
                 if is_chemical_stain
                 else None,
@@ -768,8 +833,9 @@ def _code_attribute_value(value: ElementTree) -> BigpictureCodeAttributeValue:
 
 
 def _extract_code_attribute_value(
-    elem: ElementTree, tag: str, *, is_attributes=True
+    elem: ElementTree, tag: str, ontology_id: str | None, *, is_attributes: bool = True
 ) -> BigpictureCodeAttributeValue | None:
+    """Extract the CODE_ATTRIBUTE value, requiring its scheme to match the provided ontology."""
     if is_attributes:
         values = elem.xpath(f"ATTRIBUTES/CODE_ATTRIBUTE[TAG='{tag}']/VALUE")
     else:
@@ -778,18 +844,20 @@ def _extract_code_attribute_value(
     if not values or _is_nil(values[0]):
         return None
 
-    return _code_attribute_value(values[0])
+    return _require_scheme(_code_attribute_value(values[0]), ontology_id)
 
 
 def _extract_code_attribute_values(
-    elem: ElementTree, tag: str, *, is_attributes=True
+    elem: ElementTree, tag: str, ontology_id: str | None, *, is_attributes: bool = True
 ) -> frozenset[BigpictureCodeAttributeValue]:
+    """Extract CODE_ATTRIBUTE values, requiring their scheme to match the provided ontology."""
     if is_attributes:
         values = elem.xpath(f"ATTRIBUTES/CODE_ATTRIBUTE[TAG='{tag}']/VALUE")
     else:
         values = elem.xpath(f"CODE_ATTRIBUTE[TAG='{tag}']/VALUE")
 
-    return frozenset(_code_attribute_value(v) for v in values if not _is_nil(v))
+    codes = (_code_attribute_value(v) for v in values if not _is_nil(v))
+    return _filter_by_scheme(codes, ontology_id)
 
 
 def _extract_diagnoses(
@@ -800,19 +868,19 @@ def _extract_diagnoses(
         for v in statement.xpath("CODE_ATTRIBUTES/CODE_ATTRIBUTE/VALUE")
         if not _is_nil(v)
     }
-    return {c for c in codes if _is_snomed_scheme(c.scheme)}
+    return set(_filter_by_scheme(codes, SNOMED_ONTOLOGY_ID))
 
 
 def _extract_anatomical_sites(
     elem: ElementTree,
 ) -> frozenset[BigpictureCodeAttributeValue]:
-    direct = _extract_code_attribute_values(elem, "anatomical_site")
+    direct = _extract_code_attribute_values(elem, "anatomical_site", SNOMED_ONTOLOGY_ID)
 
     set_nodes = elem.xpath("ATTRIBUTES/SET_ATTRIBUTE[TAG='anatomical_site_list']/VALUE")
     from_set: frozenset[BigpictureCodeAttributeValue] = frozenset()
     if set_nodes:
         from_set = _extract_code_attribute_values(
-            set_nodes[0], "anatomical_site", is_attributes=False
+            set_nodes[0], "anatomical_site", SNOMED_ONTOLOGY_ID, is_attributes=False
         )
 
     return direct | from_set
@@ -821,12 +889,13 @@ def _extract_anatomical_sites(
 def _extract_fixation_type(
     xml: ElementTree,
 ) -> tuple[BigpictureCodeAttributeValue | None, str | None]:
-    value = _extract_code_attribute_value(xml, "fixation_type")
+    # If schema is "Other" then no ontology is used. Otherwise, require Snomed.
+    value = _extract_code_attribute_value(xml, "fixation_type", None)
 
     if value and value.scheme == "Other":
         return None, value.meaning or value.code
 
-    return value, None
+    return _require_scheme(value, SNOMED_ONTOLOGY_ID), None
 
 
 def _extract_string_attribute_value(

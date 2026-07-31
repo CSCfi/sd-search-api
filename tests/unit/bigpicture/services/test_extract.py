@@ -242,23 +242,25 @@ def test_process_string_attribute():
     assert value == "Male"
 
 
-def test_extract_age_at_extraction_range_valid():
+def test_extract_age_at_extraction_range_valid_one_specimen():
     xml = """
-    <ATTRIBUTES>
-        <SET_ATTRIBUTE>
-            <TAG>age_at_extraction</TAG>
-            <VALUE>
-                <STRING_ATTRIBUTE>
-                    <TAG>interval_start</TAG>
-                    <VALUE>P40Y</VALUE>
-                </STRING_ATTRIBUTE>
-                <STRING_ATTRIBUTE>
-                    <TAG>interval_length</TAG>
-                    <VALUE>P1Y</VALUE>
-                </STRING_ATTRIBUTE>
-            </VALUE>
-        </SET_ATTRIBUTE>
-    </ATTRIBUTES>
+    <SPECIMEN>
+        <ATTRIBUTES>
+            <SET_ATTRIBUTE>
+                <TAG>age_at_extraction</TAG>
+                <VALUE>
+                    <STRING_ATTRIBUTE>
+                        <TAG>interval_start</TAG>
+                        <VALUE>P40Y</VALUE>
+                    </STRING_ATTRIBUTE>
+                    <STRING_ATTRIBUTE>
+                        <TAG>interval_length</TAG>
+                        <VALUE>P1Y</VALUE>
+                    </STRING_ATTRIBUTE>
+                </VALUE>
+            </SET_ATTRIBUTE>
+        </ATTRIBUTES>
+    </SPECIMEN>
     """
     elem = etree.fromstring(xml)
 
@@ -267,24 +269,72 @@ def test_extract_age_at_extraction_range_valid():
     assert result == ("P40Y", "P41Y")
 
 
+def test_extract_age_at_extraction_range_valid_two_specimen():
+    xml = """
+    <SAMPLE_SET>
+        <SPECIMEN alias="1">
+            <ATTRIBUTES>
+                <SET_ATTRIBUTE>
+                    <TAG>age_at_extraction</TAG>
+                    <VALUE>
+                        <STRING_ATTRIBUTE>
+                            <TAG>interval_start</TAG>
+                            <VALUE>P10Y</VALUE>
+                        </STRING_ATTRIBUTE>
+                        <STRING_ATTRIBUTE>
+                            <TAG>interval_length</TAG>
+                            <VALUE>P1Y</VALUE>
+                        </STRING_ATTRIBUTE>
+                    </VALUE>
+                </SET_ATTRIBUTE>
+            </ATTRIBUTES>
+        </SPECIMEN>
+        <SPECIMEN alias="2">
+            <ATTRIBUTES>
+                <SET_ATTRIBUTE>
+                    <TAG>age_at_extraction</TAG>
+                    <VALUE>
+                        <STRING_ATTRIBUTE>
+                            <TAG>interval_start</TAG>
+                            <VALUE>P50Y</VALUE>
+                        </STRING_ATTRIBUTE>
+                        <STRING_ATTRIBUTE>
+                            <TAG>interval_length</TAG>
+                            <VALUE>P1Y</VALUE>
+                        </STRING_ATTRIBUTE>
+                    </VALUE>
+                </SET_ATTRIBUTE>
+            </ATTRIBUTES>
+        </SPECIMEN>
+    </SAMPLE_SET>
+    """
+    elem = etree.fromstring(xml)
+    specimen_1, specimen_2 = elem.xpath("/SAMPLE_SET/SPECIMEN")
+
+    assert _extract_age_at_extraction_range(specimen_1) == ("P10Y", "P11Y")
+    assert _extract_age_at_extraction_range(specimen_2) == ("P50Y", "P51Y")
+
+
 def test_extract_age_at_extraction_range_invalid(caplog):
 
     xml = """
-    <ATTRIBUTES>
-        <SET_ATTRIBUTE>
-            <TAG>age_at_extraction</TAG>
-            <VALUE>
-                <STRING_ATTRIBUTE>
-                    <TAG>interval_start</TAG>
-                    <VALUE>NOT_VALID</VALUE>
-                </STRING_ATTRIBUTE>
-                <STRING_ATTRIBUTE>
-                    <TAG>interval_length</TAG>
-                    <VALUE>P1Y</VALUE>
-                </STRING_ATTRIBUTE>
-            </VALUE>
-        </SET_ATTRIBUTE>
-    </ATTRIBUTES>
+    <SPECIMEN>
+        <ATTRIBUTES>
+            <SET_ATTRIBUTE>
+                <TAG>age_at_extraction</TAG>
+                <VALUE>
+                    <STRING_ATTRIBUTE>
+                        <TAG>interval_start</TAG>
+                        <VALUE>NOT_VALID</VALUE>
+                    </STRING_ATTRIBUTE>
+                    <STRING_ATTRIBUTE>
+                        <TAG>interval_length</TAG>
+                        <VALUE>P1Y</VALUE>
+                    </STRING_ATTRIBUTE>
+                </VALUE>
+            </SET_ATTRIBUTE>
+        </ATTRIBUTES>
+    </SPECIMEN>
     """
     elem = etree.fromstring(xml)
 
@@ -307,21 +357,23 @@ def test_add_iso8601_durations():
 
 def test_process_age_of_extraction_range():
     xml = """
-    <ATTRIBUTES>
-        <SET_ATTRIBUTE>
-            <TAG>age_at_extraction</TAG>
-            <VALUE>
-                <STRING_ATTRIBUTE>
-                <TAG>interval_start</TAG>
-                <VALUE>P40Y</VALUE>
-                </STRING_ATTRIBUTE>
-                <STRING_ATTRIBUTE>
-                <TAG>interval_length</TAG>
-                <VALUE>P1Y</VALUE>
-                </STRING_ATTRIBUTE>
-            </VALUE>
-        </SET_ATTRIBUTE>
-    </ATTRIBUTES>
+    <SPECIMEN>
+        <ATTRIBUTES>
+            <SET_ATTRIBUTE>
+                <TAG>age_at_extraction</TAG>
+                <VALUE>
+                    <STRING_ATTRIBUTE>
+                    <TAG>interval_start</TAG>
+                    <VALUE>P40Y</VALUE>
+                    </STRING_ATTRIBUTE>
+                    <STRING_ATTRIBUTE>
+                    <TAG>interval_length</TAG>
+                    <VALUE>P1Y</VALUE>
+                    </STRING_ATTRIBUTE>
+                </VALUE>
+            </SET_ATTRIBUTE>
+        </ATTRIBUTES>
+    </SPECIMEN>
     """
     elem = etree.fromstring(xml)
 
@@ -332,21 +384,23 @@ def test_process_age_of_extraction_range():
 
     # PT0S interval length — end equals start
     xml = """
-     <ATTRIBUTES>
-         <SET_ATTRIBUTE>
-             <TAG>age_at_extraction</TAG>
-             <VALUE>
-                 <STRING_ATTRIBUTE>
-                 <TAG>interval_start</TAG>
-                 <VALUE>P40Y</VALUE>
-                 </STRING_ATTRIBUTE>
-                 <STRING_ATTRIBUTE>
-                 <TAG>interval_length</TAG>
-                 <VALUE>PT0S</VALUE>
-                 </STRING_ATTRIBUTE>
-             </VALUE>
-         </SET_ATTRIBUTE>
-     </ATTRIBUTES>
+     <SPECIMEN>
+         <ATTRIBUTES>
+             <SET_ATTRIBUTE>
+                 <TAG>age_at_extraction</TAG>
+                 <VALUE>
+                     <STRING_ATTRIBUTE>
+                     <TAG>interval_start</TAG>
+                     <VALUE>P40Y</VALUE>
+                     </STRING_ATTRIBUTE>
+                     <STRING_ATTRIBUTE>
+                     <TAG>interval_length</TAG>
+                     <VALUE>PT0S</VALUE>
+                     </STRING_ATTRIBUTE>
+                 </VALUE>
+             </SET_ATTRIBUTE>
+         </ATTRIBUTES>
+     </SPECIMEN>
      """
     elem = etree.fromstring(xml)
 

@@ -858,9 +858,7 @@ def _add_iso8601_durations(start: str, length: str) -> str:
 
 
 def _extract_age_at_extraction_range(elem: ElementTree) -> tuple[str, str] | None:
-    nodes = elem.xpath(
-        "//ATTRIBUTES/SET_ATTRIBUTE[TAG/text()='age_at_extraction']/VALUE"
-    )
+    nodes = elem.xpath("ATTRIBUTES/SET_ATTRIBUTE[TAG/text()='age_at_extraction']/VALUE")
     if not nodes:
         return None
 

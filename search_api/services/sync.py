@@ -7,8 +7,13 @@ from typing import Any
 from opensearchpy import AsyncOpenSearch
 from psycopg import AsyncCursor
 
-from search_api.api.opensearch.services import create_search, index_documents
+from search_api.api.opensearch.services import (
+    create_search,
+    delete_all_documents as delete_all_opensearch_documents,
+    index_documents,
+)
 from search_api.database.document import (
+    delete_all_documents as delete_all_database_documents,
     iter_unsynced,
     mark_synced,
     unsynced_count,
@@ -104,3 +109,17 @@ class SyncService:
     async def unsynced_count(cur: AsyncCursor) -> int:
         """Return the number of documents pending sync to OpenSearch."""
         return await unsynced_count(cur)
+
+    async def delete_all_documents(self, cur: AsyncCursor) -> None:
+        """Delete all documents from the database and the OpenSearch index."""
+        database_count = await delete_all_database_documents(cur)
+        logging.info("Deleted %d document(s) from the database.", database_count)
+
+        opensearch_count = await delete_all_opensearch_documents(
+            self._search, self._opensearch_index
+        )
+        logging.info(
+            "Deleted %d document(s) from the '%s' OpenSearch index.",
+            opensearch_count,
+            self._opensearch_index,
+        )

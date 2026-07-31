@@ -51,6 +51,21 @@ async def create_index(
     await search.indices.create(index=index, body=body)
 
 
+async def delete_all_documents(search: AsyncOpenSearch, index: str) -> int:
+    """Delete all documents from the OpenSearch index and return the number of deleted documents.
+
+    :param search: The OpenSearch client.
+    :param index: The OpenSearch index name.
+    :return: The number of documents deleted.
+    """
+    if not await search.indices.exists(index=index):
+        return 0
+    response = await search.delete_by_query(
+        index=index, body={"query": {"match_all": {}}}, refresh=True
+    )
+    return response.get("deleted", 0)
+
+
 async def index_document(
     search: AsyncOpenSearch,
     index: str,

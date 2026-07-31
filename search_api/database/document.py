@@ -83,3 +83,16 @@ async def unsynced_count(cur: AsyncCursor) -> int:
     )
     row = await cur.fetchone()
     return row[0] if row else 0
+
+
+async def count_documents(cur: AsyncCursor) -> int:
+    """Return the total number of documents."""
+    await cur.execute(f"SELECT COUNT(1) FROM {DOCUMENT_TABLE}")
+    row = await cur.fetchone()
+    return row[0] if row else 0
+
+
+async def delete_all_documents(cur: AsyncCursor) -> int:
+    """Delete all documents from the database and return the number of deleted documents."""
+    await cur.execute(f"DELETE FROM {DOCUMENT_TABLE}")
+    return cur.rowcount

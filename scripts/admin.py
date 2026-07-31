@@ -14,8 +14,11 @@ from search_api.api.deployments import DOMAINS
 from search_api.api.domain import Domain
 from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorService
 from search_api.api.opensearch.services import create_index, create_search
+from search_api.conf import deployment_config
+from search_api.exceptions import SystemException
 from search_api.services.load import LoadService
 from search_api.services.sync import SyncService
+from search_api.database.document import count_documents
 from search_api.database.repository import get_cursor
 from search_api.services.snomed import SnomedService
 from search_api.services.ontology_term import (
@@ -66,6 +69,35 @@ async def _load(domain: Domain, args: argparse.Namespace) -> None:
                 await sync_service.sync_fields(cur)
         finally:
             await sync_service.search.close()
+
+
+async def _clear(domain: Domain, args: argparse.Namespace) -> None:
+    if deployment_config().DEPLOYMENT_ENV == "prod":
+        raise SystemException("This command is not available in production.")
+
+    def _confirm_clear(_doc_count: int) -> bool:
+        try:
+            answer = input(
+                f"All documents ({_doc_count}) will be deleted from database and OpenSearch Index '{domain.opensearch_index}'.\n"
+                f"Type '{args.group}' to confirm, or anything else to abort: "
+            )
+        except EOFError:
+            return False
+        return answer == args.group
+
+    sync_service = SyncService(domain.opensearch_index)
+    try:
+        async with get_cursor() as cur:
+            doc_count = await count_documents(cur)
+
+        if not _confirm_clear(doc_count):
+            logging.info("Aborted, nothing was deleted.")
+            return
+
+        async with get_cursor() as cur:
+            await sync_service.delete_all_documents(cur)
+    finally:
+        await sync_service.search.close()
 
 
 async def _snomed_refresh() -> None:
@@ -149,6 +181,11 @@ if __name__ == "__main__":
             ),
         )
 
+        # clear
+        commands.add_parser(
+            "clear", help="Delete all data from the database and the OpenSearch index."
+        )
+
     # snomed (deployment-independent)
     snomed_commands = groups.add_parser(
         "snomed", help="Manage the shared SNOMED CT preferred terms cache."
@@ -175,3 +212,5 @@ if __name__ == "__main__":
             _generate_index(domain)
         elif args.command == "create-index":
             asyncio.run(_create_index(domain))
+        elif args.command == "clear":
+            asyncio.run(_clear(domain, args))

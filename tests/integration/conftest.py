@@ -36,7 +36,7 @@ def _mock_oidc_provider():
         s.close()
         yield
         return
-    except OSError, socket.error:
+    except OSError:
         pass
 
     # Start the mock provider if not already running

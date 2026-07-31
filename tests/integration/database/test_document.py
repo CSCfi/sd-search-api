@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import pytest
 
 from search_api.database.document import (
+    count_documents,
     get_modified_at,
     iter_unsynced,
     mark_synced,
@@ -96,4 +97,15 @@ async def test_get_modified_at_returns_none_when_not_set():
             result = await get_modified_at(cur, doc_id)
             assert result is None
 
+            await cur.execute("DELETE FROM document WHERE id = %s", (doc_id,))
+
+
+@pytest.mark.asyncio
+async def test_count_documents():
+    doc_id = _doc_id()
+    async with get_connection() as conn:
+        async with conn.cursor() as cur:
+            count_before = await count_documents(cur)
+            await upsert_document(cur, doc_id, {}, None)
+            assert await count_documents(cur) == count_before + 1
             await cur.execute("DELETE FROM document WHERE id = %s", (doc_id,))

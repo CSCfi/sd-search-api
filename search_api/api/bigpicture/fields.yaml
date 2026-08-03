@@ -31,7 +31,7 @@
 filtering_terms:
   - id: dataset_title
     type: text
-    scopes: [ clinical ]
+    scopes: [ clinical, non_clinical ]
     label: "Dataset title"
     description: "The title of the dataset"
     ui_group: "description"
@@ -39,7 +39,7 @@ filtering_terms:
 
   - id: dataset_description
     type: text
-    scopes: [ clinical ]
+    scopes: [ clinical, non_clinical ]
     label: "Dataset description"
     description: "The description of the dataset"
     ui_group: "description"
@@ -47,7 +47,7 @@ filtering_terms:
   - id: animal_species
     type: ontology
     group: specimen
-    scopes: [ clinical ]
+    scopes: [ clinical, non_clinical ]
     label: "Biological species"
     description: "Species of the biological being"
     ontology:
@@ -59,7 +59,7 @@ filtering_terms:
   - id: anatomical_site
     type: ontology
     group: specimen
-    scopes: [ clinical ]
+    scopes: [ clinical, non_clinical ]
     label: "Anatomical site"
     description: >-
       The anatomical site from which the specimen originated, typically at the
@@ -74,7 +74,7 @@ filtering_terms:
   - id: sex
     type: controlledValue
     group: specimen
-    scopes: [ clinical ]
+    scopes: [ clinical, non_clinical ]
     label: "Sex"
     description: "The sex of the biological being"
     controlledValues: [ "Male", "Female", "Not-known", "Other" ]
@@ -83,7 +83,7 @@ filtering_terms:
   - id: age_at_extraction
     type: iso8601Range
     group: specimen
-    scopes: [ clinical ]
+    scopes: [ clinical, non_clinical ]
     label: "Age at extraction"
     description: "The age of the biological being at the time point of extraction of the specimen."
     ui_group: "subject"
@@ -91,7 +91,7 @@ filtering_terms:
   - id: block_preparation
     type: ontology
     group: specimen
-    scopes: [ clinical ]
+    scopes: [ clinical, non_clinical ]
     label: "Block preparation"
     description: "The preservation technique used."
     ontology:
@@ -108,7 +108,7 @@ filtering_terms:
   - id: specimen_type
     type: ontology
     group: specimen
-    scopes: [ clinical ]
+    scopes: [ clinical, non_clinical ]
     label: "Specimen type"
     description: "The type of the specimen."
     ontology:
@@ -119,7 +119,7 @@ filtering_terms:
   - id: fixation_type
     type: ontologyOrValue
     group: specimen
-    scopes: [ clinical ]
+    scopes: [ clinical, non_clinical ]
     label: "Fixation type"
     description: "The type of fixation used in the process of the creation of the specimen."
     ontology:
@@ -130,7 +130,7 @@ filtering_terms:
   - id: staining_target
     type: keyword
     group: staining
-    scopes: [ clinical ]
+    scopes: [ clinical, non_clinical ]
     label: "Staining target"
     description: "The specific target of the stain"
     ui_group: "staining"
@@ -138,7 +138,7 @@ filtering_terms:
   - id: staining_procedure
     type: ontologyOrValue
     group: staining
-    scopes: [ clinical ]
+    scopes: [ clinical, non_clinical ]
     label: "Staining procedure"
     description: "The name of the staining procedure that was performed to stain the slide"
     ontology:
@@ -149,7 +149,7 @@ filtering_terms:
   - id: staining_substance
     type: ontologyOrValue
     group: staining
-    scopes: [ clinical ]
+    scopes: [ clinical, non_clinical ]
     label: "Staining substance"
     description: "The staining substance that binds to parts of the tissues of the slide"
     ontology:

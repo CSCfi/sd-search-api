@@ -594,7 +594,7 @@ def extract_dataset_documents(
             image_id=image_id,
             dataset_image_cnt=dataset_image_cnt,
             scope="clinical" if is_clinical else "non_clinical",
-            dataset_short_name=dataset_short_name,
+            dataset_short_name=dataset_short_name if is_clinical else None,
             dataset_title=dataset_title,
             dataset_description=dataset_description,
             dataset_modified_at=dataset_modified_at,

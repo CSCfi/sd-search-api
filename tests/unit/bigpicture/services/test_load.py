@@ -19,9 +19,9 @@ _PARAFFIN = "311731000"
 _HE = "406768004"
 
 
-def _fields(**kwargs) -> BigpictureFields:
+def _fields(*, scope: str = "clinical", **kwargs) -> BigpictureFields:
     return BigpictureFields(
-        image_id="img", dataset_id="ds", dataset_image_cnt=1, **kwargs
+        image_id="img", dataset_id="ds", dataset_image_cnt=1, scope=scope, **kwargs
     )
 
 

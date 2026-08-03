@@ -5,6 +5,7 @@ from pydantic import Field
 
 from search_api.api.beacon.models import (
     BeaconFilteringGroup,
+    BeaconFilteringScope,
     BeaconFilteringTermsResponse,
     BeaconFilteringTerms,
     BeaconInfoResponse,
@@ -15,7 +16,8 @@ from search_api.api.beacon.models import (
     BeaconInfo,
 )
 from search_api.api.fields import load_fields_config
-from search_api.api.groups import load_groups_config, validate_ui_groups
+from search_api.api.groups import load_groups_config, validate_filtering_groups
+from search_api.api.scopes import load_scopes_config, validate_filtering_scopes
 from search_api.exceptions import SystemException
 from search_api.api.opensearch.models import (
     OpenSearchField,
@@ -60,8 +62,8 @@ BP_SCHEMAS = [
     BP_STAINING_SCHEMA,
 ]
 
-# Filtering terms, groups, and index-only fields are declared in YAML files and
-# validated on load.
+# Filtering terms, groups, scopes, and index-only fields are declared in YAML
+# files and validated on load.
 _FIELDS_CONFIG_PATH = Path(__file__).resolve().parent / "fields.yaml"
 _fields_config = load_fields_config(_FIELDS_CONFIG_PATH)
 
@@ -73,8 +75,14 @@ BP_FILTERING_GROUPS: list[BeaconFilteringGroup] = load_groups_config(
     _GROUPS_CONFIG_PATH
 ).filtering_groups
 
+_SCOPES_CONFIG_PATH = Path(__file__).resolve().parent / "scopes.yaml"
+BP_FILTERING_SCOPES: list[BeaconFilteringScope] = load_scopes_config(
+    _SCOPES_CONFIG_PATH
+).filtering_scopes
 
-validate_ui_groups(BP_FILTERING_TERMS, BP_FILTERING_GROUPS, _FIELDS_CONFIG_PATH)
+
+validate_filtering_groups(BP_FILTERING_TERMS, BP_FILTERING_GROUPS, _FIELDS_CONFIG_PATH)
+validate_filtering_scopes(BP_FILTERING_TERMS, BP_FILTERING_SCOPES, _FIELDS_CONFIG_PATH)
 
 # Filtering term lookup by id.
 BP_FILTERING_TERM_BY_ID = {term.id: term for term in BP_FILTERING_TERMS}

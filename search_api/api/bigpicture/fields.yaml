@@ -194,3 +194,6 @@ non_filtering_fields:
 
   - id: dataset_short_name
     type: text
+
+  - id: scope
+    type: keyword

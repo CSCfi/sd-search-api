@@ -11,6 +11,7 @@ from search_api.api.beacon.models import (
     BeaconBooleanResponse,
     BeaconCountResponse,
     BeaconFilteringGroup,
+    BeaconFilteringScope,
     BeaconFilteringTerms,
     BeaconFilteringTermsResponse,
     BeaconInfo,
@@ -60,6 +61,7 @@ def make_beacon_router(domain: Domain) -> APIRouter:
     router = APIRouter()
     result_sets_response_model = domain.result_sets_response_model
     ontology_id_by_field = domain.ontology_id_by_field
+    valid_scopes = {scope.id for scope in domain.filtering_scopes}
 
     # The info and filtering_terms responses share the same beacon meta.
     meta = BeaconInfoMeta(
@@ -99,6 +101,10 @@ def make_beacon_router(domain: Domain) -> APIRouter:
     async def filtering_groups() -> list[BeaconFilteringGroup]:
         return list(domain.filtering_groups)
 
+    @router.get("/filtering_scopes", response_model=list[BeaconFilteringScope])
+    async def filtering_scopes() -> list[BeaconFilteringScope]:
+        return list(domain.filtering_scopes)
+
     @router.post(
         "/query",
         response_model=(
@@ -110,6 +116,15 @@ def make_beacon_router(domain: Domain) -> APIRouter:
         request: BeaconQueryRequest,
         beacon_service: BeaconService = Depends(get_beacon_service),
     ):
+        if (
+            request.query.requestedScope is not None
+            and request.query.requestedScope not in valid_scopes
+        ):
+            raise UserException(
+                f"Unsupported scope: {request.query.requestedScope!r}. "
+                f"Valid scopes: {sorted(valid_scopes)}."
+            )
+
         ontology_filters = [
             f for f in request.query.filters if f.id in ontology_id_by_field
         ]
@@ -135,7 +150,9 @@ def make_beacon_router(domain: Domain) -> APIRouter:
 
         granularity = request.query.requestedGranularity
         filters = other_filters + resolved_ontology_filters
-        response = await beacon_service.query(filters=filters, granularity=granularity)
+        response = await beacon_service.query(
+            filters=filters, granularity=granularity, scope=request.query.requestedScope
+        )
         num_results = len(response.resultSet)
         exists = num_results > 0
         meta = BeaconResponseMeta(

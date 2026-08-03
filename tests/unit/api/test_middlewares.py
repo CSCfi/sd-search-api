@@ -150,7 +150,13 @@ async def test_protected_path_with_tampered_token_returns_401():
     middleware = AuthMiddleware(app)
 
     token = create_jwt_token("user-1", "Jane Doe")
-    tampered = token[:-1] + ("A" if token[-1] != "A" else "B")
+    # Flip a character in the middle of the signature. The
+    # final base64url character of a 32-byte HMAC-SHA256 signature only
+    # carries 4 significant bits (2 are unused padding), so a swap
+    # there can decode to the identical signature bytes.
+    middle = len(token) // 2
+    flipped_char = "A" if token[middle] != "A" else "B"
+    tampered = token[:middle] + flipped_char + token[middle + 1 :]
     scope = _make_scope("/query", _cookie_header(tampered), method="POST")
     sent = []
 

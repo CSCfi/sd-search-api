@@ -39,6 +39,7 @@ async def test_load_and_sync_fields():
         image_id=image_id,
         dataset_id=dataset_id,
         dataset_image_cnt=dataset_image_cnt,
+        scope="clinical",
         dataset_short_name=dataset_short_name,
         dataset_title=dataset_title,
         dataset_description=dataset_description,

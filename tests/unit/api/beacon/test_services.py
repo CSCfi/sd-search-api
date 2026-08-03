@@ -14,10 +14,10 @@ def get_term(field_id: str):
     return next(t for t in BP_FILTERING_TERMS if t.id == field_id)
 
 
-def get_query(*id_value_pairs: tuple[str, str]) -> dict:
+def get_query(*id_value_pairs: tuple[str, str], scope: str | None = None) -> dict:
     """Build and return the OpenSearch query clause for the given filter pairs."""
     filters = [BeaconQueryFilter(id=fid, value=val) for fid, val in id_value_pairs]
-    return OpenSearchBeaconService._get_query(filters, BP_FILTERING_TERMS)
+    return OpenSearchBeaconService._get_query(filters, BP_FILTERING_TERMS, scope)
 
 
 # ---------------------------------------------------------------------------
@@ -353,7 +353,7 @@ def test_get_query_multiple_nested_specimen_filter():
     }
 
 
-def test_get_query_all_filter_scopes():
+def test_get_query_top_level_and_nested_filters():
     assert get_query(
         ("dataset_title", "cancer"),  # top-level
         ("sex", "Female"),  # specimen
@@ -409,6 +409,41 @@ def test_get_query_all_filter_scopes():
                                 ]
                             }
                         },
+                    }
+                },
+            ]
+        }
+    }
+
+
+def test_get_query_scope_none():
+    """scope=None (the default) means no scope restriction."""
+    assert (
+        get_query(scope=None) == get_query() == {"bool": {"must": [{"match_all": {}}]}}
+    )
+
+
+def test_get_query_scope_clinical():
+    assert get_query(scope="clinical") == {
+        "bool": {"must": [{"term": {"scope": "clinical"}}]}
+    }
+
+
+def test_get_query_scope_non_clinical():
+    assert get_query(scope="non_clinical") == {
+        "bool": {"must": [{"term": {"scope": "non_clinical"}}]}
+    }
+
+
+def test_get_query_scope_clinical_with_filter():
+    assert get_query(("dataset_title", "cancer"), scope="clinical") == {
+        "bool": {
+            "must": [
+                {"term": {"scope": "clinical"}},
+                {
+                    "bool": {
+                        "should": [{"match": {"dataset_title": "cancer"}}],
+                        "minimum_should_match": 1,
                     }
                 },
             ]

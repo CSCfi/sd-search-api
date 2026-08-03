@@ -1,0 +1,7 @@
+filtering_scopes:
+  - id: clinical
+    label: "Clinical"
+    description: ""
+  - id: non_clinical
+    label: "Non-clinical"
+    description: ""

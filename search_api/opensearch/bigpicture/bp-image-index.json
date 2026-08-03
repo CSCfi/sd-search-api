@@ -24,6 +24,9 @@
         "type": "text",
         "analyzer": "english_text"
       },
+      "scope": {
+        "type": "keyword"
+      },
       "dataset_title": {
         "type": "text",
         "analyzer": "english_text"

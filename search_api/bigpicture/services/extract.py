@@ -96,6 +96,7 @@ class BigpictureFields(BaseModel):
     image_id: str
     dataset_id: str
     dataset_image_cnt: int
+    scope: Literal["clinical", "non_clinical"]
     dataset_short_name: str | None = None
     dataset_title: str | None = None
     dataset_description: str | None = None
@@ -580,6 +581,9 @@ def extract_dataset_documents(
 
     # Finished reading XMLs.
 
+    # TODO: support non-clinical datasets.
+    is_clinical = True
+
     # Add dataset fields.
     fields: dict[str, BigpictureFields] = {}
     dataset_image_cnt = len(images)
@@ -589,6 +593,7 @@ def extract_dataset_documents(
             dataset_id=dataset_id,
             image_id=image_id,
             dataset_image_cnt=dataset_image_cnt,
+            scope="clinical" if is_clinical else "non_clinical",
             dataset_short_name=dataset_short_name,
             dataset_title=dataset_title,
             dataset_description=dataset_description,
@@ -634,9 +639,6 @@ def extract_dataset_documents(
                     stained_slide_keys, map_slide_key_to_image_ids
                 ):
                     fields[image_id].staining.add(staining_fields)
-
-    # TODO: support non-clinical datasets.
-    is_clinical = True
 
     # Add observation fields.
     if is_clinical and observation_file_path is not None:

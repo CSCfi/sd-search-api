@@ -25,6 +25,7 @@ from search_api.api.opensearch.models import (
 )
 from search_api.api.bigpicture.models import (
     BP_FILTERING_GROUPS,
+    BP_FILTERING_SCOPES,
     BP_FILTERING_TERMS,
     BP_INFO_RESPONSE,
     BP_FILTERING_TERMS_RESPONSE,
@@ -70,7 +71,7 @@ class MockBeaconService(
 ):
     @override
     async def query(
-        self, filters, granularity="record"
+        self, filters, granularity="record", scope=None
     ) -> BeaconResultSets[BigpictureBeaconResultSetResult]:
         return get_mock_query_result()
 
@@ -198,6 +199,19 @@ def test_filtering_groups(client: TestClient):
     for group in data:
         assert "id" in group
         assert "label" in group
+
+
+def test_filtering_scopes(client: TestClient):
+    response = client.get("/filtering_scopes")
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+    assert len(data) == len(BP_FILTERING_SCOPES)
+    ids = [s["id"] for s in data]
+    assert ids == [s.id for s in BP_FILTERING_SCOPES]
+    for scope in data:
+        assert "id" in scope
+        assert "label" in scope
 
 
 @pytest.fixture()

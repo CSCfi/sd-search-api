@@ -8,6 +8,7 @@ from opensearchpy import AsyncOpenSearch
 from search_api.api.opensearch.services import (
     fetch_indexed_keywords,
     build_match_query,
+    build_term_query,
     build_terms_query,
     build_iso8601_range_query,
     or_queries,
@@ -78,6 +79,7 @@ class BeaconService(ABC, Generic[T, S]):
         self,
         filters: list[BeaconQueryFilter],
         granularity: BeaconQueryGranularity = "record",
+        scope: str | None = None,
     ) -> BeaconResultSets[S]:
         pass
 
@@ -162,15 +164,20 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm, S]):
     def _get_query(
         filters: list[BeaconQueryFilter],
         filtering_terms: Sequence[OpenSearchBeaconFilteringTerm],
+        scope: str | None = None,
     ) -> dict[str, Any]:
         """Build an OpenSearch bool/must query from Beacon filters.
 
         Filters on nested fields are grouped by path and wrapped in nested
-        queries. Top-level filters are added as direct must clauses.
+        queries. Top-level filters are added as direct must clauses. Scope
+        restricts to documents of that scope.
         """
         terms_by_id = {t.id: t for t in filtering_terms}
         must_clauses: list[dict[str, Any]] = []
         nested_filters: dict[str, list[dict[str, Any]]] = {}
+
+        if scope is not None:
+            must_clauses.append(build_term_query("scope", scope))
 
         for f in filters:
             if f.id not in terms_by_id:
@@ -212,11 +219,13 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm, S]):
             results.resultSet.append(BeaconResultSet(id="", results=[]))
         return results
 
-    def get_boolean_query(self, filters: list[BeaconQueryFilter]) -> dict[str, Any]:
+    def get_boolean_query(
+        self, filters: list[BeaconQueryFilter], scope: str | None = None
+    ) -> dict[str, Any]:
         """Build a query for boolean granularity."""
         return {
             "size": 0,
-            "query": self._get_query(filters, self.filtering_terms),
+            "query": self._get_query(filters, self.filtering_terms, scope),
         }
 
     @override
@@ -224,15 +233,16 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm, S]):
         self,
         filters: list[BeaconQueryFilter],
         granularity: BeaconQueryGranularity = "record",
+        scope: str | None = None,
     ) -> BeaconResultSets[S]:
         """Execute a query. Boolean query granularity is handled here. Count
         and record granularity is delegated to _get_result."""
-        query_clause = self._get_query(filters, self.filtering_terms)
 
         if granularity == "boolean":
             resp = await self.client.search(
-                index=self.index_name, body=self.get_boolean_query(filters)
+                index=self.index_name, body=self.get_boolean_query(filters, scope)
             )
             return OpenSearchBeaconService._get_boolean_result(resp)
 
+        query_clause = self._get_query(filters, self.filtering_terms, scope)
         return await self._get_result(query_clause, granularity)

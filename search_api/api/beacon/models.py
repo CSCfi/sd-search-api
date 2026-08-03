@@ -56,6 +56,8 @@ class BeaconQuery(BaseModel):
 
     filters: list[BeaconQueryFilter] = Field(default_factory=list)
     requestedGranularity: BeaconQueryGranularity = "count"
+    # Beacon V2 extension.
+    requestedScope: str | None = None
 
 
 # https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/requests/beaconRequestBody.json
@@ -244,6 +246,17 @@ class BeaconFilteringTermsResponse(BaseModel):
 # Beacon V2 extension.
 class BeaconFilteringGroup(BaseModel):
     """A named group that organises filtering terms in the UI."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    label: str
+    description: str = ""
+
+
+# Beacon V2 extension.
+class BeaconFilteringScope(BaseModel):
+    """A named scope that documents belong to and queries can be restricted to."""
 
     model_config = ConfigDict(extra="forbid")
 

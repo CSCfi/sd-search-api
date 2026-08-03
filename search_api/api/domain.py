@@ -7,7 +7,11 @@ from typing import Any, Generic, TypeVar
 from fastapi import FastAPI
 
 from search_api.ai.models import AISearchResult
-from search_api.api.beacon.models import BeaconFilteringGroup, BeaconResultSetsResponse
+from search_api.api.beacon.models import (
+    BeaconFilteringGroup,
+    BeaconFilteringScope,
+    BeaconResultSetsResponse,
+)
 from search_api.api.beacon.services import BeaconService
 from search_api.api.opensearch.models import (
     ExtractedDocument,
@@ -41,6 +45,7 @@ class Domain:
     opensearch_index: str
     filtering_terms: Sequence[OpenSearchBeaconFilteringTerm]
     filtering_groups: Sequence[BeaconFilteringGroup]
+    filtering_scopes: Sequence[BeaconFilteringScope]
     non_filtering_fields: Sequence[OpenSearchField]
     loader: Loader[Any]
     beacon_service_factory: Callable[[Any], BeaconService]

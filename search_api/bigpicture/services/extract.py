@@ -1,6 +1,7 @@
 """Bigpicture XML extraction service."""
 
 import logging
+import re
 from collections.abc import Iterable, Sequence, Set
 from datetime import datetime, timezone
 from pathlib import Path
@@ -190,10 +191,9 @@ _SCHEME_ALIASES: dict[str, frozenset[str]] = {
 def _matches_scheme(scheme: str | None, ontology_id: str) -> bool:
     if scheme is None:
         return False
-    # Case and whitespace insensitive matching.
-    return "".join(scheme.split()).lower() in _SCHEME_ALIASES.get(
-        ontology_id, frozenset()
-    )
+    # Case- and punctuation-insensitive matching (e.g. "SNOMED CT", "SNOMED-CT", "snomedct").
+    normalized = re.sub(r"[^a-z0-9]", "", scheme.lower())
+    return normalized in _SCHEME_ALIASES.get(ontology_id, frozenset())
 
 
 def _require_scheme(

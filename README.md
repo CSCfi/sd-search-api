@@ -251,6 +251,13 @@ Example output:
 
 ## Data loading
 
+These commands connect directly to Postgres and OpenSearch, so the environment must define
+`POSTGRES_HOST`/`POSTGRES_PORT`/`POSTGRES_DB`/`POSTGRES_USER`/`POSTGRES_PASSWORD` and
+`OPENSEARCH_HOST`/`OPENSEARCH_PORT`/`OPENSEARCH_USER`/`OPENSEARCH_PASSWORD`; loading also resolves
+SNOMED CT preferred terms as it goes, so `SNOWSTORM_URL` must be set too. See
+`tests/integration/.env` for a working set. Pass `--env-file <path>` to load them from a file, or
+export them in the shell beforehand.
+
 ### Bigpicture
 
 #### Load datasets
@@ -273,6 +280,14 @@ To also sync to OpenSearch immediately after loading, add `--sync`:
 
 ```bash
 uv run python scripts/admin.py Bigpicture load /path/to/datasets/ --multi-dir --load --sync
+```
+
+#### Clear all data
+
+Delete every document from both the database and the OpenSearch index, e.g. to reload a dataset from scratch:
+
+```bash
+uv run python scripts/admin.py Bigpicture clear
 ```
 
 #### Refresh SNOMED CT preferred terms

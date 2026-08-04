@@ -205,6 +205,11 @@ def test_extract_diagnosis_with_accession_and_alias(tmp_path):
 
 def test_matches_scheme():
     assert _matches_scheme("SNOMED CT", SNOMED_ONTOLOGY_ID)
+    assert _matches_scheme("SNOMED-CT", SNOMED_ONTOLOGY_ID)
+    assert _matches_scheme("SNOMED_CT", SNOMED_ONTOLOGY_ID)
+    assert _matches_scheme("SNOMEDCT", SNOMED_ONTOLOGY_ID)
+    assert _matches_scheme("SCT", SNOMED_ONTOLOGY_ID)
+    assert _matches_scheme("SNOMED", SNOMED_ONTOLOGY_ID)
     assert _matches_scheme("snomedct", SNOMED_ONTOLOGY_ID)
     assert _matches_scheme(" SCT ", SNOMED_ONTOLOGY_ID)
     assert not _matches_scheme("ICDO", SNOMED_ONTOLOGY_ID)

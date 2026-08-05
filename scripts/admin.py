@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import warnings
 from pathlib import Path
 
@@ -14,7 +15,6 @@ from search_api.api.deployments import DOMAINS
 from search_api.api.domain import Domain
 from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorService
 from search_api.api.opensearch.services import create_index, create_search
-from search_api.conf import deployment_config
 from search_api.exceptions import SystemException
 from search_api.services.load import LoadService
 from search_api.services.sync import SyncService
@@ -75,7 +75,7 @@ async def _load(domain: Domain, args: argparse.Namespace) -> None:
 
 
 async def _clear(domain: Domain, args: argparse.Namespace) -> None:
-    if deployment_config().DEPLOYMENT_ENV == "prod":
+    if os.getenv("DEPLOYMENT_ENV", "dev") == "prod":
         raise SystemException("This command is not available in production.")
 
     def _confirm_clear(_doc_count: int) -> bool:

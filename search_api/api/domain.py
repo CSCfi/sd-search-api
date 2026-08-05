@@ -19,11 +19,15 @@ from search_api.api.opensearch.models import (
     OpenSearchField,
 )
 from search_api.api.opensearch.services import create_search
-from search_api.services.ontology import get_ontology_id_by_field
+from search_api.services.ontology import get_ontology_id_by_field, get_ontology_service
 from search_api.services.ontology_term import (
     OntologyTermCacheService,
     create_term_caches,
 )
+
+# Imported for its side effects: populates the ontology service and term cache
+# registries that this module looks up below.
+import search_api.services.ontologies  # noqa: F401
 
 LoadOptionsT = TypeVar("LoadOptionsT")
 
@@ -92,6 +96,10 @@ def make_lifespan(domain: Domain) -> Callable[[FastAPI], Any]:
             await term_service.load()
             term_service.start()
         app.state.ontology_term_services = ontology_term_services
+
+        # Initialise ontology services used by the domain.
+        for ontology_id in domain.ontology_ids:
+            await get_ontology_service(ontology_id).init()
 
         yield
 

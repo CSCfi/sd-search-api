@@ -10,7 +10,7 @@ from search_api.services.ontology import OntologyService
 
 logger = logging.getLogger(__name__)
 
-SNOMED_TABLE = "snomed"
+TERMS_CACHE_TABLE = "terms_cache"
 
 _BATCH_SIZE = 1000
 
@@ -74,15 +74,17 @@ class OntologyTermCacheService(ABC):
 
 
 class PostgresOntologyTermCacheService(OntologyTermCacheService):
-    """Postgres-backed term cache parameterised by table name.
+    """Postgres-backed term cache parameterised by ontology id.
 
-    Reads are served from an in-memory dict populated at startup and reloaded
-    from Postgres in the background every ``refresh_interval`` seconds.
-    Writes update both Postgres and the in-memory dict.
+    All ontologies share the ``terms_cache`` table, distinguished by
+    ``ontology_id``. Reads are served from an in-memory dict populated at
+    startup and reloaded from Postgres in the background every
+    ``refresh_interval`` seconds. Writes update both Postgres and the
+    in-memory dict.
     """
 
-    def __init__(self, table: str, refresh_interval: float = 300.0) -> None:
-        self._table = table
+    def __init__(self, ontology_id: str, refresh_interval: float = 300.0) -> None:
+        self._ontology_id = ontology_id
         self._refresh_interval = refresh_interval
         self._cache: OntologyTermCache = {}
         self._last_refreshed: datetime | None = None
@@ -95,7 +97,9 @@ class PostgresOntologyTermCacheService(OntologyTermCacheService):
         """
         async with get_cursor() as cur:
             await cur.execute(
-                f"SELECT field_id, concept_id, preferred_term FROM {self._table}"
+                f"SELECT field_id, concept_id, preferred_term FROM {TERMS_CACHE_TABLE} "
+                f"WHERE ontology_id = %s",
+                (self._ontology_id,),
             )
             rows = await cur.fetchall()
         cache: OntologyTermCache = {}
@@ -108,8 +112,9 @@ class PostgresOntologyTermCacheService(OntologyTermCacheService):
     async def _has_changes_since(self, since: datetime) -> bool:
         async with get_cursor() as cur:
             await cur.execute(
-                f"SELECT 1 FROM {self._table} WHERE updated_at > %s LIMIT 1",
-                (since,),
+                f"SELECT 1 FROM {TERMS_CACHE_TABLE} "
+                f"WHERE ontology_id = %s AND updated_at > %s LIMIT 1",
+                (self._ontology_id, since),
             )
             return await cur.fetchone() is not None
 
@@ -166,7 +171,7 @@ class PostgresOntologyTermCacheService(OntologyTermCacheService):
             return
 
         rows = [
-            (concept_id, field_id, terms[concept_id])
+            (self._ontology_id, concept_id, field_id, terms[concept_id])
             for concept_id in missing
             if concept_id in terms
         ]
@@ -177,14 +182,15 @@ class PostgresOntologyTermCacheService(OntologyTermCacheService):
             for i in range(0, len(rows), _BATCH_SIZE):
                 await cur.executemany(
                     f"""
-                    INSERT INTO {self._table} (concept_id, field_id, preferred_term, updated_at)
-                    VALUES (%s, %s, %s, now())
-                    ON CONFLICT (concept_id, field_id) DO NOTHING
+                    INSERT INTO {TERMS_CACHE_TABLE}
+                        (ontology_id, concept_id, field_id, preferred_term, updated_at)
+                    VALUES (%s, %s, %s, %s, now())
+                    ON CONFLICT (ontology_id, concept_id, field_id) DO NOTHING
                     """,
                     rows[i : i + _BATCH_SIZE],
                 )
 
-        for concept_id, _, term in rows:
+        for _, concept_id, _, term in rows:
             self._cache.setdefault(field_id, {})[concept_id] = term
 
         logger.info(
@@ -193,7 +199,10 @@ class PostgresOntologyTermCacheService(OntologyTermCacheService):
 
     async def refresh(self, ontology: OntologyService) -> None:
         async with get_cursor() as cur:
-            await cur.execute(f"SELECT field_id, concept_id FROM {self._table}")
+            await cur.execute(
+                f"SELECT field_id, concept_id FROM {TERMS_CACHE_TABLE} WHERE ontology_id = %s",
+                (self._ontology_id,),
+            )
             rows = await cur.fetchall()
 
         if not rows:
@@ -215,7 +224,7 @@ class PostgresOntologyTermCacheService(OntologyTermCacheService):
                 continue
             field_cache = self._cache.get(field_id, {})
             to_update = [
-                (term, concept_id, field_id)
+                (term, self._ontology_id, concept_id, field_id)
                 for concept_id, term in terms.items()
                 if field_cache.get(concept_id) != term
             ]
@@ -225,28 +234,21 @@ class PostgresOntologyTermCacheService(OntologyTermCacheService):
                 for i in range(0, len(to_update), _BATCH_SIZE):
                     await cur.executemany(
                         f"""
-                        UPDATE {self._table}
+                        UPDATE {TERMS_CACHE_TABLE}
                         SET preferred_term = %s, updated_at = now()
-                        WHERE concept_id = %s AND field_id = %s
+                        WHERE ontology_id = %s AND concept_id = %s AND field_id = %s
                         """,
                         to_update[i : i + _BATCH_SIZE],
                     )
-            for term, concept_id, _ in to_update:
+            for term, _, concept_id, _ in to_update:
                 self._cache.setdefault(field_id, {})[concept_id] = term
             total_updated += len(to_update)
 
         logger.info("Refreshed %d preferred term(s).", total_updated)
 
 
-class SnomedPostgresOntologyTermCacheService(PostgresOntologyTermCacheService):
-    """Postgres term cache preconfigured for the SNOMED CT table."""
-
-    def __init__(self, refresh_interval: float = 300.0) -> None:
-        super().__init__(table=SNOMED_TABLE, refresh_interval=refresh_interval)
-
-
 # Registry of preferred term cache factories, keyed by ontology id (e.g. ``SCTID``).
-# Each provider module self-registers via register_term_cache at import time.
+# Registered via register_term_cache in services/ontologies.py.
 _TERM_CACHE_FACTORIES: dict[str, TermCacheFactory] = {}
 
 

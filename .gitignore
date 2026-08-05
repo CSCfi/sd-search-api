@@ -21,3 +21,6 @@ openspec
 
 # MacOS
 .DS_Store
+
+# Ontology releases downloaded for local use
+SnomedCT_InternationalRF2_*.zip

@@ -9,6 +9,7 @@ import pytest
 import pytest_asyncio
 
 from search_api.api.beacon.models import (
+    SNOMED_ONTOLOGY_ID,
     BeaconQuery,
     BeaconQueryFilter,
     BeaconQueryRequest,
@@ -19,7 +20,7 @@ from search_api.api.bigpicture.models import (
 )
 from search_api.api.models import FieldValue
 from search_api.database.repository import get_connection
-from search_api.services.ontology_term import SNOMED_TABLE
+from search_api.services.ontology_term import TERMS_CACHE_TABLE
 from tests.integration.mockauth import PORT as OIDC_MOCK_PORT
 
 os.environ.setdefault("POSTGRES_DB", os.environ["BP_POSTGRES_DB"])
@@ -402,11 +403,15 @@ async def snomed_terms(client: httpx.Client):
     async with get_connection() as conn:
         async with conn.cursor() as cur:
             await cur.executemany(
-                f"INSERT INTO {SNOMED_TABLE} (concept_id, field_id, preferred_term, updated_at)"
-                " VALUES (%s, %s, %s, now())"
-                " ON CONFLICT (concept_id, field_id) DO UPDATE SET preferred_term = EXCLUDED.preferred_term,"
-                " updated_at = now()",
-                SNOMED_TERMS,
+                f"INSERT INTO {TERMS_CACHE_TABLE} "
+                "(ontology_id, concept_id, field_id, preferred_term, updated_at)"
+                " VALUES (%s, %s, %s, %s, now())"
+                " ON CONFLICT (ontology_id, concept_id, field_id) DO UPDATE"
+                " SET preferred_term = EXCLUDED.preferred_term, updated_at = now()",
+                [
+                    (SNOMED_ONTOLOGY_ID, concept_id, field_id, term)
+                    for concept_id, field_id, term in SNOMED_TERMS
+                ],
             )
 
     # Reload in-memory cache.
@@ -421,8 +426,12 @@ async def snomed_terms(client: httpx.Client):
     async with get_connection() as conn:
         async with conn.cursor() as cur:
             await cur.executemany(
-                f"DELETE FROM {SNOMED_TABLE} WHERE concept_id = %s AND field_id = %s",
-                [(concept_id, field_id) for concept_id, field_id, _ in SNOMED_TERMS],
+                f"DELETE FROM {TERMS_CACHE_TABLE} "
+                "WHERE ontology_id = %s AND concept_id = %s AND field_id = %s",
+                [
+                    (SNOMED_ONTOLOGY_ID, concept_id, field_id)
+                    for concept_id, field_id, _ in SNOMED_TERMS
+                ],
             )
 
 

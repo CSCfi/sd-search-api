@@ -13,8 +13,8 @@ from search_api.api.opensearch.services import (
     build_iso8601_range_query,
     or_queries,
 )
-from search_api.exceptions import UserException
-from search_api.services.snomed import is_concept_id
+from search_api.exceptions import SystemException, UserException
+from search_api.services.ontology import get_ontology_service
 
 from search_api.api.beacon.models import (
     BeaconFilteringTerm,
@@ -41,9 +41,14 @@ def build_opensearch_query(
     values = value if isinstance(value, list) else [value]
 
     if isinstance(field, OpenSearchOntologyOrValue):
+        if term.ontology is None:
+            raise SystemException(
+                f"Filtering term '{term.id}' has no ontology configured."
+            )
+        ontology = get_ontology_service(term.ontology.id)
         # Search concept IDs and other values in their respective fields.
-        concept_ids = [v for v in values if is_concept_id(v)]
-        other_values = [v for v in values if not is_concept_id(v)]
+        concept_ids = [v for v in values if ontology.is_concept_id(v)]
+        other_values = [v for v in values if not ontology.is_concept_id(v)]
         queries = []
         if concept_ids:
             queries.append(build_terms_query(field.concept_value_field, concept_ids))

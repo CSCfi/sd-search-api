@@ -1,13 +1,10 @@
 """Ontology provider abstraction and registry.
 
-An ontology provider resolves coded values (concept IDs) against a terminology
-service. Providers are selected per filtering term by that term's ``ontology.id``
-(e.g. ``SCTID`` -> SNOMED CT).
-
-Each provider module self-registers via :func:`register_ontology_service` at
-import time.
+Providers are registered via :func:`register_ontology_service` in
+``services/ontologies.py``.
 """
 
+import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 
@@ -27,12 +24,59 @@ class OntologyService(ABC):
         """Return preferred terms for concept IDs. IDs not found are omitted."""
 
     @abstractmethod
+    async def _resolve_concept_ids(
+        self, value: str, filtering_term: BeaconFilteringTerm
+    ) -> set[str]:
+        """Resolve one filter value to its concept ids(s)."""
+
+    @abstractmethod
+    async def _resolve_descendant_ids(self, concept_ids: set[str]) -> set[str]:
+        """Resolve concept id(s) to descendant concept id(s)."""
+
     async def prepare_ontology_filter(
         self,
         query_filter: BeaconQueryFilter,
         filtering_terms: Sequence[BeaconFilteringTerm],
     ) -> BeaconQueryFilter:
-        """Resolve, and optionally expand, a filter's values to concept IDs."""
+        """Resolve filter's values to concept IDs.
+
+        Values that do not resolve are kept only for ``ontologyOrValue`` fields.
+        """
+
+        filtering_term = next(
+            (t for t in filtering_terms if t.id == query_filter.id), None
+        )
+        if filtering_term is None or filtering_term.type not in (
+            "ontology",
+            "ontologyOrValue",
+        ):
+            return query_filter
+
+        values = (
+            query_filter.value
+            if isinstance(query_filter.value, list)
+            else [query_filter.value]
+        )
+
+        resolved_ids = await asyncio.gather(
+            *(self._resolve_concept_ids(v, filtering_term) for v in values)
+        )
+        unresolved = [v for v, ids in zip(values, resolved_ids) if not ids]
+
+        concept_ids: set[str] = set()
+        for ids in resolved_ids:
+            concept_ids.update(ids)
+        if query_filter.includeDescendantTerms:
+            concept_ids.update(await self._resolve_descendant_ids(concept_ids))
+        prepared_values: list[str] = list(concept_ids)
+        # Only "ontologyOrValue" has a free-text field to match them against.
+        if filtering_term.type == "ontologyOrValue":
+            prepared_values += unresolved
+
+        return query_filter.model_copy(update={"value": prepared_values})
+
+    async def init(self) -> None:
+        """Perform any startup initialisation"""
 
 
 def get_ontology_id_by_field(

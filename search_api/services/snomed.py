@@ -1,25 +1,14 @@
 """SNOMED CT concept lookup via the Snowstorm terminology server."""
 
 import asyncio
-from collections.abc import Sequence
 
 import httpx
 from aiocache import cached  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field
 
-from search_api.api.beacon.models import (
-    SNOMED_ONTOLOGY_ID,
-    BeaconFilteringTerm,
-    BeaconQueryFilter,
-)
-from search_api.conf import snomed_term_cache_config
+from search_api.api.beacon.models import BeaconFilteringTerm
 from search_api.conf import snowstorm_config as _snowstorm_config
-from search_api.services.ontology import OntologyService, register_ontology_service
-from search_api.services.ontology_term import (
-    OntologyTermCacheService,
-    SnomedPostgresOntologyTermCacheService,
-    register_term_cache,
-)
+from search_api.services.ontology import OntologyService
 
 _PAGE_SIZE = 1000
 _CACHE_TTL = 60 * 60 * 24 * 30  # 30 days
@@ -390,94 +379,19 @@ class SnomedService(OntologyService):
 
         return results
 
-    async def prepare_ontology_filter(
-        self,
-        query_filter: BeaconQueryFilter,
-        filtering_terms: Sequence[BeaconFilteringTerm],
-        branch: str = "MAIN",
-    ) -> BeaconQueryFilter:
-        """Resolve and optionally expand ontology filter values to concept IDs.
+    async def _resolve_concept_ids(
+        self, value: str, filtering_term: BeaconFilteringTerm
+    ) -> set[str]:
+        """Resolve one filter value to a SNOMED CT concept ID via Snowstorm."""
+        concept = await self.find_concept(value, ecl=filtering_term.snomed_ecl)
+        return {concept.concept_id} if concept is not None else set()
 
-        Each value is resolved to a SNOMED CT concept ID via Snowstorm. When
-        the filter's ``includeDescendantTerms`` is True, every resolved concept
-        is further expanded to include all its active descendants, and results
-        from all values are merged into a single de-duplicated list. Otherwise,
-        values are resolved to concept IDs but not expanded. Values that cannot
-        be resolved to a concept and non-ontology filters are returned unchanged.
-
-        Args:
-            query_filter: The Beacon query filter to prepare.
-            filtering_terms: The full list of known filtering term definitions,
-                used to determine the type of the filter.
-            branch: SNOMED CT branch path to search. Defaults to ``"MAIN"``.
-
-        Returns:
-            The original or prepared filter.
-        """
-        filtering_term = next(
-            (t for t in filtering_terms if t.id == query_filter.id), None
+    async def _resolve_descendant_ids(self, concept_ids: set[str]) -> set[str]:
+        """Return every active descendant of the given concept IDs."""
+        descendant_groups = await asyncio.gather(
+            *(self.find_descendants(concept_id) for concept_id in concept_ids)
         )
-        if filtering_term is None or filtering_term.type not in (
-            "ontology",
-            "ontologyOrValue",
-        ):
-            return query_filter
-
-        # Normalise filter values to a list to handle them uniformly.
-        values = (
-            query_filter.value
-            if isinstance(query_filter.value, list)
-            else [query_filter.value]
-        )
-
-        # Resolve each value to a concept.
-        ecl = filtering_term.snomed_ecl
-        resolved_concepts = await asyncio.gather(
-            *[self.find_concept(v, ecl=ecl, branch=branch) for v in values]
-        )
-
-        resolved = [
-            (original_value, concept)
-            for original_value, concept in zip(values, resolved_concepts)
-            if concept is not None
-        ]
-        unresolved = [
-            original_value
-            for original_value, concept in zip(values, resolved_concepts)
-            if concept is None
-        ]
-
-        if not resolved:
-            return query_filter
-
-        if query_filter.includeDescendantTerms:
-            # Expand each resolved concept to its descendants.
-            descendant_groups = await asyncio.gather(
-                *[
-                    self.find_descendants(concept.concept_id, branch)
-                    for _, concept in resolved
-                ]
-            )
-            concept_ids: set[str] = {concept.concept_id for _, concept in resolved}
-            for descendants in descendant_groups:
-                concept_ids.update(d.concept_id for d in descendants)
-            prepared_values: list[str] = list(concept_ids) + unresolved
-        else:
-            # Use resolved concept IDs without descendant expansion.
-            prepared_values = [
-                concept.concept_id for _, concept in resolved
-            ] + unresolved
-
-        # Return a new filter with resolved concept IDs replacing the original values.
-        return query_filter.model_copy(update={"value": prepared_values})
-
-
-def _term_cache() -> OntologyTermCacheService:
-    return SnomedPostgresOntologyTermCacheService(
-        refresh_interval=snomed_term_cache_config().SNOMED_CACHE_REFRESH
-    )
-
-
-# Register the SNOMED ontology service and prefreed term cache.
-register_ontology_service(SNOMED_ONTOLOGY_ID, SnomedService())
-register_term_cache(SNOMED_ONTOLOGY_ID, _term_cache)
+        result: set[str] = set()
+        for descendants in descendant_groups:
+            result.update(d.concept_id for d in descendants)
+        return result

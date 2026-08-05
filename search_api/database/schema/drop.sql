@@ -1,2 +1,3 @@
 DROP TABLE document;
-DROP TABLE snomed;
+DROP TABLE terms_cache;
+DROP TABLE ontology_cache;

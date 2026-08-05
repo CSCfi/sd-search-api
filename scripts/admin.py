@@ -20,9 +20,12 @@ from search_api.services.load import LoadService
 from search_api.services.sync import SyncService
 from search_api.database.document import count_documents
 from search_api.database.repository import get_cursor
+from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
+from search_api.services.cached_ontology import PostgresOntologyStore
+from search_api.services.send import SEND_ONTOLOGY_ID, SendOntologySource
 from search_api.services.snomed import SnomedService
 from search_api.services.ontology_term import (
-    SnomedPostgresOntologyTermCacheService,
+    PostgresOntologyTermCacheService,
     create_term_caches,
 )
 
@@ -101,10 +104,36 @@ async def _clear(domain: Domain, args: argparse.Namespace) -> None:
 
 
 async def _snomed_refresh() -> None:
-    snomed_term_service = SnomedPostgresOntologyTermCacheService()
+    snomed_term_service = PostgresOntologyTermCacheService(
+        ontology_id=SNOMED_ONTOLOGY_ID
+    )
     snomed_service = SnomedService()
     logging.info("Refreshing SNOMED preferred terms.")
     await snomed_term_service.refresh(snomed_service)
+
+
+async def _send_refresh() -> None:
+    store = PostgresOntologyStore(SEND_ONTOLOGY_ID)
+    source = SendOntologySource()
+    stored = await store.read()
+    fetched = await source.fetch()
+
+    if stored is not None and not source.is_newer(fetched.version, stored.version):
+        logging.info(
+            "SEND ontology is already up to date (stored version '%s', fetched '%s').",
+            stored.version,
+            fetched.version,
+        )
+        return
+
+    changed = stored is None or fetched.sha256 != stored.sha256
+    await store.write(fetched)
+    logging.info(
+        "Updated SEND ontology to version '%s' with '%d' concepts%s",
+        fetched.version,
+        len(fetched.concepts),
+        "." if changed else " (content unchanged).",
+    )
 
 
 def _generate_index(domain: Domain) -> None:
@@ -198,12 +227,27 @@ if __name__ == "__main__":
         ),
     )
 
+    # send (deployment-independent)
+    send_commands = groups.add_parser(
+        "send", help="Manage the SEND controlled terminology concept table."
+    ).add_subparsers(dest="send_command", required=True)
+    send_commands.add_parser(
+        "refresh",
+        help=(
+            "Refresh SEND ontology cached in the database. "
+            "Run after a new SEND release to keep SEND ontology current."
+        ),
+    )
+
     args = parser.parse_args()
     _setup(args.env_file)
 
     if args.group == "snomed":
         if args.snomed_command == "refresh":
             asyncio.run(_snomed_refresh())
+    elif args.group == "send":
+        if args.send_command == "refresh":
+            asyncio.run(_send_refresh())
     else:
         domain = DOMAINS[args.group]
         if args.command == "load":

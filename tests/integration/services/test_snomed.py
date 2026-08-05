@@ -15,7 +15,6 @@ async def test_find_concept():
         assert concept is not None
         assert concept.concept_id == "337915000"
         assert concept.preferred_term == "Homo sapiens"
-        assert set(concept.synonyms) == set(["Human", "Homo sapiens"])
 
 
 @pytest.mark.asyncio

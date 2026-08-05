@@ -170,8 +170,6 @@ class BeaconFilteringOntology(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: str
-    rootTerms: list[str] | None = None
-    allowedTerms: list[str] | None = None
 
 
 class BeaconFilteringTerm(BaseModel):
@@ -195,13 +193,26 @@ class BeaconFilteringTerm(BaseModel):
     )
     ontologyConcept: str | list[str] | None = Field(
         default=None,
-        description="A single ontology concept ID including descendants or a list of concept IDs.",
+        description=(
+            "The ontology concept(s) that bound the part of the ontology this "
+            "field is searched within. Required for 'ontology' and "
+            "'ontologyOrValue' fields. A single concept id covers that concept "
+            "and all of its descendants, so it names a subtree; a list covers "
+            "only the listed concepts, so it is an explicit set."
+        ),
     )
     controlledValues: list[str] | None = None
 
     @property
     def snomed_ecl(self) -> str:
-        """Build a SNOMED CT ECL expression from ontology concepts."""
+        """Build a SNOMED CT ECL expression from ``ontologyConcept``.
+
+        A single concept id becomes ``<< id``, matching the concept and all of
+        its descendants. A list becomes ``id OR id ...``, matching only those
+        concepts and *not* their descendants.
+
+        :raises ValueError: if the field has no ontologyConcept configured.
+        """
         if isinstance(self.ontologyConcept, str):
             return f"<< {self.ontologyConcept}"
         if self.ontologyConcept:

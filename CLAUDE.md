@@ -24,7 +24,9 @@ DEPLOYMENT_TYPE=Bigpicture sd_search_api
 # Start Postgres + OpenSearch (required for data loading/sync)
 docker compose --env-file tests/integration/.env --profile dev up --build
 
-# Admin CLI (load data, generate index, refresh SNOMED cache, refresh SEND CT)
+# Admin CLI (load data, generate index, refresh an ontology)
+# `<ontology> refresh` has two parts: update the ontology from its source, then
+# refresh the preferred terms cached for it in terms_cache.
 uv run python scripts/admin.py Bigpicture load <dir> --load --sync
 uv run python scripts/admin.py Bigpicture generate-index
 uv run python scripts/admin.py Bigpicture create-index   # once per environment

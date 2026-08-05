@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import warnings
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -22,12 +23,9 @@ from search_api.database.document import count_documents
 from search_api.database.repository import get_cursor
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
 from search_api.services.cached_ontology import PostgresOntologyStore
+from search_api.services.ontology import get_ontology_service
 from search_api.services.send import SEND_ONTOLOGY_ID, SendOntologySource
-from search_api.services.snomed import SnomedService
-from search_api.services.ontology_term import (
-    PostgresOntologyTermCacheService,
-    create_term_caches,
-)
+from search_api.services.ontology_term import create_term_caches
 
 
 def _index_path(domain: Domain) -> Path:
@@ -103,16 +101,16 @@ async def _clear(domain: Domain, args: argparse.Namespace) -> None:
         await sync_service.search.close()
 
 
-async def _snomed_refresh() -> None:
-    snomed_term_service = PostgresOntologyTermCacheService(
-        ontology_id=SNOMED_ONTOLOGY_ID
-    )
-    snomed_service = SnomedService()
-    logging.info("Refreshing SNOMED preferred terms.")
-    await snomed_term_service.refresh(snomed_service)
+async def _update_snomed_ontology() -> None:
+    """Update the SNOMED CT release."""
+    # TODO: fetch a new SNOMED CT release and load it into Snowstorm. Releases
+    # are currently installed into Snowstorm outside this CLI, so there is
+    # nothing to update here and only the preferred terms are refreshed.
+    logging.info("Updating a SNOMED CT release is not supported.")
 
 
-async def _send_refresh() -> None:
+async def _update_send_ontology() -> None:
+    """Update the SEND ontology cached in the database, if a newer one exists."""
     store = PostgresOntologyStore(SEND_ONTOLOGY_ID)
     source = SendOntologySource()
     stored = await store.read()
@@ -134,6 +132,29 @@ async def _send_refresh() -> None:
         len(fetched.concepts),
         "." if changed else " (content unchanged).",
     )
+
+
+# How each ontology is updated from its source, keyed by ontology id.
+_ONTOLOGY_UPDATERS: dict[str, Callable[[], Awaitable[None]]] = {
+    SNOMED_ONTOLOGY_ID: _update_snomed_ontology,
+    SEND_ONTOLOGY_ID: _update_send_ontology,
+}
+
+
+async def _refresh_ontology(ontology_id: str) -> None:
+    """Refresh one ontology in two parts.
+
+    First the ontology itself is updated from its source, then the preferred
+    terms cached for it in the terms_cache table are refreshed against it.
+    """
+    await _ONTOLOGY_UPDATERS[ontology_id]()
+
+    # Initialised after the update so the terms are refreshed against it.
+    ontology = get_ontology_service(ontology_id)
+    await ontology.init()
+
+    logging.info("Refreshing %s preferred terms.", ontology_id)
+    await create_term_caches([ontology_id])[ontology_id].refresh(ontology)
 
 
 def _generate_index(domain: Domain) -> None:
@@ -222,8 +243,8 @@ if __name__ == "__main__":
     snomed_commands.add_parser(
         "refresh",
         help=(
-            "Refresh SNOMED CT preferred terms stored in the database. "
-            "Run after a new SNOMED release to keep preferred terms current."
+            "Update the SNOMED CT ontology and refresh the preferred terms "
+            "cached for it in the database. Run after a new SNOMED release."
         ),
     )
 
@@ -234,8 +255,8 @@ if __name__ == "__main__":
     send_commands.add_parser(
         "refresh",
         help=(
-            "Refresh SEND ontology cached in the database. "
-            "Run after a new SEND release to keep SEND ontology current."
+            "Update the SEND ontology cached in the database and refresh the "
+            "preferred terms cached for it. Run after a new SEND release."
         ),
     )
 
@@ -244,10 +265,10 @@ if __name__ == "__main__":
 
     if args.group == "snomed":
         if args.snomed_command == "refresh":
-            asyncio.run(_snomed_refresh())
+            asyncio.run(_refresh_ontology(SNOMED_ONTOLOGY_ID))
     elif args.group == "send":
         if args.send_command == "refresh":
-            asyncio.run(_send_refresh())
+            asyncio.run(_refresh_ontology(SEND_ONTOLOGY_ID))
     else:
         domain = DOMAINS[args.group]
         if args.command == "load":

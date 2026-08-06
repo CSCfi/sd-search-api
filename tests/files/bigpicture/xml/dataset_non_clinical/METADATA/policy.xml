@@ -1,0 +1,11 @@
+<POLICY_SET>
+    <POLICY alias="1">
+        <DATASET_REF alias="1" accession="bb-dataset-w2j6fd-3npx7k"/>
+        <ATTRIBUTES>
+            <STRING_ATTRIBUTE>
+                <TAG>type_of_dataset</TAG>
+                <VALUE>Non-Clinical/Obscured</VALUE>
+            </STRING_ATTRIBUTE>
+        </ATTRIBUTES>
+    </POLICY>
+</POLICY_SET>

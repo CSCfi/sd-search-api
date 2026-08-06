@@ -1,0 +1,27 @@
+<OBSERVATION_SET xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+    <!-- A non-clinical dataset carries no diagnosis. Only a non-diagnosis
+         statement is left, so extraction yields no diagnosis fields even
+         though observation.xml is present. -->
+    <OBSERVATION alias="7">
+        <IMAGE_REF alias="2" accession="bb-image-v6h3rn-8kwd5p"/>
+        <STATEMENT>
+            <STATEMENT_TYPE>Finding</STATEMENT_TYPE>
+            <STATEMENT_STATUS>Distinct</STATEMENT_STATUS>
+            <CODE_ATTRIBUTES>
+                <CODE_ATTRIBUTE>
+                    <TAG>finding</TAG>
+                    <VALUE>
+                        <CODE>404684003</CODE>
+                        <SCHEME>SNOMED CT</SCHEME>
+                        <MEANING>Clinical finding (finding)</MEANING>
+                        <SCHEME_VERSION/>
+                    </VALUE>
+                </CODE_ATTRIBUTE>
+            </CODE_ATTRIBUTES>
+            <CUSTOM_ATTRIBUTES xsi:nil="true"/>
+            <FREETEXT xsi:nil="true"/>
+            <ATTRIBUTES xsi:nil="true"/>
+        </STATEMENT>
+        <ATTRIBUTES xsi:nil="true"/>
+    </OBSERVATION>
+</OBSERVATION_SET>

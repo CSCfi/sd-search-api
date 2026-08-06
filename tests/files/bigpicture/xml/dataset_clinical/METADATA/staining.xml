@@ -1,5 +1,5 @@
 <STAINING_SET>
-    <STAINING alias="1" accession="staining_1">
+    <STAINING alias="1">
         <PROCEDURE_INFORMATION>
             <STRING_ATTRIBUTE>
                 <TAG>staining_method</TAG>
@@ -26,7 +26,7 @@
             </STRING_ATTRIBUTE>
         </ATTRIBUTES>
     </STAINING>
-    <STAINING alias="2" accession="staining_2">
+    <STAINING alias="2">
         <STAIN>
             <STRING_ATTRIBUTE>
                 <TAG>staining_compound</TAG>

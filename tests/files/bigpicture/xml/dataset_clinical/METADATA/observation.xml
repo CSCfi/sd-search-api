@@ -10,8 +10,8 @@
 
     <!-- CASE_REF, Distinct: reaches both images. Has two codes; the
          non-SNOMED one is ignored. -->
-    <OBSERVATION alias="1" accession="observation_case">
-        <CASE_REF alias="1" accession="case_1"/>
+    <OBSERVATION alias="1">
+        <CASE_REF alias="1"/>
         <STATEMENT>
             <STATEMENT_TYPE>Diagnosis</STATEMENT_TYPE>
             <STATEMENT_STATUS>Distinct</STATEMENT_STATUS>
@@ -43,8 +43,8 @@
     </OBSERVATION>
 
     <!-- BIOLOGICAL_BEING_REF, Summary: reaches both images. -->
-    <OBSERVATION alias="2" accession="observation_being">
-        <BIOLOGICAL_BEING_REF alias="1" accession="biological_being_1"/>
+    <OBSERVATION alias="2">
+        <BIOLOGICAL_BEING_REF alias="1"/>
         <STATEMENT>
             <STATEMENT_TYPE>Diagnosis</STATEMENT_TYPE>
             <STATEMENT_STATUS>Summary</STATEMENT_STATUS>
@@ -67,8 +67,8 @@
     </OBSERVATION>
 
     <!-- SPECIMEN_REF, Distinct: reaches both images. -->
-    <OBSERVATION alias="3" accession="observation_specimen">
-        <SPECIMEN_REF alias="1" accession="specimen_1"/>
+    <OBSERVATION alias="3">
+        <SPECIMEN_REF alias="1"/>
         <STATEMENT>
             <STATEMENT_TYPE>Diagnosis</STATEMENT_TYPE>
             <STATEMENT_STATUS>Distinct</STATEMENT_STATUS>
@@ -91,8 +91,8 @@
     </OBSERVATION>
 
     <!-- BLOCK_REF, Summary: reaches both images. -->
-    <OBSERVATION alias="4" accession="observation_block">
-        <BLOCK_REF alias="1" accession="block_1"/>
+    <OBSERVATION alias="4">
+        <BLOCK_REF alias="1"/>
         <STATEMENT>
             <STATEMENT_TYPE>Diagnosis</STATEMENT_TYPE>
             <STATEMENT_STATUS>Summary</STATEMENT_STATUS>
@@ -115,8 +115,8 @@
     </OBSERVATION>
 
     <!-- SLIDE_REF, Distinct: reaches image_2 only. -->
-    <OBSERVATION alias="5" accession="observation_slide">
-        <SLIDE_REF alias="2" accession="slide_2"/>
+    <OBSERVATION alias="5">
+        <SLIDE_REF alias="2"/>
         <STATEMENT>
             <STATEMENT_TYPE>Diagnosis</STATEMENT_TYPE>
             <STATEMENT_STATUS>Distinct</STATEMENT_STATUS>
@@ -139,8 +139,8 @@
     </OBSERVATION>
 
     <!-- IMAGE_REF, Summary: reaches image_1 only and treated as Distinct. -->
-    <OBSERVATION alias="6" accession="observation_image">
-        <IMAGE_REF alias="1" accession="image_1"/>
+    <OBSERVATION alias="6">
+        <IMAGE_REF alias="1" accession="bb-image-k3n8pw-6dz2rj"/>
         <STATEMENT>
             <STATEMENT_TYPE>Diagnosis</STATEMENT_TYPE>
             <STATEMENT_STATUS>Summary</STATEMENT_STATUS>
@@ -163,8 +163,8 @@
     </OBSERVATION>
 
     <!-- Non-diagnosis statement: ignored for clinical datasets -->
-    <OBSERVATION alias="7" accession="observation_finding">
-        <IMAGE_REF alias="2" accession="image_2"/>
+    <OBSERVATION alias="7">
+        <IMAGE_REF alias="2" accession="bb-image-q7v5tb-m4hs8n"/>
         <STATEMENT>
             <STATEMENT_TYPE>Finding</STATEMENT_TYPE>
             <STATEMENT_STATUS>Distinct</STATEMENT_STATUS>

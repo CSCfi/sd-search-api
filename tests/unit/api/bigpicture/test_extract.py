@@ -30,28 +30,36 @@ from search_api.api.bigpicture.extract import (
     _filter_by_scheme,
 )
 
-DATASET_1_DIR = (
+_XML_DIR = (
     Path(__file__).resolve().parent.parent.parent.parent
     / "files"
     / "bigpicture"
     / "xml"
-    / "dataset_1"
 )
+CLINICAL_DATASET_DIR = _XML_DIR / "dataset_clinical"
+NON_CLINICAL_DATASET_DIR = _XML_DIR / "dataset_non_clinical"
+
+# Accessions as the submitter mints them: <center>-<type>-c{6}-c{6}. Only the
+# dataset and the images carry one; everything else is referenced by alias.
+CLINICAL_DATASET = "bb-dataset-hy4m2v-9tq7cx"
+CLINICAL_IMAGE_1 = "bb-image-k3n8pw-6dz2rj"
+CLINICAL_IMAGE_2 = "bb-image-q7v5tb-m4hs8n"
+NON_CLINICAL_DATASET = "bb-dataset-w2j6fd-3npx7k"
+NON_CLINICAL_IMAGE_1 = "bb-image-z9c4gs-7bqm2t"
+NON_CLINICAL_IMAGE_2 = "bb-image-v6h3rn-8kwd5p"
 
 
 def _code(scheme: str | None) -> BigpictureCodeAttributeValue:
     return BigpictureCodeAttributeValue(code="1", scheme=scheme, meaning="Test")
 
 
-def test_extract_fields():
-    # extract_dataset_documents yields ExtractedDocument; build the payload to assert on stored values.
-    # (Full code-attribute fidelity — scheme/meaning — is covered by the helper tests below.)
-    docs = {doc.id: doc for doc in extract_dataset_documents(str(DATASET_1_DIR))}
-    assert set(docs) == {"image_1", "image_2"}
+def test_extract_fields_clinical():
+    docs = {doc.id: doc for doc in extract_dataset_documents(str(CLINICAL_DATASET_DIR))}
+    assert set(docs) == {CLINICAL_IMAGE_1, CLINICAL_IMAGE_2}
 
-    payload = build_document(docs["image_1"].values)
-    assert payload["image_id"] == "image_1"
-    assert payload["dataset_id"] == "dataset_1"
+    payload = build_document(docs[CLINICAL_IMAGE_1].values)
+    assert payload["image_id"] == CLINICAL_IMAGE_1
+    assert payload["dataset_id"] == CLINICAL_DATASET
     assert payload["dataset_description"] == "test_description"
 
     # The block and biological being are flattened to specimen.
@@ -69,7 +77,45 @@ def test_extract_fields():
     assert stain["staining_procedure_other"] == "test6"
     assert "staining_target" not in stain
 
-    payload2 = build_document(docs["image_2"].values)
+    payload2 = build_document(docs[CLINICAL_IMAGE_2].values)
+    stain2 = payload2["staining"][0]
+    assert stain2["staining_procedure"] == "7"
+    assert stain2["staining_procedure_other"] == "test7"
+    assert stain2["staining_target"] == "pan Cytokeratin"
+
+
+def test_extract_fields_non_clinical():
+    docs = {
+        doc.id: doc for doc in extract_dataset_documents(str(NON_CLINICAL_DATASET_DIR))
+    }
+    assert set(docs) == {NON_CLINICAL_IMAGE_1, NON_CLINICAL_IMAGE_2}
+
+    payload = build_document(docs[NON_CLINICAL_IMAGE_1].values)
+    assert payload["scope"] == "non_clinical"
+    # The short name is excluded for non-clinical datasets.
+    assert "dataset_short_name" not in payload
+    assert "diagnosis" not in payload
+    assert "diagnosis_candidate" not in payload
+
+    assert payload["image_id"] == NON_CLINICAL_IMAGE_1
+    assert payload["dataset_id"] == NON_CLINICAL_DATASET
+    assert payload["dataset_description"] == "test_description"
+
+    specimen = payload["specimen"][0]
+    assert specimen["block_preparation"] == "5"
+    assert specimen["anatomical_site"] == ["2"]
+    assert specimen["fixation_type"] == "3"
+    assert specimen["specimen_type"] == "4"
+    assert specimen["age_at_extraction"] == {"gte": 14600, "lte": 14965}
+    assert specimen["animal_species"] == "1"
+    assert specimen["sex"] == "Male"
+
+    stain = payload["staining"][0]
+    assert stain["staining_procedure"] == "6"
+    assert stain["staining_procedure_other"] == "test6"
+    assert "staining_target" not in stain
+
+    payload2 = build_document(docs[NON_CLINICAL_IMAGE_2].values)
     stain2 = payload2["staining"][0]
     assert stain2["staining_procedure"] == "7"
     assert stain2["staining_procedure_other"] == "test7"
@@ -77,18 +123,18 @@ def test_extract_fields():
 
 
 def test_extract_diagnoses():
-    docs = {doc.id: doc for doc in extract_dataset_documents(str(DATASET_1_DIR))}
+    docs = {doc.id: doc for doc in extract_dataset_documents(str(CLINICAL_DATASET_DIR))}
 
-    payload1 = build_document(docs["image_1"].values)
-    payload2 = build_document(docs["image_2"].values)
+    payload1 = build_document(docs[CLINICAL_IMAGE_1].values)
+    payload2 = build_document(docs[CLINICAL_IMAGE_2].values)
 
     # CASE_REF (Distinct, both images)
     # SPECIMEN_REF (Distinct, both images)
-    # IMAGE_REF (Distinct, image_1)
+    # IMAGE_REF (Distinct, image 1)
     assert sorted(payload1["diagnosis"]) == ["109355002", "254837009", "73211009"]
     # CASE_REF (Distinct, reaches both)
     # SPECIMEN_REF (Distinct, reaches both)
-    # SLIDE_REF (Distinct, image_2 only).
+    # SLIDE_REF (Distinct, image 2 only).
     assert sorted(payload2["diagnosis"]) == ["195967001", "254837009", "73211009"]
 
     # BIOLOGICAL_BEING_REF (Summary, both images)
@@ -143,10 +189,10 @@ def test_object_keys_from_object_ids():
     ]
 
 
-def _copy_xml_dir(tmp_path: Path) -> Path:
-    """Copy the dataset_1 fixture to tmp_path."""
-    dst = tmp_path / "dataset_1"
-    shutil.copytree(DATASET_1_DIR, dst)
+def _copy_clinical_xml_dir(tmp_path: Path) -> Path:
+    """Copy the dataset_clinical fixture to tmp_path."""
+    dst = tmp_path / "dataset_clinical"
+    shutil.copytree(CLINICAL_DATASET_DIR, dst)
     return dst
 
 
@@ -155,10 +201,10 @@ def _replace_in_xml(path: Path, old: str, new: str) -> None:
 
 
 def test_extract_requires_dataset_accession(tmp_path):
-    root = _copy_xml_dir(tmp_path)
+    root = _copy_clinical_xml_dir(tmp_path)
     _replace_in_xml(
         root / "METADATA" / "dataset.xml",
-        '<DATASET alias="1" accession="dataset_1">',
+        f'<DATASET alias="1" accession="{CLINICAL_DATASET}">',
         '<DATASET alias="1">',
     )
 
@@ -167,10 +213,10 @@ def test_extract_requires_dataset_accession(tmp_path):
 
 
 def test_extract_image_id_with_accession_and_alias(tmp_path):
-    root = _copy_xml_dir(tmp_path)
+    root = _copy_clinical_xml_dir(tmp_path)
     _replace_in_xml(
         root / "METADATA" / "image.xml",
-        '<IMAGE alias="2" accession="image_2">',
+        f'<IMAGE alias="2" accession="{CLINICAL_IMAGE_2}">',
         '<IMAGE alias="2">',
     )
 
@@ -178,30 +224,10 @@ def test_extract_image_id_with_accession_and_alias(tmp_path):
 
     # Only the first image has an accession. The second document id becomes
     # dataset accession followed by image alias.
-    assert set(docs) == {"image_1", "dataset_1-2"}
-    opensearch_doc = build_document(docs["dataset_1-2"].values)
+    assert set(docs) == {CLINICAL_IMAGE_1, f"{CLINICAL_DATASET}-2"}
+    opensearch_doc = build_document(docs[f"{CLINICAL_DATASET}-2"].values)
     assert opensearch_doc["image_id"] == "2"
-    assert opensearch_doc["dataset_id"] == "dataset_1"
-
-
-def test_extract_diagnosis_with_accession_and_alias(tmp_path):
-    root = _copy_xml_dir(tmp_path)
-    _replace_in_xml(
-        root / "METADATA" / "sample.xml",
-        '<PART_OF_CASE_REF alias="1" accession="case_1"/>',
-        '<PART_OF_CASE_REF alias="1"/>',
-    )
-    _replace_in_xml(
-        root / "METADATA" / "observation.xml",
-        '<CASE_REF alias="1" accession="case_1"/>',
-        '<CASE_REF alias="1"/>',
-    )
-
-    docs = {doc.id: doc for doc in extract_dataset_documents(str(root))}
-
-    for image_id in ("image_1", "image_2"):
-        opensearch_doc = build_document(docs[image_id].values)
-        assert "254837009" in opensearch_doc["diagnosis"], image_id
+    assert opensearch_doc["dataset_id"] == CLINICAL_DATASET
 
 
 def test_matches_scheme():
@@ -760,30 +786,9 @@ def test_get_last_modification_time_no_files():
     fs.info.assert_not_called()
 
 
-# Scope from the policy's type_of_dataset attribute.
+# Scope from the policy's type_of_dataset attribute. The two scopes themselves are
+# covered by test_extract_fields and test_extract_fields_non_clinical above.
 #
-
-
-def test_extract_scope_clinical(tmp_path):
-    # The dataset_1 scope is Clinical/Anonymized.
-    root = _copy_xml_dir(tmp_path)
-
-    docs = {doc.id: doc for doc in extract_dataset_documents(str(root))}
-    payload = build_document(docs["image_1"].values)
-
-    assert payload["scope"] == "clinical"
-
-
-def test_extract_scope_non_clinical(tmp_path):
-    root = _copy_xml_dir(tmp_path)
-    _replace_in_xml(
-        root / "METADATA" / "policy.xml", "Clinical/Anonymized", "Non-Clinical/Obscured"
-    )
-
-    docs = {doc.id: doc for doc in extract_dataset_documents(str(root))}
-    payload = build_document(docs["image_1"].values)
-
-    assert payload["scope"] == "non_clinical"
 
 
 @pytest.mark.parametrize(
@@ -798,12 +803,12 @@ def test_extract_scope_non_clinical(tmp_path):
     ],
 )
 def test_extract_scope_supported_dataset_types(tmp_path, value, expected):
-    root = _copy_xml_dir(tmp_path)
+    root = _copy_clinical_xml_dir(tmp_path)
     _replace_in_xml(root / "METADATA" / "policy.xml", "Clinical/Anonymized", value)
 
     docs = {doc.id: doc for doc in extract_dataset_documents(str(root))}
 
-    assert build_document(docs["image_1"].values)["scope"] == expected
+    assert build_document(docs[CLINICAL_IMAGE_1].values)["scope"] == expected
 
 
 @pytest.mark.parametrize(
@@ -815,7 +820,7 @@ def test_extract_scope_supported_dataset_types(tmp_path, value, expected):
     ],
 )
 def test_extract_scope_unsupported_dataset_types(tmp_path, value):
-    root = _copy_xml_dir(tmp_path)
+    root = _copy_clinical_xml_dir(tmp_path)
     _replace_in_xml(root / "METADATA" / "policy.xml", "Clinical/Anonymized", value)
 
     with pytest.raises(UserException, match="Unsupported 'type_of_dataset' value"):
@@ -830,7 +835,7 @@ def test_extract_scope_unsupported_dataset_types(tmp_path, value):
     ],
 )
 def test_extract_scope_requires_attribute_and_value(tmp_path, old, new):
-    root = _copy_xml_dir(tmp_path)
+    root = _copy_clinical_xml_dir(tmp_path)
     _replace_in_xml(root / "METADATA" / "policy.xml", old, new)
 
     with pytest.raises(UserException, match="Missing 'type_of_dataset' attribute"):
@@ -838,7 +843,7 @@ def test_extract_scope_requires_attribute_and_value(tmp_path, old, new):
 
 
 def test_extract_scope_requires_policy_file(tmp_path):
-    root = _copy_xml_dir(tmp_path)
+    root = _copy_clinical_xml_dir(tmp_path)
     (root / "METADATA" / "policy.xml").unlink()
 
     with pytest.raises(ValueError, match="Missing file: .*policy.xml"):

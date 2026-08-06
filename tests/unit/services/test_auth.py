@@ -8,6 +8,7 @@ os.environ["BASE_URL"] = "http://localhost:8000"
 os.environ["OIDC_URL"] = "http://localhost:9999"
 os.environ["OIDC_CLIENT_ID"] = "test-client-id"
 os.environ["OIDC_CLIENT_SECRET"] = "test-client-secret"
+os.environ["OIDC_SECURE_COOKIE"] = "true"
 os.environ["JWT_KEY"] = b64encode(
     b"test-jwt-signing-key-at-least-32-bytes-long"
 ).decode("ascii")

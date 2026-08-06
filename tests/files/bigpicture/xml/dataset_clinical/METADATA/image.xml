@@ -1,6 +1,6 @@
 <IMAGE_SET>
-    <IMAGE alias="1" accession="image_1">
-        <IMAGE_OF alias="1" accession="slide_1"/>
+    <IMAGE alias="1" accession="bb-image-k3n8pw-6dz2rj">
+        <IMAGE_OF alias="1"/>
         <IMAGE_TYPE>
             <WSI_IMAGE>test</WSI_IMAGE>
         </IMAGE_TYPE>
@@ -17,8 +17,8 @@
             </STRING_ATTRIBUTE>
         </ATTRIBUTES>
     </IMAGE>
-    <IMAGE alias="2" accession="image_2">
-        <IMAGE_OF alias="2" accession="slide_2"/>
+    <IMAGE alias="2" accession="bb-image-q7v5tb-m4hs8n">
+        <IMAGE_OF alias="2"/>
         <IMAGE_TYPE>
             <WSI_IMAGE>test2</WSI_IMAGE>
         </IMAGE_TYPE>

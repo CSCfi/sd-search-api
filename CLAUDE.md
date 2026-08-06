@@ -359,7 +359,7 @@ tests/            # mirrors the search_api/ package layout
 │   └── services/{ontology/,test_sync.py}   # SNOMED hits a live Snowstorm
 ├── performance/   # locust load tests
 ├── utils/         # test helpers (generate_data.py)
-└── files/bigpicture/xml/dataset_1/METADATA/   # XML fixtures
+└── files/bigpicture/xml/dataset_{clinical,non_clinical}/METADATA/   # XML fixtures
 ```
 
 Integration `conftest.py` loads `tests/integration/.env` and provides module-scoped fixtures:

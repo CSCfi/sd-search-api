@@ -7,9 +7,21 @@ Providers are registered via :func:`register_ontology_service` in
 import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from typing import Protocol
 
 from search_api.api.beacon.models import BeaconFilteringTerm, BeaconQueryFilter
 from search_api.exceptions import SystemException
+
+
+class TermCache(Protocol):
+    """Cache mapping terms to concept IDs."""
+
+    async def get_concept_ids_by_term(self, field_id: str, term: str) -> set[str]: ...
+
+
+def normalise_term(value: str) -> str:
+    """Normalise a term so that it matches regardless of case and spacing."""
+    return " ".join(value.split()).casefold()
 
 
 class OntologyService(ABC):
@@ -24,19 +36,44 @@ class OntologyService(ABC):
         """Return preferred terms for concept IDs. IDs not found are omitted."""
 
     @abstractmethod
-    async def _resolve_concept_ids(
+    async def _find_concept_ids(
         self, value: str, filtering_term: BeaconFilteringTerm
     ) -> set[str]:
-        """Resolve one filter value to its concept ids(s)."""
+        """Query the ontology for one filter value's concept id(s)."""
 
     @abstractmethod
-    async def _resolve_descendant_ids(self, concept_ids: set[str]) -> set[str]:
-        """Resolve concept id(s) to descendant concept id(s)."""
+    async def _find_descendant_ids(self, concept_ids: set[str]) -> set[str]:
+        """Query the ontology for concept id(s)' descendant concept id(s)."""
+
+    async def _resolve_concept_ids(
+        self,
+        value: str,
+        filtering_term: BeaconFilteringTerm,
+        term_cache: TermCache | None,
+    ) -> set[str]:
+        """Resolve one filter value to concept id(s) in the following order:
+
+        1. If the value is a concept id then it is returned as given
+        2. If the value is cached for the field then all associated concept id(s)
+           are returned
+        3. Otherwise, the value is resolved against the ontology and any associated
+           concept id(s) are returned.
+        """
+        if self.is_concept_id(value):
+            return {value}
+
+        if term_cache is not None:
+            cached = await term_cache.get_concept_ids_by_term(filtering_term.id, value)
+            if cached:
+                return cached
+
+        return await self._find_concept_ids(value, filtering_term)
 
     async def prepare_ontology_filter(
         self,
         query_filter: BeaconQueryFilter,
         filtering_terms: Sequence[BeaconFilteringTerm],
+        term_cache: TermCache | None = None,
     ) -> BeaconQueryFilter:
         """Resolve filter's values to concept IDs.
 
@@ -59,7 +96,7 @@ class OntologyService(ABC):
         )
 
         resolved_ids = await asyncio.gather(
-            *(self._resolve_concept_ids(v, filtering_term) for v in values)
+            *(self._resolve_concept_ids(v, filtering_term, term_cache) for v in values)
         )
         unresolved = [v for v, ids in zip(values, resolved_ids) if not ids]
 
@@ -67,7 +104,7 @@ class OntologyService(ABC):
         for ids in resolved_ids:
             concept_ids.update(ids)
         if query_filter.includeDescendantTerms:
-            concept_ids.update(await self._resolve_descendant_ids(concept_ids))
+            concept_ids.update(await self._find_descendant_ids(concept_ids))
         prepared_values: list[str] = list(concept_ids)
         # Only "ontologyOrValue" has a free-text field to match them against.
         if filtering_term.type == "ontologyOrValue":

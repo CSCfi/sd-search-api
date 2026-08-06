@@ -1,4 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic.json_schema import SkipJsonSchema
 from typing import Generic, Literal, Sequence, TypeVar
 
 BEACON_API_VERSION = "v2.0"
@@ -172,6 +173,22 @@ class BeaconFilteringOntology(BaseModel):
     id: str
 
 
+class OntologyRestriction(BaseModel):
+    """Restricts the part of an ontology a field's values are resolved against.
+
+    Not part of the Beacon API.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    concept_ids: list[str] = Field(
+        min_length=1, description="Concept ids the field's values resolve within."
+    )
+    include_descendants: bool = Field(
+        description="Whether the descendants of each concept id are included.",
+    )
+
+
 class BeaconFilteringTerm(BaseModel):
     """Beacon V2 filtering term."""
 
@@ -191,45 +208,39 @@ class BeaconFilteringTerm(BaseModel):
         default=None,
         description="The ontology used for the field.",
     )
-    ontologyConcept: str | list[str] | None = Field(
+    # Excluded from API response (exclude) and OpenAPI schema (SkipJsonSchema).
+    ontologyRestriction: SkipJsonSchema[OntologyRestriction | None] = Field(
         default=None,
+        exclude=True,
         description=(
-            "The ontology concept(s) that bound the part of the ontology this "
-            "field is searched within. Required for 'ontology' and "
-            "'ontologyOrValue' fields. A single concept id covers that concept "
-            "and all of its descendants, so it names a subtree; a list covers "
-            "only the listed concepts, so it is an explicit set."
+            "Restricts the part of the ontology this field's values resolve "
+            "within. Without a restriction values resolve against the whole ontology."
         ),
     )
     controlledValues: list[str] | None = None
 
     @property
-    def snomed_ecl(self) -> str:
-        """Build a SNOMED CT ECL expression from ``ontologyConcept``.
+    def snomed_ecl(self) -> str | None:
+        """Build a SNOMED CT ECL expression from ``ontologyRestriction``.
 
-        A single concept id becomes ``<< id``, matching the concept and all of
-        its descendants. A list becomes ``id OR id ...``, matching only those
-        concepts and *not* their descendants.
-
-        :raises ValueError: if the field has no ontologyConcept configured.
+        Each concept id becomes ``<< id`` when descendants are included and
+        ``id`` when they are not. Several ids are combined with ``OR``.
+        None when the field has no restriction, i.e. searches all concepts.
         """
-        if isinstance(self.ontologyConcept, str):
-            return f"<< {self.ontologyConcept}"
-        if self.ontologyConcept:
-            return " OR ".join(self.ontologyConcept)
-        raise ValueError(f"No ontologyConcept configured for field '{self.id}'")
+        if self.ontologyRestriction is None:
+            return None
+        prefix = "<< " if self.ontologyRestriction.include_descendants else ""
+        return " OR ".join(
+            f"{prefix}{concept_id}"
+            for concept_id in self.ontologyRestriction.concept_ids
+        )
 
     @model_validator(mode="after")
     def validate_filtering_term(self):
-        if self.type in {"ontology", "ontologyOrValue"}:
-            if self.ontology is None:
-                raise ValueError(
-                    "ontology must be provided when type is 'ontology' or 'ontologyOrValue'"
-                )
-            if not self.ontologyConcept:
-                raise ValueError(
-                    "ontologyConcept must be provided when type is 'ontology' or 'ontologyOrValue'"
-                )
+        if self.type in {"ontology", "ontologyOrValue"} and self.ontology is None:
+            raise ValueError(
+                "ontology must be provided when type is 'ontology' or 'ontologyOrValue'"
+            )
 
         if self.type == "controlledValue" and self.controlledValues is None:
             raise ValueError(

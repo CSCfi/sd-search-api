@@ -1,4 +1,8 @@
-from search_api.api.beacon.models import BeaconFilteringOntology, SNOMED_ONTOLOGY_ID
+from search_api.api.beacon.models import (
+    BeaconFilteringOntology,
+    OntologyRestriction,
+    SNOMED_ONTOLOGY_ID,
+)
 from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorService
 from search_api.api.opensearch.models import (
     OpenSearchBeaconFilteringTerm,
@@ -18,7 +22,11 @@ def _filtering_term(field_id, type_, group=None) -> OpenSearchBeaconFilteringTer
         ontology=BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID)
         if is_ontology
         else None,
-        ontologyConcept="123456789" if is_ontology else None,
+        ontologyRestriction=(
+            OntologyRestriction(concept_ids=["123456789"], include_descendants=True)
+            if is_ontology
+            else None
+        ),
         controlledValues=["a", "b"] if type_ == "controlledValue" else None,
     )
 

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from search_api.database.repository import get_cursor
 from search_api.exceptions import SystemException
-from search_api.services.ontology import OntologyService
+from search_api.services.ontology import OntologyService, TermCache, normalise_term
 
 logger = logging.getLogger(__name__)
 
@@ -14,13 +14,14 @@ TERMS_CACHE_TABLE = "terms_cache"
 
 _BATCH_SIZE = 1000
 
-type OntologyTermCache = dict[str, dict[str, str]]
+type PreferredTermByFieldAndConceptIdMap = dict[str, dict[str, str]]
+type ConceptIdsByFieldAndPreferredTermMap = dict[str, dict[str, set[str]]]
 
 # A factory that builds a fully-configured term cache for one ontology.
 type TermCacheFactory = Callable[[], "OntologyTermCacheService"]
 
 
-class OntologyTermCacheService(ABC):
+class OntologyTermCacheService(TermCache, ABC):
     """Persistent cache mapping indexed concept IDs to preferred terms."""
 
     @abstractmethod
@@ -56,6 +57,13 @@ class OntologyTermCacheService(ABC):
         """
 
     @abstractmethod
+    async def get_concept_ids_by_term(self, field_id: str, term: str) -> set[str]:
+        """Return the concept ids cached for a field under term.
+
+        Matched case- and space-insensitively.
+        """
+
+    @abstractmethod
     async def refresh(self, ontology: OntologyService) -> None:
         """Resolve all stored concept IDs against the current ontology release.
 
@@ -86,9 +94,26 @@ class PostgresOntologyTermCacheService(OntologyTermCacheService):
     def __init__(self, ontology_id: str, refresh_interval: float = 300.0) -> None:
         self._ontology_id = ontology_id
         self._refresh_interval = refresh_interval
-        self._cache: OntologyTermCache = {}
+        self._preferred_term_by_id: PreferredTermByFieldAndConceptIdMap = {}
+        self._ids_by_preferred_term: ConceptIdsByFieldAndPreferredTermMap = {}
         self._last_refreshed: datetime | None = None
         self._task: asyncio.Task | None = None
+
+    def _index_term(self, field_id: str, concept_id: str, preferred_term: str) -> None:
+        """Map concept_id and preferred_term to each other in both directions."""
+        preferred_term_by_id = self._preferred_term_by_id.setdefault(field_id, {})
+        ids_by_preferred_term = self._ids_by_preferred_term.setdefault(field_id, {})
+        existing_preferred_term = preferred_term_by_id.get(concept_id)
+        if existing_preferred_term is not None:
+            # Remove existing preferred term to concept id mapping.
+            ids_by_preferred_term[normalise_term(existing_preferred_term)].discard(
+                concept_id
+            )
+
+        preferred_term_by_id[concept_id] = preferred_term
+        ids_by_preferred_term.setdefault(normalise_term(preferred_term), set()).add(
+            concept_id
+        )
 
     async def load(self) -> None:
         """Load all terms from Postgres into the in-memory cache.
@@ -102,12 +127,17 @@ class PostgresOntologyTermCacheService(OntologyTermCacheService):
                 (self._ontology_id,),
             )
             rows = await cur.fetchall()
-        cache: OntologyTermCache = {}
-        for field_id, concept_id, term in rows:
-            cache.setdefault(field_id, {})[concept_id] = term
-        self._cache = cache
+        self._preferred_term_by_id = {}
+        self._ids_by_preferred_term = {}
+        for field_id, concept_id, preferred_term in rows:
+            self._index_term(field_id, concept_id, preferred_term)
         self._last_refreshed = datetime.now(timezone.utc)
         logger.info("Loaded %d preferred term(s) into memory cache.", len(rows))
+
+    async def get_concept_ids_by_term(self, field_id: str, term: str) -> set[str]:
+        return set(
+            self._ids_by_preferred_term.get(field_id, {}).get(normalise_term(term), ())
+        )
 
     async def _has_changes_since(self, since: datetime) -> bool:
         async with get_cursor() as cur:
@@ -148,11 +178,11 @@ class PostgresOntologyTermCacheService(OntologyTermCacheService):
     async def get_preferred_terms(
         self, field_id: str, concept_ids: set[str]
     ) -> dict[str, str]:
-        field_cache = self._cache.get(field_id, {})
+        preferred_term_by_id = self._preferred_term_by_id.get(field_id, {})
         return {
-            concept_id: term
+            concept_id: preferred_term
             for concept_id in concept_ids
-            if (term := field_cache.get(concept_id)) is not None
+            if (preferred_term := preferred_term_by_id.get(concept_id)) is not None
         }
 
     async def cache_preferred_terms(
@@ -161,7 +191,7 @@ class PostgresOntologyTermCacheService(OntologyTermCacheService):
         if not concept_ids:
             return
 
-        missing = concept_ids.difference(self._cache.get(field_id, {}))
+        missing = concept_ids.difference(self._preferred_term_by_id.get(field_id, {}))
         if not missing:
             return
 
@@ -190,8 +220,8 @@ class PostgresOntologyTermCacheService(OntologyTermCacheService):
                     rows[i : i + _BATCH_SIZE],
                 )
 
-        for _, concept_id, _, term in rows:
-            self._cache.setdefault(field_id, {})[concept_id] = term
+        for _, concept_id, _, preferred_term in rows:
+            self._index_term(field_id, concept_id, preferred_term)
 
         logger.info(
             "Cached preferred terms for %d (concept_id, field_id) pair(s).", len(rows)
@@ -222,11 +252,11 @@ class PostgresOntologyTermCacheService(OntologyTermCacheService):
                     field_id,
                 )
                 continue
-            field_cache = self._cache.get(field_id, {})
+            preferred_term_by_id = self._preferred_term_by_id.get(field_id, {})
             to_update = [
-                (term, self._ontology_id, concept_id, field_id)
-                for concept_id, term in terms.items()
-                if field_cache.get(concept_id) != term
+                (preferred_term, self._ontology_id, concept_id, field_id)
+                for concept_id, preferred_term in terms.items()
+                if preferred_term_by_id.get(concept_id) != preferred_term
             ]
             if not to_update:
                 continue
@@ -240,8 +270,8 @@ class PostgresOntologyTermCacheService(OntologyTermCacheService):
                         """,
                         to_update[i : i + _BATCH_SIZE],
                     )
-            for term, _, concept_id, _ in to_update:
-                self._cache.setdefault(field_id, {})[concept_id] = term
+            for preferred_term, _, concept_id, _ in to_update:
+                self._index_term(field_id, concept_id, preferred_term)
             total_updated += len(to_update)
 
         logger.info("Refreshed %d preferred term(s).", total_updated)

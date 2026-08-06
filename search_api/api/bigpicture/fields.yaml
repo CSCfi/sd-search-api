@@ -52,7 +52,9 @@ filtering_terms:
     description: "Species of the biological being"
     ontology:
       id: SCTID
-    ontologyConcept: "410607006"  # Organism (organism)
+    ontologyRestriction:
+      concept_ids: [ "410607006" ]  # Organism (organism)
+      include_descendants: true
     ui_group: "subject"
     ui_display: false
 
@@ -67,7 +69,9 @@ filtering_terms:
       region.
     ontology:
       id: SCTID
-    ontologyConcept: "123037004"  # Body structure (body structure)
+    ontologyRestriction:
+      concept_ids: [ "123037004" ]  # Body structure (body structure)
+      include_descendants: true
     multivalued: true
     ui_group: "subject"
 
@@ -96,13 +100,16 @@ filtering_terms:
     description: "The preservation technique used."
     ontology:
       id: SCTID
-    ontologyConcept:
-      - "311731000"  # Paraffin wax (substance)
-      - "433469005"  # Frozen section embedding medium (substance)
-      - "61088005"   # Plastic (substance)
-      - "10249006"   # Agar (substance)
-      - "65345002"   # Epoxy resin (substance)
-      - "261712009"  # Acrylic polymer (substance)
+    ontologyRestriction:
+      concept_ids:
+        - "311731000"  # Paraffin wax (substance)
+        - "433469005"  # Frozen section embedding medium (substance)
+        - "61088005"   # Plastic (substance)
+        - "10249006"   # Agar (substance)
+        - "65345002"   # Epoxy resin (substance)
+        - "261712009"  # Acrylic polymer (substance)
+      # Exactly these media, not their descendants.
+      include_descendants: false
     ui_group: "sample"
 
   - id: specimen_type
@@ -113,7 +120,9 @@ filtering_terms:
     description: "The type of the specimen."
     ontology:
       id: SCTID
-    ontologyConcept: "91720002"  # Body substance (substance)
+    ontologyRestriction:
+      concept_ids: [ "91720002" ]  # Body substance (substance)
+      include_descendants: true
     ui_group: "sample"
 
   - id: fixation_type
@@ -124,7 +133,9 @@ filtering_terms:
     description: "The type of fixation used in the process of the creation of the specimen."
     ontology:
       id: SCTID
-    ontologyConcept: "1388477003"  # Tissue fixative (product)
+    ontologyRestriction:
+      concept_ids: [ "1388477003" ]  # Tissue fixative (product)
+      include_descendants: true
     ui_group: "sample"
 
   - id: staining_target
@@ -143,7 +154,9 @@ filtering_terms:
     description: "The name of the staining procedure that was performed to stain the slide"
     ontology:
       id: SCTID
-    ontologyConcept: "127790008"  # Staining method (procedure)
+    ontologyRestriction:
+      concept_ids: [ "127790008" ]  # Staining method (procedure)
+      include_descendants: true
     ui_group: "staining"
 
   - id: staining_substance
@@ -154,7 +167,9 @@ filtering_terms:
     description: "The staining substance that binds to parts of the tissues of the slide"
     ontology:
       id: SCTID
-    ontologyConcept: "397165007"  # Stain
+    ontologyRestriction:
+      concept_ids: [ "397165007" ]  # Stain
+      include_descendants: true
     ui_group: "staining"
 
   - id: diagnosis
@@ -164,7 +179,9 @@ filtering_terms:
     description: "Diagnosis known to apply to one more image linked to an observation."
     ontology:
       id: SCTID
-    ontologyConcept: "138875005"  # SNOMED CT Concept (root)
+    ontologyRestriction:
+      concept_ids: [ "138875005" ]  # SNOMED CT Concept (root)
+      include_descendants: true
     multivalued: true
     ui_group: "clinical"
 
@@ -175,7 +192,9 @@ filtering_terms:
     description: "Diagnosis known to apply to at least one, but not necessarily all, images linked to an observation."
     ontology:
       id: SCTID
-    ontologyConcept: "138875005"  # SNOMED CT Concept (root)
+    ontologyRestriction:
+      concept_ids: [ "138875005" ]  # SNOMED CT Concept (root)
+      include_descendants: true
     multivalued: true
     ui_group: "clinical"
 

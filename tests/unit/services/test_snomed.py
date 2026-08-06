@@ -31,10 +31,11 @@ def test_is_concept_id(service, value, expected):
 
 
 @pytest.mark.asyncio
-async def test_resolve_concept_ids_passes_the_terms_ecl_to_snowstorm(service):
+async def test_find_concept_ids_passes_the_terms_ecl_to_snowstorm(service):
     service.find_concept = AsyncMock(return_value=_concept("337915000"))
 
-    result = await service._resolve_concept_ids("Homo sapiens", ANIMAL_SPECIES_TERM)
+    with patch.object(SnomedService, "_describes", new=AsyncMock(return_value=True)):
+        result = await service._find_concept_ids("Homo sapiens", ANIMAL_SPECIES_TERM)
 
     assert result == {"337915000"}
     service.find_concept.assert_awaited_once_with(
@@ -43,16 +44,26 @@ async def test_resolve_concept_ids_passes_the_terms_ecl_to_snowstorm(service):
 
 
 @pytest.mark.asyncio
-async def test_resolve_concept_ids_resolves_to_nothing_when_no_concept_matches(service):
+async def test_find_concept_ids_resolves_to_nothing_when_no_concept_matches(service):
     service.find_concept = AsyncMock(return_value=None)
 
-    result = await service._resolve_concept_ids("no match here", ANIMAL_SPECIES_TERM)
+    result = await service._find_concept_ids("no match here", ANIMAL_SPECIES_TERM)
 
     assert result == set()
 
 
 @pytest.mark.asyncio
-async def test_resolve_descendant_ids_unions_the_descendants_of_every_concept_id(
+async def test_find_concept_ids_rejects_a_match_the_value_does_not_describe(service):
+    service.find_concept = AsyncMock(return_value=_concept("261014004"))
+
+    with patch.object(SnomedService, "_describes", new=AsyncMock(return_value=False)):
+        result = await service._find_concept_ids("Frozen", ANIMAL_SPECIES_TERM)
+
+    assert result == set()
+
+
+@pytest.mark.asyncio
+async def test_find_descendant_ids_unions_the_descendants_of_every_concept_id(
     service,
 ):
     with patch.object(
@@ -63,7 +74,7 @@ async def test_resolve_descendant_ids_unions_the_descendants_of_every_concept_id
             side_effect=[[_concept("111"), _concept("222")], [_concept("222")]]
         ),
     ) as find_descendants:
-        result = await service._resolve_descendant_ids({"410607006", "888"})
+        result = await service._find_descendant_ids({"410607006", "888"})
 
     assert result == {"111", "222"}
     # Every concept id is looked up, and only those.
@@ -74,10 +85,10 @@ async def test_resolve_descendant_ids_unions_the_descendants_of_every_concept_id
 
 
 @pytest.mark.asyncio
-async def test_resolve_descendant_ids_resolves_to_nothing_for_a_leaf_concept(service):
+async def test_find_descendant_ids_resolves_to_nothing_for_a_leaf_concept(service):
     with patch.object(
         SnomedService, "find_descendants", new=AsyncMock(return_value=[])
     ):
-        result = await service._resolve_descendant_ids({"410607006"})
+        result = await service._find_descendant_ids({"410607006"})
 
     assert result == set()

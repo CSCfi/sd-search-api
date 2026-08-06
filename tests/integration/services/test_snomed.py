@@ -50,3 +50,25 @@ async def test_find_descendants():
     assert "22298006" not in [c.concept_id for c in concepts]
     assert all(c.concept_id for c in concepts)
     assert all(c.preferred_term for c in concepts)
+
+
+@pytest.mark.asyncio
+async def test_describes_true_for_exact_preferred_term():
+    assert await SnomedService._describes("337915000", "Homo sapiens") is True
+
+
+@pytest.mark.asyncio
+async def test_describes_true_for_a_partial_term():
+    # "Formalin" is a substring of 1388516000's description
+    # "Neutral buffered formalin 10% solution".
+    assert await SnomedService._describes("1388516000", "Formalin") is True
+
+
+@pytest.mark.asyncio
+async def test_describes_is_case_and_space_insensitive():
+    assert await SnomedService._describes("337915000", "  HOMO   SAPIENS  ") is True
+
+
+@pytest.mark.asyncio
+async def test_describes_false_for_an_unrelated_value():
+    assert await SnomedService._describes("337915000", "zzz nonsense") is False

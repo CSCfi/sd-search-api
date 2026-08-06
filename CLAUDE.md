@@ -124,6 +124,17 @@ Indexed fields and filtering terms are declared in `api/bigpicture/fields.yaml` 
 `OpenSearchIndexGeneratorService` (`api/opensearch/index_generator.py`) via the
 `generate-index` admin command.
 
+An `ontology` / `ontologyOrValue` field may declare an `ontologyRestriction` — the part of the
+ontology its values may resolve to. It is deployment configuration, excluded from both API
+responses and the OpenAPI schema. It is optional: a field without one resolves against the whole
+ontology (`snomed_ecl` is then `None`), which is why the provider hooks verify their match.
+
+```yaml
+ontologyRestriction:
+  concept_ids: [ "410607006" ]   # Organism
+  include_descendants: true      # the subtree; false means exactly these concepts
+```
+
 ### API layer & routes
 
 The Beacon router is generic, built per domain by `make_beacon_router(domain)`
@@ -160,7 +171,8 @@ The BeaconService abstraction lives in `api/beacon/services.py` (`BeaconService`
 `POST /query` receives a `BeaconQueryRequest`. Ontology filters (`ontology` / `ontologyOrValue`)
 are resolved first: per filter, `get_ontology_service(term.ontology.id).prepare_ontology_filter(...)`
 turns free text / concept IDs into concept IDs (optionally expanding to descendants when
-`includeDescendantTerms`). The filter `type` (`BeaconFilteringTermType`) then selects the query
+`includeDescendantTerms`), scoped by the field's `ontologyRestriction` — see the resolution cascade
+under *Ontology providers*. The filter `type` (`BeaconFilteringTermType`) then selects the query
 builder (`api/opensearch/services.py`):
 
 | type | builder | notes |
@@ -180,9 +192,19 @@ comes from `request.query.requestedGranularity`.
 `get_preferred_terms`, and `prepare_ontology_filter`. `prepare_ontology_filter` is a template
 method implemented once on the ABC — filtering-term lookup, value normalisation, the
 resolved/unresolved split, and the final filter rebuild are identical across providers. Each
-provider only implements two hooks: `_resolve_concept_ids(value, filtering_term)` (one value ->
+provider only implements two hooks: `_find_concept_ids(value, filtering_term)` (one value ->
 its concept ID(s), possibly more than one if a term isn't unique) and
-`_resolve_descendant_ids(concept_ids)` (a set of concept IDs -> all of their descendants).
+`_find_descendant_ids(concept_ids)` (a set of concept IDs -> all of their descendants).
+
+Each value is resolved by `_resolve_concept_ids`, cheapest source first:
+
+1. **A concept id is taken as given** — an id absent from the ontology is absent from the index
+   too, so looking it up would cost a round trip without changing the result.
+2. **A preferred term cached for the field** (`terms_cache`, matched via `normalise_term`, so case-
+   and space-insensitively) resolves in memory. Unlike the field's `ontologyRestriction` this covers
+   every concept actually indexed for the field, including ones outside the restriction.
+3. Otherwise the provider's `_find_concept_ids` hook consults the ontology itself.
+
 Unresolved values are only kept in the prepared filter for `ontologyOrValue` fields (which have a
 free-text fallback field downstream); for strict `ontology` fields they're dropped. A registry maps
 an **ontology id** (e.g. `SCTID`) to its provider via `register_ontology_service` /
@@ -197,15 +219,16 @@ ontology. Registering a new provider means adding it there, not adding an import
 `services/snomed.py` — `SnomedService(OntologyService)` wraps Snowstorm; registered as `SCTID`:
 
 - `find_concept(term, ecl, branch)` → `SnomedConcept | None`
-- `search_concepts(term, ecl, branch, limit)` → `list[SnomedConcept]`
 - `find_descendants(concept_id, branch)` → `list[SnomedConcept]` (static)
 - `get_preferred_terms(concept_ids, branch)` → `dict[str, str]`
-- `get_concepts(concept_ids, ecl, branch)` → `dict[str, SnomedConcept]` (static)
-- `suggest_concepts(term, ecl, branch, limit, indexed_concept_ids)` → `list[SnomedConcept]`
-- `_resolve_concept_ids`/`_resolve_descendant_ids` — the two `OntologyService` hooks, built on
-  `find_concept`/`find_descendants` above (always on the `"MAIN"` branch — no caller varies it)
+- `_find_concept_ids`/`_find_descendant_ids` — the two `OntologyService` hooks, built on
+  `find_concept`/`find_descendants` above (always on the `"MAIN"` branch — no caller varies it).
+  Snowstorm always returns its best match, so `_find_concept_ids` accepts one only if the value
+  actually appears in one of the concept's descriptions (`_describes`); otherwise an unrecognised
+  value would resolve to a loosely related concept and silently match no documents.
 
-`_fetch_all_concepts` is cached for 30 days. Set `SNOWSTORM_URL` to enable.
+`_fetch_all_concepts` and `_fetch_descriptions` are cached for 30 days. Set `SNOWSTORM_URL` to
+enable.
 
 ### Ontology term cache (`search_api/services/ontology_term.py`)
 
@@ -236,9 +259,11 @@ per-field incremental cache above:
   `CachedOntologyStore` (ABC) — `read() -> CachedOntology | None` / `write(CachedOntology)`.
 - `CachedOntologyService` — `OntologyService` fed by a `BootstrapCachedOntologySource`; fetches once
   at startup (`init`) and serves lookups from that in-memory table. No automatic background refresh;
-  a newer release only takes effect on the next process start. Its `_resolve_concept_ids` hook
-  matches a concept id, preferred term or synonym case-insensitively, resolving to every concept
-  carrying that value; `_resolve_descendant_ids` walks `parent_ids` to any depth.
+  a newer release only takes effect on the next process start. Its `_find_concept_ids` hook
+  matches a concept id, preferred term or synonym via `normalise_term`, resolving to every concept
+  carrying that value and then keeping only those permitted by the field's `ontologyRestriction`
+  (in SEND ~260 terms are shared between code lists, so the restriction is what disambiguates
+  them); `_find_descendant_ids` walks `parent_ids` to any depth.
 - `PostgresOntologyStore` — persists one ontology's full concept table as a single JSON snapshot in
   the shared `ontology_cache` table (`ontology_id, version, sha256, data, updated_at`), one row per
   `ontology_id`; `write` always replaces the entire stored snapshot (never per-concept updates).

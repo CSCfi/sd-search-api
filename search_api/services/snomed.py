@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from search_api.api.beacon.models import BeaconFilteringTerm
 from search_api.conf import snowstorm_config as _snowstorm_config
-from search_api.services.ontology import OntologyService
+from search_api.services.ontology import OntologyService, normalise_term
 
 _PAGE_SIZE = 1000
 _CACHE_TTL = 60 * 60 * 24 * 30  # 30 days
@@ -139,6 +139,30 @@ async def _fetch_all_concepts(ecl: str, branch: str) -> list[SnomedConcept]:
     return concepts
 
 
+@cached(ttl=_CACHE_TTL)
+async def _fetch_descriptions(concept_id: str, branch: str) -> tuple[str, ...]:
+    """Fetch a concept's active descriptions, normalised for matching.
+
+    Args:
+        concept_id: Concept ID whose descriptions are to be retrieved.
+        branch: SNOMED CT branch path to search (e.g. ``"MAIN"``).
+
+    Returns:
+        The normalised term of every active description of the concept.
+    """
+    url = f"{_snowstorm_url()}/{branch}/descriptions"
+    async with _client() as client:
+        resp = await client.get(
+            url, params={"conceptIds": concept_id, "limit": _PAGE_SIZE}
+        )
+        resp.raise_for_status()
+    return tuple(
+        normalise_term(item["term"])
+        for item in resp.json().get("items", [])
+        if item.get("active")
+    )
+
+
 class SnomedService(OntologyService):
     """SNOMED CT concept lookup service."""
 
@@ -221,14 +245,37 @@ class SnomedService(OntologyService):
                     result[item["conceptId"]] = item["pt"]["term"]
         return result
 
-    async def _resolve_concept_ids(
+    @staticmethod
+    async def _describes(concept_id: str, value: str, branch: str = "MAIN") -> bool:
+        """Return True if value appears in one of the concept's descriptions.
+
+        Snowstorm's best match may be unrelated to the provided value. We guard against
+        this by requiring value to appear in one of the matched concept's
+        descriptions, e.g. "Formalin" in "Neutral buffered formalin 10% solution".
+        """
+        wanted = normalise_term(value)
+        return any(
+            wanted in description
+            for description in await _fetch_descriptions(concept_id, branch)
+        )
+
+    async def _find_concept_ids(
         self, value: str, filtering_term: BeaconFilteringTerm
     ) -> set[str]:
-        """Resolve one filter value to a SNOMED CT concept ID via Snowstorm."""
-        concept = await self.find_concept(value, ecl=filtering_term.snomed_ecl)
-        return {concept.concept_id} if concept is not None else set()
+        """Find a SNOMED CT concept ID for one filter value via Snowstorm.
 
-    async def _resolve_descendant_ids(self, concept_ids: set[str]) -> set[str]:
+        The value is searched within the field's restricted part of SNOMED CT, or
+        all of it if the field is unrestricted. The best match is accepted
+        only if the value is found in one of its descriptions.
+        """
+        concept = await self.find_concept(value, ecl=filtering_term.snomed_ecl)
+        if concept is None:
+            return set()
+        if not await self._describes(concept.concept_id, value):
+            return set()
+        return {concept.concept_id}
+
+    async def _find_descendant_ids(self, concept_ids: set[str]) -> set[str]:
         """Return every active descendant of the given concept IDs."""
         descendant_groups = await asyncio.gather(
             *(self.find_descendants(concept_id) for concept_id in concept_ids)

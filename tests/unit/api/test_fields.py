@@ -104,7 +104,7 @@ def test_invalid_type_value(tmp_path):
     assert "invalid" in str(exc.value)
 
 
-def test_unquoted_numeric_ontology_concept_is_rejected(tmp_path):
+def test_unquoted_numeric_concept_id_is_rejected(tmp_path):
     path = _write(
         tmp_path,
         """\
@@ -117,12 +117,14 @@ def test_unquoted_numeric_ontology_concept_is_rejected(tmp_path):
             description: "Species"
             ontology:
               id: SCTID
-            ontologyConcept: 410607006
+            ontologyRestriction:
+              concept_ids: [ 410607006 ]
+              include_descendants: true
         """,
     )
     with pytest.raises(ConfigurationException) as exc:
         load_fields_config(path)
-    assert "ontologyConcept" in str(exc.value)
+    assert "concept_ids" in str(exc.value)
 
 
 def test_ontology_or_value_rejects_multivalued(tmp_path):
@@ -138,7 +140,9 @@ def test_ontology_or_value_rejects_multivalued(tmp_path):
             description: "Fixation"
             ontology:
               id: SCTID
-            ontologyConcept: "1388477003"
+            ontologyRestriction:
+              concept_ids: [ "1388477003" ]
+              include_descendants: true
             multivalued: true
         """,
     )

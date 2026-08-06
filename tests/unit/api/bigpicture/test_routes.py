@@ -122,6 +122,10 @@ class MockOntologyTermCacheService(OntologyTermCacheService):
         pass
 
     @override
+    async def get_concept_ids_by_term(self, field_id: str, term: str) -> set[str]:
+        return {cid for cid, t in PREFERRED_TERMS.items() if t == term}
+
+    @override
     async def refresh(self, snomed) -> None:
         pass
 
@@ -142,6 +146,9 @@ def client():
     app.dependency_overrides[get_beacon_service] = lambda: MockBeaconService(
         BP_FILTERING_TERMS
     )
+    app.dependency_overrides[get_ontology_term_services] = lambda: {
+        SNOMED_ONTOLOGY_ID: MockOntologyTermCacheService()
+    }
     yield TestClient(app)
     app.dependency_overrides.clear()
     app.dependency_overrides.update(saved)

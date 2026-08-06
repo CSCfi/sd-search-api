@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict
 
 from search_api.api.beacon.models import BeaconFilteringTerm
 from search_api.database.repository import get_cursor
-from search_api.services.ontology import OntologyService
+from search_api.services.ontology import OntologyService, normalise_term
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +165,9 @@ class CachedOntologyService(OntologyService):
                 concept.preferred_term,
                 *concept.synonyms,
             ):
-                by_value.setdefault(value.casefold(), set()).add(concept.concept_id)
+                by_value.setdefault(normalise_term(value), set()).add(
+                    concept.concept_id
+                )
             for parent_id in concept.parent_ids:
                 children.setdefault(parent_id, set()).add(concept.concept_id)
         self._version = cached.version
@@ -190,13 +192,23 @@ class CachedOntologyService(OntologyService):
         }
 
     @override
-    async def _resolve_concept_ids(
+    async def _find_concept_ids(
         self, value: str, filtering_term: BeaconFilteringTerm
     ) -> set[str]:
-        return set(self._by_value.get(value.casefold(), ()))
+        concept_ids = set(self._by_value.get(normalise_term(value), ()))
+
+        # Keep only the concepts the field is restricted to. An
+        # unrestricted field keeps all of them.
+        restriction = filtering_term.ontologyRestriction
+        if restriction is None:
+            return concept_ids
+        permitted = set(restriction.concept_ids)
+        if restriction.include_descendants:
+            permitted |= await self._find_descendant_ids(permitted)
+        return concept_ids & permitted
 
     @override
-    async def _resolve_descendant_ids(self, concept_ids: set[str]) -> set[str]:
+    async def _find_descendant_ids(self, concept_ids: set[str]) -> set[str]:
         result: set[str] = set()
         child_ids: list[str] = []
         for concept_id in concept_ids:

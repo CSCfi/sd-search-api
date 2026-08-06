@@ -1,8 +1,14 @@
 """Unit tests for CachedOntologyService hooks called by ``prepare_ontology_filter`` template method."""
 
+from collections.abc import Sequence
+
 import pytest
 
-from search_api.api.beacon.models import BeaconFilteringOntology, BeaconFilteringTerm
+from search_api.api.beacon.models import (
+    BeaconFilteringOntology,
+    BeaconFilteringTerm,
+    OntologyRestriction,
+)
 from search_api.services.cached_ontology import (
     BootstrapCachedOntologySource,
     CachedOntologySource,
@@ -30,6 +36,8 @@ V1_CONCEPTS = [
         concept_id="C5", preferred_term="P5", parent_ids=frozenset({"C3"})
     ),
 ]
+
+V1_ROOT_CONCEPTS: tuple[str, ...] = ("C1", "C2")
 
 V2_CONCEPTS = [
     CachedOntologyConcept(concept_id="C6", preferred_term="P6"),
@@ -71,7 +79,10 @@ class MockStore(CachedOntologyStore):
         self.stored = fetched
 
 
-def term() -> BeaconFilteringTerm:
+def term(
+    restrict_concept_ids: Sequence[str] | None = V1_ROOT_CONCEPTS,
+    restrict_include_descendants: bool = True,
+) -> BeaconFilteringTerm:
     return BeaconFilteringTerm(
         id="species",
         type="ontology",
@@ -79,7 +90,14 @@ def term() -> BeaconFilteringTerm:
         label="Species",
         description="Species",
         ontology=BeaconFilteringOntology(id="TEST"),
-        ontologyConcept="ROOT",
+        ontologyRestriction=(
+            None
+            if restrict_concept_ids is None
+            else OntologyRestriction(
+                concept_ids=list(restrict_concept_ids),
+                include_descendants=restrict_include_descendants,
+            )
+        ),
     )
 
 
@@ -113,20 +131,20 @@ async def test_get_preferred_terms(service):
 
 
 @pytest.mark.asyncio
-async def test_resolve_concept_ids(service):
+async def test_find_concept_ids(service):
     await service.init()
 
-    assert await service._resolve_concept_ids("C3", term()) == {"C3"}
-    assert await service._resolve_concept_ids("c3", term()) == {"C3"}
-    assert await service._resolve_concept_ids("P3", term()) == {"C3"}
-    assert await service._resolve_concept_ids("p3", term()) == {"C3"}
-    assert await service._resolve_concept_ids("S1", term()) == {"C3"}
-    assert await service._resolve_concept_ids("s1", term()) == {"C3"}
-    assert await service._resolve_concept_ids("invalid", term()) == set()
+    assert await service._find_concept_ids("C3", term()) == {"C3"}
+    assert await service._find_concept_ids("c3", term()) == {"C3"}
+    assert await service._find_concept_ids("P3", term()) == {"C3"}
+    assert await service._find_concept_ids("p3", term()) == {"C3"}
+    assert await service._find_concept_ids("S1", term()) == {"C3"}
+    assert await service._find_concept_ids("s1", term()) == {"C3"}
+    assert await service._find_concept_ids("invalid", term()) == set()
 
 
 @pytest.mark.asyncio
-async def test_resolve_concept_ids_for_a_term_shared_by_several_concepts():
+async def test_find_concept_ids_for_a_term_shared_by_several_concepts():
     """A preferred term or synonym isn't guaranteed unique across concepts
     (real SEND has some), so it resolves to all of them rather than dropping
     the association."""
@@ -138,23 +156,48 @@ async def test_resolve_concept_ids_for_a_term_shared_by_several_concepts():
     )
     await service.init()
 
-    assert await service._resolve_concept_ids("P1", term()) == {"C1", "C2"}
+    assert await service._find_concept_ids("P1", term()) == {"C1", "C2"}
 
 
 @pytest.mark.asyncio
-async def test_resolve_descendant_ids(service):
+async def test_find_concept_ids_with_restriction(service):
+    await service.init()
+
+    # C4 is a descendant of both C1 and C2, so either restriction reaches it.
+    assert await service._find_concept_ids("P4", term(["C1"])) == {"C4"}
+    assert await service._find_concept_ids("P4", term(["C2"])) == {"C4"}
+
+    # C3 is a descendant of C1 only, so a C2 restriction does not reach it.
+    assert await service._find_concept_ids("P3", term(["C1"])) == {"C3"}
+    assert await service._find_concept_ids("P3", term(["C2"])) == set()
+    assert await service._find_concept_ids("P3", term(None)) == {"C3"}
+
+    # Excluding descendants, C1's descendant C3 no longer resolves.
+    assert await service._find_concept_ids(
+        "P1", term(["C1"], restrict_include_descendants=False)
+    ) == {"C1"}
+    assert (
+        await service._find_concept_ids(
+            "P3", term(["C1"], restrict_include_descendants=False)
+        )
+        == set()
+    )
+
+
+@pytest.mark.asyncio
+async def test_find_descendant_ids(service):
     await service.init()
 
     # C1's children are C3 and C4, and C3's child C5 is reached transitively.
-    assert await service._resolve_descendant_ids({"C1"}) == {"C3", "C4", "C5"}
-    assert await service._resolve_descendant_ids({"C3"}) == {"C5"}
+    assert await service._find_descendant_ids({"C1"}) == {"C3", "C4", "C5"}
+    assert await service._find_descendant_ids({"C3"}) == {"C5"}
     # C4 has two parents, so it is reached from C1 above and from C2 here.
-    assert await service._resolve_descendant_ids({"C2"}) == {"C4"}
-    # Unions across concept ids, with C4 (under both C1 and C2) returned once.
-    assert await service._resolve_descendant_ids({"C1", "C2"}) == {"C3", "C4", "C5"}
+    assert await service._find_descendant_ids({"C2"}) == {"C4"}
+    # Unions across concept ids, with C4 (a descendant of both C1 and C2) returned once.
+    assert await service._find_descendant_ids({"C1", "C2"}) == {"C3", "C4", "C5"}
     # A leaf and an unknown concept id both resolve to nothing.
-    assert await service._resolve_descendant_ids({"C5"}) == set()
-    assert await service._resolve_descendant_ids({"invalid"}) == set()
+    assert await service._find_descendant_ids({"C5"}) == set()
+    assert await service._find_descendant_ids({"invalid"}) == set()
 
 
 @pytest.mark.asyncio

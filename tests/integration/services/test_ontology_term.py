@@ -94,12 +94,17 @@ async def test_load():
             )
 
     service = _service()
-    assert service._cache == {}
+    assert await service.get_preferred_terms(_FIELD_ID, set(CACHED_TERMS)) == {}
 
     await service.load()
 
-    for cid, term in CACHED_TERMS.items():
-        assert service._cache.get(_FIELD_ID, {}).get(cid) == term
+    assert (
+        await service.get_preferred_terms(_FIELD_ID, set(CACHED_TERMS)) == CACHED_TERMS
+    )
+    # load() also builds the by-term direction used to resolve filter values.
+    assert await service.get_concept_ids_by_term(_FIELD_ID, "Homo sapiens") == {
+        "337915000"
+    }
 
 
 @pytest.mark.asyncio
@@ -107,8 +112,7 @@ async def test_load_does_not_raise_on_empty_table():
     """load() completes without error even when concept has no rows for these IDs."""
     service = _service()
     await service.load()
-    for cid in CACHED_TERMS:
-        assert service._cache.get(_FIELD_ID, {}).get(cid) is None
+    assert await service.get_preferred_terms(_FIELD_ID, set(CACHED_TERMS)) == {}
 
 
 @pytest.mark.asyncio
@@ -131,14 +135,11 @@ async def test_get_preferred_terms_empty_set(fill_cache):
 
 
 @pytest.mark.asyncio
-async def test_cache_preferred_terms_skips_existing_ids():
-    service = _service()
-    service._cache = {_FIELD_ID: dict(CACHED_TERMS)}
-
+async def test_cache_preferred_terms_skips_existing_ids(fill_cache):
     mock_snomed = AsyncMock()
     mock_snomed.get_preferred_terms = AsyncMock(return_value={})
 
-    await service.cache_preferred_terms(
+    await fill_cache.cache_preferred_terms(
         _FIELD_ID, set(CACHED_TERMS.keys()), mock_snomed
     )
 
@@ -157,7 +158,9 @@ async def test_cache_preferred_terms_stores_new_terms():
 
     await service.cache_preferred_terms(_FIELD_ID, {"337915000"}, mock_snomed)
 
-    assert service._cache.get(_FIELD_ID, {}).get("337915000") == "Homo sapiens"
+    assert await service.get_preferred_terms(_FIELD_ID, {"337915000"}) == {
+        "337915000": "Homo sapiens"
+    }
     assert await _get_stored_term("337915000") == "Homo sapiens"
 
 
@@ -171,7 +174,7 @@ async def test_cache_preferred_terms_skip_when_snowstorm_returns_empty():
 
     await service.cache_preferred_terms(_FIELD_ID, {"337915000"}, mock_snomed)
 
-    assert service._cache.get(_FIELD_ID, {}).get("337915000") is None
+    assert await service.get_preferred_terms(_FIELD_ID, {"337915000"}) == {}
     assert await _get_stored_term("337915000") is None
 
 
@@ -217,8 +220,10 @@ async def test_has_changes_since():
         await service.load()
 
         assert service._last_refreshed is not None
-        for concept_id, term in initial_terms.items():
-            assert service._cache.get(_FIELD_ID, {}).get(concept_id) == term
+        assert (
+            await service.get_preferred_terms(_FIELD_ID, set(initial_terms))
+            == initial_terms
+        )
 
         current_ts = datetime.now(timezone.utc)
 
@@ -243,10 +248,12 @@ async def test_has_changes_since():
 
         # Loads extra rows
         await service.load()
-        for concept_id, term in initial_terms.items():
-            assert service._cache.get(_FIELD_ID, {}).get(concept_id) == term
-        for concept_id, term in extra_terms.items():
-            assert service._cache.get(_FIELD_ID, {}).get(concept_id) == term
+        assert (
+            await service.get_preferred_terms(
+                _FIELD_ID, set(initial_terms) | set(extra_terms)
+            )
+            == initial_terms | extra_terms
+        )
     finally:
         async with get_connection() as conn:
             async with conn.cursor() as cur:

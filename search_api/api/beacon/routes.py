@@ -115,6 +115,9 @@ def make_beacon_router(domain: Domain) -> APIRouter:
     async def query(
         request: BeaconQueryRequest,
         beacon_service: BeaconService = Depends(get_beacon_service),
+        ontology_term_services: dict[str, OntologyTermCacheService] = Depends(
+            get_ontology_term_services
+        ),
     ):
         if (
             request.query.requestedScope is not None
@@ -140,7 +143,11 @@ def make_beacon_router(domain: Domain) -> APIRouter:
                     *[
                         get_ontology_service(
                             ontology_id_by_field[f.id]
-                        ).prepare_ontology_filter(f, domain.filtering_terms)
+                        ).prepare_ontology_filter(
+                            f,
+                            domain.filtering_terms,
+                            ontology_term_services.get(ontology_id_by_field[f.id]),
+                        )
                         for f in ontology_filters
                     ]
                 )

@@ -224,8 +224,11 @@ ontology. Registering a new provider means adding it there, not adding an import
 - `_find_concept_ids`/`_find_descendant_ids` — the two `OntologyService` hooks, built on
   `find_concept`/`find_descendants` above (always on the `"MAIN"` branch — no caller varies it).
   Snowstorm always returns its best match, so `_find_concept_ids` accepts one only if the value
-  actually appears in one of the concept's descriptions (`_describes`); otherwise an unrecognised
-  value would resolve to a loosely related concept and silently match no documents.
+  **is** one of the concept's descriptions, compared by `normalise_term` (`_describes`); otherwise
+  an unrecognised value would resolve to a loosely related concept and silently match no documents.
+  The comparison is deliberately exact rather than partial — a partial term like "Formalin" is
+  rejected even though it appears in "Neutral buffered formalin 10% solution", because the concept
+  a value resolved to is not reported back to the caller.
 
 `_fetch_all_concepts` and `_fetch_descriptions` are cached for 30 days. Set `SNOWSTORM_URL` to
 enable.

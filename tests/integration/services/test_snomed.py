@@ -53,20 +53,22 @@ async def test_find_descendants():
 
 
 @pytest.mark.asyncio
-async def test_describes_true_for_exact_preferred_term():
+async def test_describes_true_for_preferred_term_or_synonym():
+    # "Homo sapiens" is 337915000's preferred term, "Human" a synonym of it.
     assert await SnomedService._describes("337915000", "Homo sapiens") is True
-
-
-@pytest.mark.asyncio
-async def test_describes_true_for_a_partial_term():
-    # "Formalin" is a substring of 1388516000's description
-    # "Neutral buffered formalin 10% solution".
-    assert await SnomedService._describes("1388516000", "Formalin") is True
+    assert await SnomedService._describes("337915000", "Human") is True
 
 
 @pytest.mark.asyncio
 async def test_describes_is_case_and_space_insensitive():
     assert await SnomedService._describes("337915000", "  HOMO   SAPIENS  ") is True
+
+
+@pytest.mark.asyncio
+async def test_describes_false_for_a_partial_term():
+    # "Formalin" is only part of 1388516000's description "Neutral buffered
+    # formalin 10% solution", so it is not one of its descriptions.
+    assert await SnomedService._describes("1388516000", "Formalin") is False
 
 
 @pytest.mark.asyncio

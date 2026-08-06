@@ -140,7 +140,7 @@ async def _fetch_all_concepts(ecl: str, branch: str) -> list[SnomedConcept]:
 
 
 @cached(ttl=_CACHE_TTL)
-async def _fetch_descriptions(concept_id: str, branch: str) -> tuple[str, ...]:
+async def _fetch_descriptions(concept_id: str, branch: str) -> frozenset[str]:
     """Fetch a concept's active descriptions, normalised for matching.
 
     Args:
@@ -156,7 +156,7 @@ async def _fetch_descriptions(concept_id: str, branch: str) -> tuple[str, ...]:
             url, params={"conceptIds": concept_id, "limit": _PAGE_SIZE}
         )
         resp.raise_for_status()
-    return tuple(
+    return frozenset(
         normalise_term(item["term"])
         for item in resp.json().get("items", [])
         if item.get("active")
@@ -247,17 +247,8 @@ class SnomedService(OntologyService):
 
     @staticmethod
     async def _describes(concept_id: str, value: str, branch: str = "MAIN") -> bool:
-        """Return True if value appears in one of the concept's descriptions.
-
-        Snowstorm's best match may be unrelated to the provided value. We guard against
-        this by requiring value to appear in one of the matched concept's
-        descriptions, e.g. "Formalin" in "Neutral buffered formalin 10% solution".
-        """
-        wanted = normalise_term(value)
-        return any(
-            wanted in description
-            for description in await _fetch_descriptions(concept_id, branch)
-        )
+        """Return True if value is one of the concept's descriptions compared by normalise_term."""
+        return normalise_term(value) in await _fetch_descriptions(concept_id, branch)
 
     async def _find_concept_ids(
         self, value: str, filtering_term: BeaconFilteringTerm
@@ -266,7 +257,7 @@ class SnomedService(OntologyService):
 
         The value is searched within the field's restricted part of SNOMED CT, or
         all of it if the field is unrestricted. The best match is accepted
-        only if the value is found in one of its descriptions.
+        only if the value is one of its descriptions.
         """
         concept = await self.find_concept(value, ecl=filtering_term.snomed_ecl)
         if concept is None:

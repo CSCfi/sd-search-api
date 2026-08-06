@@ -26,6 +26,7 @@ from search_api.services.cached_ontology import PostgresOntologyStore
 from search_api.services.ontology import get_ontology_service
 from search_api.services.send import SEND_ONTOLOGY_ID, SendOntologySource
 from search_api.services.ontology_term import create_term_caches
+from search_api.services.snomed import import_snomed_release
 
 
 def _index_path(domain: Domain) -> Path:
@@ -101,12 +102,9 @@ async def _clear(domain: Domain, args: argparse.Namespace) -> None:
         await sync_service.search.close()
 
 
-async def _update_snomed_ontology() -> None:
-    """Update the SNOMED CT release."""
-    # TODO: fetch a new SNOMED CT release and load it into Snowstorm. Releases
-    # are currently installed into Snowstorm outside this CLI, so there is
-    # nothing to update here and only the preferred terms are refreshed.
-    logging.info("Updating a SNOMED CT release is not supported.")
+async def _update_snomed_ontology(release_file: Path) -> None:
+    """Import release_file into Snowstorm as a new SNOMED CT release."""
+    await import_snomed_release(release_file)
 
 
 async def _update_send_ontology() -> None:
@@ -134,20 +132,27 @@ async def _update_send_ontology() -> None:
     )
 
 
-# How each ontology is updated from its source, keyed by ontology id.
-_ONTOLOGY_UPDATERS: dict[str, Callable[[], Awaitable[None]]] = {
+# How each ontology is updated from its source, keyed by ontology id. Signatures
+# differ per ontology so this is typed loosely and _refresh_ontology passes each
+# updater the arguments it needs.
+_ONTOLOGY_UPDATERS: dict[str, Callable[..., Awaitable[None]]] = {
     SNOMED_ONTOLOGY_ID: _update_snomed_ontology,
     SEND_ONTOLOGY_ID: _update_send_ontology,
 }
 
 
-async def _refresh_ontology(ontology_id: str) -> None:
+async def _refresh_ontology(ontology_id: str, release_file: Path | None = None) -> None:
     """Refresh one ontology in two parts.
 
     First the ontology itself is updated from its source, then the preferred
     terms cached for it in the terms_cache table are refreshed against it.
     """
-    await _ONTOLOGY_UPDATERS[ontology_id]()
+    if ontology_id == SNOMED_ONTOLOGY_ID:
+        if release_file is None:
+            raise SystemException("--release-file is required to refresh SNOMED.")
+        await _ONTOLOGY_UPDATERS[ontology_id](release_file)
+    else:
+        await _ONTOLOGY_UPDATERS[ontology_id]()
 
     # Initialised after the update so the terms are refreshed against it.
     ontology = get_ontology_service(ontology_id)
@@ -240,11 +245,20 @@ if __name__ == "__main__":
     snomed_commands = groups.add_parser(
         "snomed", help="Manage the shared SNOMED CT preferred terms cache."
     ).add_subparsers(dest="snomed_command", required=True)
-    snomed_commands.add_parser(
+    snomed_refresh_parser = snomed_commands.add_parser(
         "refresh",
         help=(
             "Update the SNOMED CT ontology and refresh the preferred terms "
             "cached for it in the database. Run after a new SNOMED release."
+        ),
+    )
+    snomed_refresh_parser.add_argument(
+        "--release-file",
+        type=Path,
+        required=True,
+        metavar="FILE",
+        help=(
+            "Path to a SNOMED CT release archive (e.g. SnomedCT_InternationalRF2_PRODUCTION_<date>.zip)."
         ),
     )
 
@@ -265,7 +279,7 @@ if __name__ == "__main__":
 
     if args.group == "snomed":
         if args.snomed_command == "refresh":
-            asyncio.run(_refresh_ontology(SNOMED_ONTOLOGY_ID))
+            asyncio.run(_refresh_ontology(SNOMED_ONTOLOGY_ID, args.release_file))
     elif args.group == "send":
         if args.send_command == "refresh":
             asyncio.run(_refresh_ontology(SEND_ONTOLOGY_ID))

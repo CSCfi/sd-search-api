@@ -1,6 +1,8 @@
 """SNOMED CT concept lookup via the Snowstorm terminology server."""
 
 import asyncio
+import logging
+from pathlib import Path
 
 import httpx
 from aiocache import cached  # type: ignore[import-untyped]
@@ -8,11 +10,13 @@ from pydantic import BaseModel
 
 from search_api.api.beacon.models import BeaconFilteringTerm
 from search_api.conf import snowstorm_config as _snowstorm_config
+from search_api.exceptions import SystemException
 from search_api.services.ontology import OntologyService, normalise_term
 
 _PAGE_SIZE = 1000
 _CACHE_TTL = 60 * 60 * 24 * 30  # 30 days
 _CONCEPT_ID_BATCH_SIZE = 50  # limit conceptIds to keep the request URL within limits
+_IMPORT_POLL_INTERVAL = 60.0  # seconds; an import can take hours to complete
 
 
 class SnomedConcept(BaseModel):
@@ -24,11 +28,11 @@ def _snowstorm_url() -> str:
     return _snowstorm_config().SNOWSTORM_URL
 
 
-def _client() -> httpx.AsyncClient:
+def _client(timeout: float | None = 30.0) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         headers={"User-Agent": "sd-search-api", "Accept": "application/json"},
         follow_redirects=True,
-        timeout=30.0,
+        timeout=timeout,
     )
 
 
@@ -161,6 +165,65 @@ async def _fetch_descriptions(concept_id: str, branch: str) -> frozenset[str]:
         for item in resp.json().get("items", [])
         if item.get("active")
     )
+
+
+async def import_snomed_release(release_file: Path, branch: str = "MAIN") -> None:
+    """Import a new SNOMED CT release into Snowstorm.
+
+    Creates an import job, uploads the release archive, and polls until the
+    job completes. Mirrors the manual procedure in the README's "Import
+    SNOMED release" section.
+
+    Args:
+        release_file: Path to the SNOMED CT release archive (e.g. a
+            SnomedCT_InternationalRF2_*.zip file).
+        branch: SNOMED CT branch path to import into. Defaults to ``"MAIN"``.
+
+    Raises:
+        SystemException: if the import job reports a failed status.
+    """
+    async with _client() as client:
+        resp = await client.post(
+            f"{_snowstorm_url()}/imports",
+            json={
+                "type": "SNAPSHOT",
+                "branchPath": branch,
+                "createCodeSystemVersion": True,
+            },
+        )
+        resp.raise_for_status()
+        import_id = resp.headers["location"].rsplit("/", 1)[-1]
+    logging.info("Created Snowstorm import job '%s'.", import_id)
+
+    logging.info("Uploading '%s'; this may take a while.", release_file)
+    async with _client(timeout=None) as client:
+        with release_file.open("rb") as f:
+            resp = await client.post(
+                f"{_snowstorm_url()}/imports/{import_id}/archive",
+                files={"file": (release_file.name, f, "application/zip")},
+            )
+            resp.raise_for_status()
+
+    logging.info("Waiting for import '%s' to complete.", import_id)
+    while True:
+        async with _client() as client:
+            resp = await client.get(f"{_snowstorm_url()}/imports/{import_id}")
+        if resp.status_code == 404:
+            # The job becomes unavailable once done, so a
+            # 404 here signals completion rather than an error.
+            logging.info(
+                "Import '%s' is no longer available; assuming completed.", import_id
+            )
+            return
+        resp.raise_for_status()
+        status = resp.json().get("status")
+        if status == "COMPLETED":
+            logging.info("Import '%s' completed.", import_id)
+            return
+        if status == "FAILED":
+            raise SystemException(f"SNOMED CT import '{import_id}' failed.")
+        logging.info("Import '%s' status: %s.", import_id, status)
+        await asyncio.sleep(_IMPORT_POLL_INTERVAL)
 
 
 class SnomedService(OntologyService):

@@ -30,7 +30,7 @@ docker compose --env-file tests/integration/.env --profile dev up --build
 uv run python scripts/admin.py Bigpicture load <dir> --load --sync
 uv run python scripts/admin.py Bigpicture generate-index
 uv run python scripts/admin.py Bigpicture create-index   # once per environment
-uv run python scripts/admin.py snomed refresh
+uv run python scripts/admin.py snomed refresh --release-file <path/to/SnomedCT_*.zip>
 uv run python scripts/admin.py send refresh
 ```
 
@@ -232,6 +232,12 @@ ontology. Registering a new provider means adding it there, not adding an import
 
 `_fetch_all_concepts` and `_fetch_descriptions` are cached for 30 days. Set `SNOWSTORM_URL` to
 enable.
+
+`import_snomed_release(release_file, branch)` automates the README's "Import SNOMED release"
+procedure: creates a Snowstorm import job, uploads the release archive, then polls
+`/imports/{id}` until it reports `COMPLETED` (raising on `FAILED`; a `404` also means done, per
+Snowstorm's own behaviour of dropping completed jobs). Invoked by `scripts/admin.py`'s
+`snomed refresh --release-file <path>`, where `--release-file` is required.
 
 ### Ontology term cache (`search_api/services/ontology_term.py`)
 

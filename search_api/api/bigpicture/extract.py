@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
 from search_api.api.bigpicture.models import BP_DOCUMENT_FIELDS
-from search_api.exceptions import SystemException
+from search_api.exceptions import SystemException, UserException
 from search_api.api.opensearch.models import ExtractedDocument, OpenSearchFieldValue
 from search_api.utils.crypt import load_c4gh_keys, read_file, resolve_path
 from search_api.utils.dir import list_directories
@@ -167,6 +167,7 @@ def to_opensearch_field_values(fields: BigpictureFields) -> list[OpenSearchField
 
 DATASET_XML_FILE = "METADATA/dataset.xml"
 IMAGE_XML_FILE = "METADATA/image.xml"
+POLICY_XML_FILE = "METADATA/policy.xml"
 SAMPLE_XML_FILE = "METADATA/sample.xml"
 STAINING_XML_FILE = "METADATA/staining.xml"
 OBSERVATION_XML_FILE = "METADATA/observation.xml"
@@ -175,6 +176,7 @@ XML_SCHEMA_DIR = Path(__file__).resolve().parent / "schemas"
 
 DATASET_XML_SCHEMA_FILE = "BP.dataset.xsd"
 IMAGE_XML_SCHEMA_FILE = "BP.image.xsd"
+POLICY_XML_SCHEMA_FILE = "BP.policy.xsd"
 SAMPLE_XML_SCHEMA_FILE = "BP.sample.xsd"
 STAINING_XML_SCHEMA_FILE = "BP.staining.xsd"
 OBSERVATION_XML_SCHEMA_FILE = "BP.observation.xsd"
@@ -378,6 +380,39 @@ def _get_last_modification_time(
     return max(mtimes) if mtimes else None
 
 
+_TYPE_OF_DATASET_TAG = "type_of_dataset"
+
+# Scope by lower-cased part of 'type_of_dataset' string attribute before the "/".
+_SCOPE_BY_DATASET_TYPE: dict[str, Literal["clinical", "non_clinical"]] = {
+    "clinical": "clinical",
+    "non-clinical": "non_clinical",
+}
+
+
+def _extract_scope(
+    policy_xml: ElementTree, policy_file_path: str
+) -> Literal["clinical", "non_clinical"]:
+    """Extract dataset scope from policy ``type_of_dataset`` attribute.
+
+    The scope before the ``"/"`` is read case-insensitively.
+
+    :raises UserException: if the attribute is missing or its scope is unknown.
+    """
+    for policy in policy_xml.xpath("/POLICY | /POLICY_SET/POLICY"):
+        value = _extract_string_attribute_value(policy, _TYPE_OF_DATASET_TAG)
+        if value is None:
+            continue
+        scope = _SCOPE_BY_DATASET_TYPE.get(value.partition("/")[0].strip().lower())
+        if scope is None:
+            raise UserException(
+                f"Unsupported '{_TYPE_OF_DATASET_TAG}' value {value!r} in {policy_file_path}."
+            )
+        return scope
+    raise UserException(
+        f"Missing '{_TYPE_OF_DATASET_TAG}' attribute in {policy_file_path}."
+    )
+
+
 def extract_documents(
     root: str = "/",
     fs: fsspec.AbstractFileSystem | None = None,
@@ -436,6 +471,7 @@ def extract_dataset_documents(
 
     dataset_file_path = resolve_path(fs, f"{root}/{DATASET_XML_FILE}")
     image_file_path = resolve_path(fs, f"{root}/{IMAGE_XML_FILE}")
+    policy_file_path = resolve_path(fs, f"{root}/{POLICY_XML_FILE}")
     sample_file_path = resolve_path(fs, f"{root}/{SAMPLE_XML_FILE}")
     staining_file_path = resolve_path(fs, f"{root}/{STAINING_XML_FILE}")
     observation_file_path = resolve_path(
@@ -449,6 +485,7 @@ def extract_dataset_documents(
             for file_path in (
                 dataset_file_path,
                 image_file_path,
+                policy_file_path,
                 sample_file_path,
                 staining_file_path,
                 observation_file_path,
@@ -523,6 +560,14 @@ def extract_dataset_documents(
             map_image_key_to_image_ids.setdefault(key, set()).add(image_ids.id)
         _map_ref(xml, "IMAGE_OF", map_slide_key_to_image_ids, image_ids.id)
 
+    # Read policy XML.
+    #
+
+    policy_xml = parse_xml(read_file(fs, policy_file_path, keys))
+    validate_xml(policy_xml, XML_SCHEMA_DIR, POLICY_XML_SCHEMA_FILE)
+    scope = _extract_scope(policy_xml, policy_file_path)
+    is_clinical = scope == "clinical"
+
     # Read sample XML.
     #
 
@@ -579,9 +624,6 @@ def extract_dataset_documents(
 
     # Finished reading XMLs.
 
-    # TODO: support non-clinical datasets.
-    is_clinical = True
-
     # Add dataset fields.
     fields: dict[str, BigpictureFields] = {}
     dataset_image_cnt = len(images)
@@ -591,7 +633,7 @@ def extract_dataset_documents(
             dataset_id=dataset_id,
             image_id=image_id,
             dataset_image_cnt=dataset_image_cnt,
-            scope="clinical" if is_clinical else "non_clinical",
+            scope=scope,
             dataset_short_name=dataset_short_name if is_clinical else None,
             dataset_title=dataset_title,
             dataset_description=dataset_description,

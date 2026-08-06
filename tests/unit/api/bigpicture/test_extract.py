@@ -10,6 +10,7 @@ from lxml import etree
 
 from search_api.api.opensearch.document import build_document
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
+from search_api.exceptions import UserException
 from search_api.api.bigpicture.extract import (
     BigpictureCodeAttributeValue,
     ObjectKey,
@@ -757,3 +758,88 @@ def test_get_last_modification_time_no_files():
 
     assert result is None
     fs.info.assert_not_called()
+
+
+# Scope from the policy's type_of_dataset attribute.
+#
+
+
+def test_extract_scope_clinical(tmp_path):
+    # The dataset_1 scope is Clinical/Anonymized.
+    root = _copy_xml_dir(tmp_path)
+
+    docs = {doc.id: doc for doc in extract_dataset_documents(str(root))}
+    payload = build_document(docs["image_1"].values)
+
+    assert payload["scope"] == "clinical"
+
+
+def test_extract_scope_non_clinical(tmp_path):
+    root = _copy_xml_dir(tmp_path)
+    _replace_in_xml(
+        root / "METADATA" / "policy.xml", "Clinical/Anonymized", "Non-Clinical/Obscured"
+    )
+
+    docs = {doc.id: doc for doc in extract_dataset_documents(str(root))}
+    payload = build_document(docs["image_1"].values)
+
+    assert payload["scope"] == "non_clinical"
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("Clinical/Pseudonymized", "clinical"),
+        ("Non-Clinical/Cryptonymized", "non_clinical"),
+        ("Non-Clinical/Cryptonymised", "non_clinical"),
+        ("clinical/anonymized", "clinical"),
+        ("NON-CLINICAL/OBSCURED", "non_clinical"),
+        (" Clinical / Anonymized ", "clinical"),
+    ],
+)
+def test_extract_scope_supported_dataset_types(tmp_path, value, expected):
+    root = _copy_xml_dir(tmp_path)
+    _replace_in_xml(root / "METADATA" / "policy.xml", "Clinical/Anonymized", value)
+
+    docs = {doc.id: doc for doc in extract_dataset_documents(str(root))}
+
+    assert build_document(docs["image_1"].values)["scope"] == expected
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "Obscured",
+        "Clinical-Anonymized",
+        "Preclinical/Obscured",
+    ],
+)
+def test_extract_scope_unsupported_dataset_types(tmp_path, value):
+    root = _copy_xml_dir(tmp_path)
+    _replace_in_xml(root / "METADATA" / "policy.xml", "Clinical/Anonymized", value)
+
+    with pytest.raises(UserException, match="Unsupported 'type_of_dataset' value"):
+        list(extract_dataset_documents(str(root)))
+
+
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        ("type_of_dataset", "other_tag"),  # attribute absent
+        ("Clinical/Anonymized", ""),  # present but empty, so nothing to read
+    ],
+)
+def test_extract_scope_requires_attribute_and_value(tmp_path, old, new):
+    root = _copy_xml_dir(tmp_path)
+    _replace_in_xml(root / "METADATA" / "policy.xml", old, new)
+
+    with pytest.raises(UserException, match="Missing 'type_of_dataset' attribute"):
+        list(extract_dataset_documents(str(root)))
+
+
+def test_extract_scope_requires_policy_file(tmp_path):
+    root = _copy_xml_dir(tmp_path)
+    (root / "METADATA" / "policy.xml").unlink()
+
+    with pytest.raises(ValueError, match="Missing file: .*policy.xml"):
+        list(extract_dataset_documents(str(root)))

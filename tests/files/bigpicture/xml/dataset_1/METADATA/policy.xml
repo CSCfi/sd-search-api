@@ -1,0 +1,11 @@
+<POLICY_SET>
+    <POLICY alias="1" accession="policy_1">
+        <DATASET_REF alias="1" accession="dataset_1"/>
+        <ATTRIBUTES>
+            <STRING_ATTRIBUTE>
+                <TAG>type_of_dataset</TAG>
+                <VALUE>Clinical/Anonymized</VALUE>
+            </STRING_ATTRIBUTE>
+        </ATTRIBUTES>
+    </POLICY>
+</POLICY_SET>

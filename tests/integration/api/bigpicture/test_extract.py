@@ -28,6 +28,7 @@ _XML_DIR = (
 _XML_METADATA_FILES = [
     "METADATA/dataset.xml",
     "METADATA/image.xml",
+    "METADATA/policy.xml",
     "METADATA/sample.xml",
     "METADATA/staining.xml",
 ]

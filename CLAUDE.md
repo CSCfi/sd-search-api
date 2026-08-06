@@ -112,15 +112,24 @@ ISO-8601 duration tuples become `{gte, lte}` day ranges via `iso8601_duration_to
 ### XML ingestion (`search_api/api/bigpicture/extract.py`)
 
 `extract_documents(root, single_dir, c4gh_private_key_file, c4gh_passphrase) → Iterator[ExtractedDocument]`
-walks a directory tree and reads five XML files per dataset:
+walks a directory tree and reads six XML files per dataset:
 
 | File | Extracts |
 |---|---|
 | `METADATA/dataset.xml` | dataset ID, title, description |
 | `METADATA/image.xml` | image IDs, slide mappings |
+| `METADATA/policy.xml` | `scope` (see below) |
 | `METADATA/sample.xml` | biological beings, cases, specimens, blocks |
 | `METADATA/staining.xml` | staining procedures, substances, targets |
 | `METADATA/observation.xml` | `diagnosis` / `diagnosis_candidate` (optional file) |
+
+`scope` comes from the policy's `type_of_dataset` attribute, whose value is
+`"<scope>/<de-identification>"` (`Clinical/Anonymized`, `Clinical/Pseudonymized`,
+`Non-Clinical/Obscured`, `Non-Clinical/Cryptonymized`). Only the part before the `/` is read, so a
+new de-identification method needs no code change; that part is matched case-insensitively, while
+the tag itself is not (it is the spec's machine name, read via `_extract_string_attribute_value`).
+`_extract_scope` raises `UserException` if the attribute is missing or its scope is not
+`Clinical`/`Non-Clinical`.
 
 It builds ID-chain mappings (image→slide→block→specimen→case→biological being), parses into the
 Bigpicture models below, then `to_opensearch_field_values(fields)` flattens them to

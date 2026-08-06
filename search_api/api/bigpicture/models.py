@@ -64,18 +64,18 @@ BP_SCHEMAS = [
 
 # Filtering terms, groups, scopes, and index-only fields are declared in YAML
 # files and validated on load.
-_FIELDS_CONFIG_PATH = Path(__file__).resolve().parent / "fields.yaml"
+_FIELDS_CONFIG_PATH = Path(__file__).resolve().parent / "config" / "fields.yaml"
 _fields_config = load_fields_config(_FIELDS_CONFIG_PATH)
 
 BP_FILTERING_TERMS = _fields_config.filtering_terms
 BP_NON_FILTERING_FIELDS = _fields_config.non_filtering_fields
 
-_GROUPS_CONFIG_PATH = Path(__file__).resolve().parent / "groups.yaml"
+_GROUPS_CONFIG_PATH = Path(__file__).resolve().parent / "config" / "groups.yaml"
 BP_FILTERING_GROUPS: list[BeaconFilteringGroup] = load_groups_config(
     _GROUPS_CONFIG_PATH
 ).filtering_groups
 
-_SCOPES_CONFIG_PATH = Path(__file__).resolve().parent / "scopes.yaml"
+_SCOPES_CONFIG_PATH = Path(__file__).resolve().parent / "config" / "scopes.yaml"
 BP_FILTERING_SCOPES: list[BeaconFilteringScope] = load_scopes_config(
     _SCOPES_CONFIG_PATH
 ).filtering_scopes

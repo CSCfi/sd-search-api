@@ -14,7 +14,7 @@ from search_api.api.opensearch.services import (
     or_queries,
 )
 from search_api.exceptions import SystemException, UserException
-from search_api.services.ontology import get_ontology_service
+from search_api.services.ontology.service import get_ontology_service
 
 from search_api.api.beacon.models import (
     BeaconFilteringTerm,

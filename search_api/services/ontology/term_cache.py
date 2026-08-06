@@ -6,7 +6,11 @@ from datetime import datetime, timezone
 
 from search_api.database.repository import get_cursor
 from search_api.exceptions import SystemException
-from search_api.services.ontology import OntologyService, TermCache, normalise_term
+from search_api.services.ontology.service import (
+    OntologyService,
+    TermCache,
+    normalise_term,
+)
 
 logger = logging.getLogger(__name__)
 

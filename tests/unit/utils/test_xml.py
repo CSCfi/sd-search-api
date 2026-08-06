@@ -3,7 +3,7 @@ from pathlib import Path
 from lxml import etree
 import pytest
 
-from search_api.services.xml import (
+from search_api.utils.xml import (
     parse_xml,
     validate_xml,
     get_xml_value,

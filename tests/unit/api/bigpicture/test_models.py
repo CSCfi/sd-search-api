@@ -16,7 +16,7 @@ from search_api.api.bigpicture.models import (
 )
 from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorService
 from search_api.api.opensearch.models import OpenSearchOntologyOrValue
-from search_api.bigpicture.services.extract import (
+from search_api.api.bigpicture.extract import (
     BigpictureCodeAttributeValue,
     BigpictureFields,
     BigpictureSpecimenFields,
@@ -34,8 +34,9 @@ _CONTAINER_MODELS = {
 _BP_INDEX_PATH = (
     Path(__file__).resolve().parents[4]
     / "search_api"
-    / "opensearch"
+    / "api"
     / "bigpicture"
+    / "index"
     / "bp-image-index.json"
 )
 

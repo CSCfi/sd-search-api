@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock, patch
 
 from search_api.api.bigpicture.models import BP_FILTERING_TERM_BY_ID
 from search_api.exceptions import SystemException
-from search_api.services import snomed as snomed_module
-from search_api.services.snomed import (
+from search_api.services.ontology import snomed as snomed_module
+from search_api.services.ontology.snomed import (
     SnomedConcept,
     SnomedService,
     import_snomed_release,

@@ -8,8 +8,8 @@ import pytest_asyncio
 
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
 from search_api.database.repository import get_connection
-from search_api.services.snomed import SnomedService
-from search_api.services.ontology_term import (
+from search_api.services.ontology.snomed import SnomedService
+from search_api.services.ontology.term_cache import (
     TERMS_CACHE_TABLE,
     PostgresOntologyTermCacheService,
 )

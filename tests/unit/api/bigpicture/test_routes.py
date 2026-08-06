@@ -38,7 +38,7 @@ from search_api.api.beacon.routes import (
 )
 from search_api.api.exception_handlers import register_exception_handlers
 from search_api.api.models import FieldValue, IndexedFieldValueCounts
-from search_api.services.ontology_term import OntologyTermCacheService
+from search_api.services.ontology.term_cache import OntologyTermCacheService
 
 app = FastAPI()
 app.include_router(make_beacon_router(BP_DOMAIN))

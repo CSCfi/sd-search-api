@@ -16,9 +16,9 @@ from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
 from search_api.api.bigpicture.models import BP_DOCUMENT_FIELDS
 from search_api.exceptions import SystemException
 from search_api.api.opensearch.models import ExtractedDocument, OpenSearchFieldValue
-from search_api.services.crypt import load_c4gh_keys, read_file, resolve_path
-from search_api.services.dir import list_directories
-from search_api.services.xml import parse_xml, validate_xml, get_xml_value
+from search_api.utils.crypt import load_c4gh_keys, read_file, resolve_path
+from search_api.utils.dir import list_directories
+from search_api.utils.xml import parse_xml, validate_xml, get_xml_value
 
 
 # Parsing models for Bigpicture XML, converted to OpenSearchFieldValues by to_opensearch_field_values.
@@ -171,9 +171,7 @@ SAMPLE_XML_FILE = "METADATA/sample.xml"
 STAINING_XML_FILE = "METADATA/staining.xml"
 OBSERVATION_XML_FILE = "METADATA/observation.xml"
 
-XML_SCHEMA_DIR = (
-    Path(__file__).resolve().parent.parent.parent / "schemas" / "bigpicture"
-)
+XML_SCHEMA_DIR = Path(__file__).resolve().parent / "schemas"
 
 DATASET_XML_SCHEMA_FILE = "BP.dataset.xsd"
 IMAGE_XML_SCHEMA_FILE = "BP.image.xsd"

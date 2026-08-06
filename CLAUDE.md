@@ -44,6 +44,29 @@ all deployment-specific behaviour is captured in a `Domain`, and the generic mac
 lifespan, load/sync, ontology resolution) is built from it. Bigpicture (digital pathology image
 search) is currently the only deployment.
 
+### Package layout
+
+```
+search_api/
+├── api/                # HTTP layer + per-deployment packages
+│   ├── {admin,auth,beacon,opensearch}/      # generic routers and services
+│   └── bigpicture/     # everything Bigpicture-specific lives here, nowhere else:
+│       ├── domain.py models.py ai.py opensearch.py extract.py
+│       ├── config/     # hand-edited fields/groups/scopes YAML
+│       ├── index/      # GENERATED OpenSearch mapping (generate-index writes it)
+│       └── schemas/    # XSDs used to validate the ingested XML
+├── services/           # generic services
+│   ├── ontology/       # service.py registrations.py term_cache.py cached.py snomed.py send.py
+│   ├── auth.py session.py
+│   └── load.py sync.py
+├── utils/              # stateless helpers: crypt.py dir.py xml.py
+├── ai/  database/  conf.py  exceptions.py  main.py
+```
+
+All deployment files sit under one directory, so every data path resolves with a plain
+`Path(__file__).parent / …` — no traversal back out of the package. `config/` vs `index/` marks
+which files are hand-edited and which are generated.
+
 ### Deployment seam: `Domain` (`search_api/api/domain.py`)
 
 `main.py` selects one deployment by the `DEPLOYMENT_TYPE` env var, looks it up in the registry
@@ -86,7 +109,7 @@ The OpenSearch-shaped payload is produced at **load** time by `build_document`
 (`api/opensearch/document.py`), which converts each `OpenSearchFieldValue`; `age_at_extraction`
 ISO-8601 duration tuples become `{gte, lte}` day ranges via `iso8601_duration_to_days`.
 
-### XML ingestion (`search_api/bigpicture/services/extract.py`)
+### XML ingestion (`search_api/api/bigpicture/extract.py`)
 
 `extract_documents(root, single_dir, c4gh_private_key_file, c4gh_passphrase) → Iterator[ExtractedDocument]`
 walks a directory tree and reads five XML files per dataset:
@@ -104,7 +127,7 @@ Bigpicture models below, then `to_opensearch_field_values(fields)` flattens them
 `OpenSearchFieldValue`s keyed by the fields declared in `BP_DOCUMENT_FIELDS`. `age_at_extraction`
 is an ISO-8601 duration tuple `(start, end)` — e.g. `("P40Y", "P41Y")` — computed by
 `_add_iso8601_durations` (uses `isodate`, normalises month overflow); invalid durations are logged
-and dropped. `.c4gh`-encrypted XML is decrypted on the fly (`services/crypt.py`).
+and dropped. `.c4gh`-encrypted XML is decrypted on the fly (`utils/crypt.py`).
 
 The parsing models are also in `extract.py`; `BigpictureFields` is the per-image root, holding the
 ids, `scope`, the dataset fields, `diagnosis`/`diagnosis_candidate`, and the `specimen` and
@@ -118,7 +141,7 @@ JSON-serialisable).
 
 ### Configurable fields (YAML)
 
-Indexed fields and filtering terms are declared in `api/bigpicture/fields.yaml` and loaded by
+Indexed fields and filtering terms are declared in `api/bigpicture/config/fields.yaml` and loaded by
 `api/fields.py` (`load_fields_config`) into `BP_DOCUMENT_FIELDS` / `BP_FILTERING_TERMS`
 (`api/bigpicture/models.py`). The OpenSearch index mapping JSON is generated from these fields by
 `OpenSearchIndexGeneratorService` (`api/opensearch/index_generator.py`) via the
@@ -159,7 +182,7 @@ Admin routes (`api/admin/routes.py`, `/admin` prefix, mounted only when `ADMIN_K
 `/admin/snomed/fields/{field_id}/unexpected_concepts`.
 
 Auth routes (`api/auth/routes.py`, always mounted): `GET /login`, `GET /callback`, `GET /logout` —
-an OIDC relying party (`services/auth_service.py`) that issues a session JWT cookie. Configured by
+an OIDC relying party (`services/auth.py`) that issues a session JWT cookie. Configured by
 `OIDCConfiguration` / `JWTConfiguration` in `conf.py`.
 
 The BeaconService abstraction lives in `api/beacon/services.py` (`BeaconService` ABC,
@@ -186,7 +209,7 @@ Filters mapping to multiple OpenSearch fields are combined with `or_queries`; fi
 or `staining` are wrapped in nested queries. Response granularity (`boolean` / `count` / `record`)
 comes from `request.query.requestedGranularity`.
 
-### Ontology providers (`search_api/services/ontology.py`)
+### Ontology providers (`search_api/services/ontology/service.py`)
 
 `OntologyService` (ABC) abstracts term resolution for one ontology: `is_concept_id`,
 `get_preferred_terms`, and `prepare_ontology_filter`. `prepare_ontology_filter` is a template
@@ -211,12 +234,12 @@ an **ontology id** (e.g. `SCTID`) to its provider via `register_ontology_service
 `get_ontology_service`, keeping `ontology.py` unaware of concrete providers. A filtering term
 selects its provider by `ontology.id`.
 
-**Every provider is registered in `services/ontologies.py`** — both the ontology service and its
+**Every provider is registered in `services/ontology/registrations.py`** — both the ontology service and its
 preferred term cache factory, for SNOMED and SEND alike. `api/domain.py` imports that module for
 its side effects, so the registries are populated before a domain resolves or initialises an
 ontology. Registering a new provider means adding it there, not adding an import somewhere.
 
-`services/snomed.py` — `SnomedService(OntologyService)` wraps Snowstorm; registered as `SCTID`:
+`services/ontology/snomed.py` — `SnomedService(OntologyService)` wraps Snowstorm; registered as `SCTID`:
 
 - `find_concept(term, ecl, branch)` → `SnomedConcept | None`
 - `find_descendants(concept_id, branch)` → `list[SnomedConcept]` (static)
@@ -239,7 +262,7 @@ procedure: creates a Snowstorm import job, uploads the release archive, then pol
 Snowstorm's own behaviour of dropping completed jobs). Invoked by `scripts/admin.py`'s
 `snomed refresh --release-file <path>`, where `--release-file` is required.
 
-### Ontology term cache (`search_api/services/ontology_term.py`)
+### Ontology term cache (`search_api/services/ontology/term_cache.py`)
 
 A persistent cache mapping `(ontology_id, field_id, concept_id)` → preferred term, served from an
 in-memory dict reloaded from Postgres on a background interval. Appropriate for large ontologies
@@ -254,7 +277,7 @@ indexing a field are cached. All ontologies share the one `terms_cache` table
 - A factory registry (`register_term_cache` / `create_term_caches`) mirrors the ontology-service
   registry; `make_lifespan` builds one cache per ontology in play.
 
-### Cached ontology sources (`search_api/services/cached_ontology.py`)
+### Cached ontology sources (`search_api/services/ontology/cached.py`)
 
 For small, flat ontologies (e.g. SEND) where caching the whole thing is cheap, unlike the
 per-field incremental cache above:
@@ -315,17 +338,18 @@ A working set is in `tests/integration/.env`.
 ## Tests
 
 ```
-tests/
+tests/            # mirrors the search_api/ package layout
 ├── unit/          # run by tox; no external services needed
 │   ├── api/{admin,auth,beacon,bigpicture,opensearch}/
-│   ├── bigpicture/services/
-│   └── services/
+│   ├── services/{ontology/,test_auth.py,test_session.py,test_validate.py}
+│   └── utils/                 # crypt, dir, xml
 ├── integration/   # require Postgres/OpenSearch (route tests hit a running server)
-│   ├── api/bigpicture/        # endpoint tests, incl. AI (test_routes_ai.py, @skip — needs Ollama)
-│   ├── bigpicture/services/   # extract + load against Postgres
+│   ├── api/bigpicture/        # endpoints incl. AI (test_routes_ai.py, @skip — needs Ollama),
+│   │                          # plus extract + load against Postgres
 │   ├── database/, scripts/bigpicture/
-│   └── services/              # term cache, cached ontology, sync (SNOMED hits a live Snowstorm)
+│   └── services/{ontology/,test_sync.py}   # SNOMED hits a live Snowstorm
 ├── performance/   # locust load tests
+├── utils/         # test helpers (generate_data.py)
 └── files/bigpicture/xml/dataset_1/METADATA/   # XML fixtures
 ```
 

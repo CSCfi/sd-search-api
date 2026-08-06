@@ -1,4 +1,4 @@
-"""Unit tests for search_api.services.auth_service.AuthServiceHandler."""
+"""Unit tests for search_api.services.auth.AuthServiceHandler."""
 
 import os
 from base64 import b64encode
@@ -20,7 +20,7 @@ from idpyoidc.client.exception import OidcServiceError
 from requests.exceptions import ConnectionError as RequestsConnectionError
 
 from search_api.exceptions import SystemException
-from search_api.services.auth_service import AuthServiceHandler
+from search_api.services.auth import AuthServiceHandler
 from search_api.services.session import validate_jwt_token
 
 

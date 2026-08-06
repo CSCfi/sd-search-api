@@ -22,18 +22,19 @@ from search_api.services.sync import SyncService
 from search_api.database.document import count_documents
 from search_api.database.repository import get_cursor
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
-from search_api.services.cached_ontology import PostgresOntologyStore
-from search_api.services.ontology import get_ontology_service
-from search_api.services.send import SEND_ONTOLOGY_ID, SendOntologySource
-from search_api.services.ontology_term import create_term_caches
-from search_api.services.snomed import import_snomed_release
+from search_api.services.ontology.cached import PostgresOntologyStore
+from search_api.services.ontology.service import get_ontology_service
+from search_api.services.ontology.send import SEND_ONTOLOGY_ID, SendOntologySource
+from search_api.services.ontology.term_cache import create_term_caches
+from search_api.services.ontology.snomed import import_snomed_release
 
 
 def _index_path(domain: Domain) -> Path:
     return (
         Path(search_api.__file__).parent
-        / "opensearch"
+        / "api"
         / domain.name
+        / "index"
         / f"{domain.opensearch_index}.json"
     )
 

@@ -28,7 +28,7 @@ from datetime import date
 import httpx
 
 from search_api.exceptions import SystemException
-from search_api.services.cached_ontology import (
+from search_api.services.ontology.cached import (
     BootstrapCachedOntologySource,
     CachedOntologySource,
     PostgresOntologyStore,

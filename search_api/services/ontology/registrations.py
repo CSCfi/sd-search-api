@@ -9,15 +9,15 @@ are populated before a domain resolves or initialises an ontology.
 
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
 from search_api.conf import snomed_term_cache_config
-from search_api.services.cached_ontology import CachedOntologyService
-from search_api.services.ontology import register_ontology_service
-from search_api.services.ontology_term import (
+from search_api.services.ontology.cached import CachedOntologyService
+from search_api.services.ontology.service import register_ontology_service
+from search_api.services.ontology.term_cache import (
     OntologyTermCacheService,
     PostgresOntologyTermCacheService,
     register_term_cache,
 )
-from search_api.services.send import SEND_ONTOLOGY_ID, send_ontology_source
-from search_api.services.snomed import SnomedService
+from search_api.services.ontology.send import SEND_ONTOLOGY_ID, send_ontology_source
+from search_api.services.ontology.snomed import SnomedService
 
 
 def _snomed_term_cache() -> OntologyTermCacheService:

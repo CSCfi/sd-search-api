@@ -2,7 +2,7 @@
 
 import pytest
 from search_api.api.bigpicture.models import BP_FILTERING_TERM_BY_ID
-from search_api.services.snomed import SnomedService
+from search_api.services.ontology.snomed import SnomedService
 
 
 @pytest.mark.asyncio

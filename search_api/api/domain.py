@@ -19,15 +19,18 @@ from search_api.api.opensearch.models import (
     OpenSearchField,
 )
 from search_api.api.opensearch.services import create_search
-from search_api.services.ontology import get_ontology_id_by_field, get_ontology_service
-from search_api.services.ontology_term import (
+from search_api.services.ontology.service import (
+    get_ontology_id_by_field,
+    get_ontology_service,
+)
+from search_api.services.ontology.term_cache import (
     OntologyTermCacheService,
     create_term_caches,
 )
 
 # Imported for its side effects: populates the ontology service and term cache
 # registries that this module looks up below.
-import search_api.services.ontologies  # noqa: F401
+import search_api.services.ontology.registrations  # noqa: F401
 
 LoadOptionsT = TypeVar("LoadOptionsT")
 

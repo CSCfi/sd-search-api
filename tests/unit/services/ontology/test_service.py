@@ -16,7 +16,7 @@ from search_api.api.beacon.models import (
     BeaconFilteringTermType,
     BeaconQueryFilter,
 )
-from search_api.services.ontology import OntologyService, normalise_term
+from search_api.services.ontology.service import OntologyService, normalise_term
 
 # Which concept id(s) each term resolves to and the concept id
 # parent/child graph. By convention, concept ids start with C

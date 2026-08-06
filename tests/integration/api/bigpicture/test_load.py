@@ -4,7 +4,7 @@ import uuid
 import pytest
 
 from search_api.api.opensearch.models import ExtractedDocument
-from search_api.bigpicture.services.extract import (
+from search_api.api.bigpicture.extract import (
     BigpictureCodeAttributeValue,
     BigpictureFields,
     BigpictureStainingFields,

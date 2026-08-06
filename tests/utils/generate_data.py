@@ -11,7 +11,7 @@ from pathlib import Path
 
 from search_api.api.bigpicture.models import BP_OPENSEARCH_INDEX
 from search_api.api.opensearch.models import ExtractedDocument
-from search_api.bigpicture.services.extract import (
+from search_api.api.bigpicture.extract import (
     BigpictureFields,
     BigpictureCodeAttributeValue,
     BigpictureStainingFields,
@@ -28,8 +28,9 @@ bp_sync_service = SyncService(BP_OPENSEARCH_INDEX)
 _INDEX_MAPPING_PATH = (
     Path(__file__).resolve().parent.parent.parent
     / "search_api"
-    / "opensearch"
+    / "api"
     / "bigpicture"
+    / "index"
     / "bp-image-index.json"
 )
 

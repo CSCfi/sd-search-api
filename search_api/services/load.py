@@ -10,12 +10,12 @@ from search_api.api.opensearch.document import build_document
 from search_api.api.opensearch.models import ExtractedDocument, OpenSearchFieldValue
 from search_api.database.document import get_modified_at, upsert_document
 from search_api.database.repository import get_cursor
-from search_api.services.ontology import (
+from search_api.services.ontology.service import (
     OntologyService,
     get_ontology_id_by_field,
     get_ontology_service,
 )
-from search_api.services.ontology_term import OntologyTermCacheService
+from search_api.services.ontology.term_cache import OntologyTermCacheService
 
 logger = logging.getLogger(__name__)
 

@@ -7,7 +7,7 @@ tested without Postgres. The store-backed behaviour is covered by
 
 import pytest
 
-from search_api.services.ontology_term import PostgresOntologyTermCacheService
+from search_api.services.ontology.term_cache import PostgresOntologyTermCacheService
 
 FIELD_ID = "species"
 

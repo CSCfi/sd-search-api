@@ -2,7 +2,7 @@ import pytest
 import fsspec
 from pathlib import Path
 
-from search_api.services.dir import list_directories
+from search_api.utils.dir import list_directories
 
 
 @pytest.fixture

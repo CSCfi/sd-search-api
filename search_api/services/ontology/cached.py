@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict
 
 from search_api.api.beacon.models import BeaconFilteringTerm
 from search_api.database.repository import get_cursor
-from search_api.services.ontology import OntologyService, normalise_term
+from search_api.services.ontology.service import OntologyService, normalise_term
 
 logger = logging.getLogger(__name__)
 

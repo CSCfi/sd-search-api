@@ -10,7 +10,7 @@ from lxml import etree
 
 from search_api.api.opensearch.document import build_document
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
-from search_api.bigpicture.services.extract import (
+from search_api.api.bigpicture.extract import (
     BigpictureCodeAttributeValue,
     ObjectKey,
     ObjectIds,

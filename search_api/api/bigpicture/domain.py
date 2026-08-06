@@ -24,7 +24,7 @@ from search_api.api.bigpicture.ai import (
 from search_api.api.bigpicture.opensearch import BigpictureOpenSearchBeaconService
 from search_api.api.domain import Domain, Loader
 from search_api.api.opensearch.models import ExtractedDocument
-from search_api.bigpicture.services.extract import extract_documents
+from search_api.api.bigpicture.extract import extract_documents
 
 
 @dataclass(frozen=True)

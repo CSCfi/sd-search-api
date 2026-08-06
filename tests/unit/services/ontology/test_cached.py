@@ -9,7 +9,7 @@ from search_api.api.beacon.models import (
     BeaconFilteringTerm,
     OntologyRestriction,
 )
-from search_api.services.cached_ontology import (
+from search_api.services.ontology.cached import (
     BootstrapCachedOntologySource,
     CachedOntologySource,
     CachedOntologyConcept,

@@ -12,7 +12,7 @@ from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
 from search_api.api.bigpicture.models import BP_FILTERING_TERMS
 from search_api.api.exception_handlers import register_exception_handlers
 from search_api.api.models import FieldValue, IndexedFieldValueCounts
-from search_api.services.snomed import SnomedService
+from search_api.services.ontology.snomed import SnomedService
 
 _ADMIN_KEY = "test-admin-key"
 os.environ["ADMIN_KEY"] = _ADMIN_KEY

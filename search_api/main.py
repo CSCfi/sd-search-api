@@ -10,7 +10,7 @@ from search_api.api.domain import make_lifespan
 from search_api.api.exception_handlers import register_exception_handlers
 from search_api.api.middlewares import AuthMiddleware
 from search_api.conf import admin_config, deployment_config, jwt_config, oidc_config
-from search_api.services.auth_service import AuthServiceHandler
+from search_api.services.auth import AuthServiceHandler
 
 # uvicorn search_api.main:app --reload
 

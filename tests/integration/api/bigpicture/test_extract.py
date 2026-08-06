@@ -11,7 +11,7 @@ from crypt4gh.lib import encrypt as c4gh_encrypt
 from nacl.public import PrivateKey
 
 from search_api.api.bigpicture.domain import BP_DOMAIN
-from search_api.bigpicture.services.extract import extract_documents
+from search_api.api.bigpicture.extract import extract_documents
 from search_api.database.document import DOCUMENT_TABLE, get_document
 from search_api.database.repository import get_connection
 from search_api.services.load import LoadService

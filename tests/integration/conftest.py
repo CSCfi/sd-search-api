@@ -55,8 +55,9 @@ async def _close_search_client():
 _BP_INDEX_PATH = (
     Path(__file__).resolve().parents[2]
     / "search_api"
-    / "opensearch"
+    / "api"
     / "bigpicture"
+    / "index"
     / "bp-image-index.json"
 )
 

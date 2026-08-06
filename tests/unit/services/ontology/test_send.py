@@ -1,7 +1,7 @@
 import pytest
 
 from search_api.exceptions import SystemException
-from search_api.services.send import (
+from search_api.services.ontology.send import (
     SendOntologySource,
     parse_send_ontology,
     parse_send_ontology_version,

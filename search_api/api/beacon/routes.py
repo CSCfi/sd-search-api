@@ -28,8 +28,8 @@ from search_api.api.domain import Domain
 from search_api.api.models import AIQueryRequest, FieldValue
 from search_api.conf import feature_config
 from search_api.exceptions import SystemException, UserException
-from search_api.services.ontology import get_ontology_service
-from search_api.services.ontology_term import OntologyTermCacheService
+from search_api.services.ontology.service import get_ontology_service
+from search_api.services.ontology.term_cache import OntologyTermCacheService
 
 
 # Dependency providers are module-level so tests can override them by identity

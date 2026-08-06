@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
 from search_api.conf import oidc_config
-from search_api.services.auth_service import AuthServiceHandler
+from search_api.services.auth import AuthServiceHandler
 
 # Binds the login attempt to the browser that started it: /login sets this to the
 # OIDC `state` value and /callback requires it to match the `state` query param.

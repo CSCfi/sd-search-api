@@ -4,8 +4,8 @@ from search_api.api.admin.auth import require_admin
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID, BeaconFilteringTerm
 from search_api.api.models import FieldValue
 from search_api.exceptions import UserException
-from search_api.services.ontology_term import OntologyTermCacheService
-from search_api.services.snomed import SnomedService, is_concept_id
+from search_api.services.ontology.term_cache import OntologyTermCacheService
+from search_api.services.ontology.snomed import SnomedService, is_concept_id
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)])
 

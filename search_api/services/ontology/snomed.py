@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from search_api.api.beacon.models import BeaconFilteringTerm
 from search_api.conf import snowstorm_config as _snowstorm_config
 from search_api.exceptions import SystemException
-from search_api.services.ontology import OntologyService, normalise_term
+from search_api.services.ontology.service import OntologyService, normalise_term
 
 _PAGE_SIZE = 1000
 _CACHE_TTL = 60 * 60 * 24 * 30  # 30 days

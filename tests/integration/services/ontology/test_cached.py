@@ -4,7 +4,7 @@ from uuid import uuid4
 import pytest
 
 from search_api.database.repository import get_connection
-from search_api.services.cached_ontology import (
+from search_api.services.ontology.cached import (
     ONTOLOGY_CACHE_TABLE,
     PostgresOntologyStore,
     CachedOntologyConcept,

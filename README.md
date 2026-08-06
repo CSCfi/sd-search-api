@@ -302,7 +302,7 @@ uv run python scripts/admin.py snomed refresh
 
 #### Generate the OpenSearch index
 
-The OpenSearch index mapping (`search_api/opensearch/bigpicture/bp-image-index.json`) is
+The OpenSearch index mapping (`search_api/api/bigpicture/index/bp-image-index.json`) is
 is generated from the filtered and non-filtered field definitions, so that field names
 and types stay in sync with them.
 After changing them, regenerate and commit the file:

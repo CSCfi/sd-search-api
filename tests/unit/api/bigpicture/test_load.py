@@ -1,5 +1,5 @@
 from search_api.api.opensearch.document import build_document
-from search_api.bigpicture.services.extract import (
+from search_api.api.bigpicture.extract import (
     BigpictureSpecimenFields,
     BigpictureCodeAttributeValue,
     BigpictureFields,

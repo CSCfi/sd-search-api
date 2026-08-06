@@ -8,7 +8,7 @@ from crypt4gh.keys.c4gh import generate as c4gh_generate
 from crypt4gh.lib import encrypt as c4gh_encrypt
 from nacl.public import PrivateKey
 
-from search_api.services.crypt import load_c4gh_keys, read_file, resolve_path
+from search_api.utils.crypt import load_c4gh_keys, read_file, resolve_path
 
 
 # resolve_path

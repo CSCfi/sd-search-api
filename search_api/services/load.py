@@ -88,7 +88,9 @@ class LoadService:
                     and doc.modified_at is not None
                     and existing >= doc.modified_at
                 ):
-                    logger.info("Skipping document %s — not newer than stored.", doc.id)
+                    logger.debug(
+                        "Skipping document %s — not newer than stored.", doc.id
+                    )
                     skipped += 1
                     continue
 

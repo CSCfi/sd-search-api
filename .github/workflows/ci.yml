@@ -72,7 +72,7 @@ jobs:
 
       - name: Build and Tag Image
         run: |
-          docker build -t image-registry.apps.2.rahti.csc.fi/${{ secrets.RAHTI_PROJECT }}/sd-search-api:latest .
+          docker build -f dockerfiles/Dockerfile -t image-registry.apps.2.rahti.csc.fi/${{ secrets.RAHTI_PROJECT }}/sd-search-api:latest .
 
       - name: Push Image
         run: docker push image-registry.apps.2.rahti.csc.fi/${{ secrets.RAHTI_PROJECT }}/sd-search-api:latest

@@ -61,7 +61,10 @@ async def _load(domain: Domain, args: argparse.Namespace) -> None:
 
     logging.info("Loading documents into the database.")
     load_service = LoadService(
-        create_term_caches(domain.ontology_ids), domain.filtering_terms
+        create_term_caches(domain.ontology_ids),
+        domain.filtering_terms,
+        domain.filtering_scopes,
+        domain.filtering_qualifiers,
     )
     await load_service.store_documents(docs_iter)
 

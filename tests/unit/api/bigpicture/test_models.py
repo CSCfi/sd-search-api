@@ -11,24 +11,28 @@ from search_api.api.beacon.models import (
 from search_api.api.bigpicture.models import (
     BP_FILTERING_TERMS,
     BP_FILTERING_TERMS_RESPONSE,
-    BP_NON_FILTERING_FIELDS,
     BP_INFO_RESPONSE,
 )
+from search_api.api.bigpicture.domain import BP_DOMAIN
 from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorService
 from search_api.api.opensearch.models import OpenSearchOntologyOrValue
 from search_api.api.bigpicture.extract import (
     BigpictureCodeAttributeValue,
     BigpictureFields,
+    BigpictureDiagnosisFields,
+    BigpictureFindingFields,
     BigpictureSpecimenFields,
     BigpictureStainingFields,
 )
 from search_api.services.validate import validate_json
 
-# Map each OpenSearch nested-container path to the model that holds its fields.
-_CONTAINER_MODELS = {
+# Map each OpenSearch nested group to the model that holds its fields.
+_GROUP_MODELS = {
     "": BigpictureFields,
     "specimen": BigpictureSpecimenFields,
     "staining": BigpictureStainingFields,
+    "diagnosis": BigpictureDiagnosisFields,
+    "finding": BigpictureFindingFields,
 }
 
 _BP_INDEX_PATH = (
@@ -55,7 +59,8 @@ def test_ontology_model_fields_match_filtering_terms():
     model_field_ids = (
         ontology_field_names(BigpictureSpecimenFields)
         | ontology_field_names(BigpictureStainingFields)
-        | ontology_field_names(BigpictureFields)  # top-level diagnosis fields
+        | ontology_field_names(BigpictureFindingFields)
+        | ontology_field_names(BigpictureDiagnosisFields)
     )
     filtering_term_ids = {
         t.id for t in BP_FILTERING_TERMS if t.type in ("ontology", "ontologyOrValue")
@@ -74,8 +79,8 @@ def test_extracted_fields_match_filtering_terms():
             else [osf]
         )
         for path in paths:
-            container, _, name = path.rpartition(".")
-            model_cls = _CONTAINER_MODELS[container]
+            group, _, name = path.rpartition(".")
+            model_cls = _GROUP_MODELS[group]
             assert name in model_cls.model_fields, (
                 f"filtering-term field {name!r} is not an attribute of {model_cls.__name__}"
             )
@@ -87,9 +92,7 @@ def test_committed_index_matches_generated():
     Run ``python scripts/admin.py Bigpicture generate-index`` after changing the
     filtering terms or index-only fields.
     """
-    generated = OpenSearchIndexGeneratorService(
-        [*BP_NON_FILTERING_FIELDS, *BP_FILTERING_TERMS]
-    ).generate()
+    generated = OpenSearchIndexGeneratorService(BP_DOMAIN.opensearch_fields).generate()
     committed = json.loads(_BP_INDEX_PATH.read_text())
     assert committed == generated
 

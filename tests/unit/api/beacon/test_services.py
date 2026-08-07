@@ -1,13 +1,18 @@
 import pytest
 
 from search_api.api.beacon.models import BeaconQueryFilter
-from search_api.exceptions import UserException
+from search_api.exceptions import SystemException, UserException
 from search_api.api.beacon.services import (
     OpenSearchBeaconService,
     build_opensearch_query,
 )
-from search_api.api.bigpicture.models import BP_FILTERING_TERMS
+from search_api.api.bigpicture.models import (
+    BP_FILTERING_QUALIFIERS,
+    BP_FILTERING_TERMS,
+)
+from search_api.api.bigpicture.opensearch import BigpictureOpenSearchBeaconService
 from search_api.api.opensearch.models import ONTOLOGY_OTHER_VALUE_FIELD_SUFFIX
+from search_api.api.opensearch.services import fetch_indexed_keywords
 
 
 def get_term(field_id: str):
@@ -449,3 +454,161 @@ def test_get_query_scope_clinical_with_filter():
             ]
         }
     }
+
+
+def _service() -> OpenSearchBeaconService:
+    return BigpictureOpenSearchBeaconService(
+        client=None,  # type: ignore[arg-type]
+        index_name="test",
+        filtering_terms=BP_FILTERING_TERMS,
+        filtering_qualifiers=BP_FILTERING_QUALIFIERS,
+    )
+
+
+def test_qualifier_clauses_absent_qualifier_is_not_filtered():
+    """An absent or empty qualifier contributes no clause, so it filters nothing."""
+    service = _service()
+    assert service._qualifier_clauses(None) == {}
+    assert service._qualifier_clauses({}) == {}
+    assert service._qualifier_clauses({"observation": []}) == {}
+
+
+def test_qualifier_clauses_cover_every_group_the_qualifier_names():
+    """One requested qualifier yields one clause per group it qualifies."""
+    clauses = _service()._qualifier_clauses({"observation": ["confirmed"]})
+    assert clauses == {
+        "diagnosis": [{"terms": {"diagnosis.qualifiers": ["observation:confirmed"]}}],
+        "finding": [{"terms": {"finding.qualifiers": ["observation:confirmed"]}}],
+    }
+
+
+def test_get_query_qualifier_joins_the_filter_inside_the_nested_query():
+    service = _service()
+    query = OpenSearchBeaconService._get_query(
+        [BeaconQueryFilter(id="diagnosis", value="73211009")],
+        BP_FILTERING_TERMS,
+        None,
+        service._qualifier_clauses({"observation": ["confirmed"]}),
+    )
+    nested = query["bool"]["must"][0]["nested"]
+    assert nested["path"] == "diagnosis"
+    assert nested["query"]["bool"]["filter"] == [
+        {
+            "bool": {
+                "should": [{"terms": {"diagnosis.diagnosis": ["73211009"]}}],
+                "minimum_should_match": 1,
+            }
+        },
+        {"terms": {"diagnosis.qualifiers": ["observation:confirmed"]}},
+    ]
+
+
+def test_get_query_qualifier_alone_does_not_constrain_an_unfiltered_group():
+    service = _service()
+    query = OpenSearchBeaconService._get_query(
+        [BeaconQueryFilter(id="dataset_title", value="cancer")],
+        BP_FILTERING_TERMS,
+        None,
+        service._qualifier_clauses({"observation": ["candidate"]}),
+    )
+    assert not any("nested" in clause for clause in query["bool"]["must"])
+
+
+# ---------------------------------------------------------------------------
+# Field value counts — restricted by scope and by qualifier
+# ---------------------------------------------------------------------------
+
+# These check the request that gets built.
+
+
+class _BodyCaptured(Exception):
+    """Raised once the request body has been captured, to end the call."""
+
+    def __init__(self, body: dict) -> None:
+        self.body = body
+
+
+class _CapturingSearchClient:
+    """Captures the request body instead of answering it."""
+
+    async def search(self, index: str, body: dict) -> dict:
+        raise _BodyCaptured(body)
+
+
+async def _counts_body(field_id: str, **restrictions) -> dict:
+    """Return the request body that get_indexed_field_value_counts would send."""
+    service = BigpictureOpenSearchBeaconService(
+        client=_CapturingSearchClient(),  # type: ignore[arg-type]
+        index_name="idx",
+        filtering_terms=BP_FILTERING_TERMS,
+        filtering_qualifiers=BP_FILTERING_QUALIFIERS,
+    )
+    try:
+        await service.get_indexed_field_value_counts(field_id, **restrictions)
+    except _BodyCaptured as captured:
+        return captured.body
+    raise AssertionError("no search request was made")
+
+
+@pytest.mark.asyncio
+async def test_field_value_counts_restrict_by_scope_and_qualifier():
+    """Scope restricts the documents counted, a qualifier the group items in them."""
+    body = await _counts_body(
+        "diagnosis", scope="clinical", qualifiers={"observation": ["confirmed"]}
+    )
+
+    assert body["query"] == {"term": {"scope": "clinical"}}
+    group_items = body["aggs"]["group_items"]
+    assert group_items["nested"] == {"path": "diagnosis"}
+    assert group_items["aggs"]["qualified_items"]["filter"] == {
+        "bool": {
+            "filter": [{"terms": {"diagnosis.qualifiers": ["observation:confirmed"]}}]
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_field_value_counts_without_restrictions_count_everything():
+    """Neither axis has a default, so omitting both counts every value."""
+    body = await _counts_body("diagnosis")
+
+    assert "query" not in body
+    assert "qualified_items" not in body["aggs"]["group_items"]["aggs"]
+
+
+@pytest.mark.asyncio
+async def test_field_value_counts_scope_applies_to_a_top_level_field():
+    body = await _counts_body("dataset_title", scope="non_clinical")
+
+    assert body["query"] == {"term": {"scope": "non_clinical"}}
+
+
+@pytest.mark.asyncio
+async def test_field_value_counts_qualifier_ignored_for_an_unqualified_group():
+    """specimen carries no qualifier values, so a qualifier must not zero its counts."""
+    body = await _counts_body("sex", qualifiers={"observation": ["confirmed"]})
+
+    assert "qualified_items" not in body["aggs"]["group_items"]["aggs"]
+
+
+@pytest.mark.asyncio
+async def test_field_value_counts_of_a_grouped_field_ask_for_document_counts():
+    """A grouped field's buckets count items, so reverse_nested is added to climb back."""
+    body = await _counts_body("diagnosis")
+
+    field_values = body["aggs"]["group_items"]["aggs"]["field_values"]
+    assert field_values["aggs"] == {"documents": {"reverse_nested": {}}}
+
+
+@pytest.mark.asyncio
+async def test_group_item_filter_is_rejected_for_a_field_without_a_group():
+    """Dropping it silently would return counts wider than the caller asked for."""
+    with pytest.raises(
+        SystemException, match="Cannot filter the group items of 'dataset_title'"
+    ):
+        await fetch_indexed_keywords(
+            _CapturingSearchClient(),  # type: ignore[arg-type]
+            "idx",
+            "dataset_title",
+            group_item_filter={"bool": {"filter": []}},
+        )

@@ -15,6 +15,7 @@ from search_api.api.beacon.models import (
     BeaconResultSets,
 )
 from search_api.api.bigpicture.models import (
+    BP_FILTERING_QUALIFIERS,
     BigpictureBeaconResultSetResult,
     BigpictureBeaconResultSetsResponse,
 )
@@ -71,7 +72,7 @@ class MockBeaconService(
 ):
     @override
     async def query(
-        self, filters, granularity="record", scope=None
+        self, filters, granularity="record", scope=None, qualifiers=None
     ) -> BeaconResultSets[BigpictureBeaconResultSetResult]:
         return get_mock_query_result()
 
@@ -81,7 +82,7 @@ class MockBeaconService(
 
     @override
     async def get_indexed_field_value_counts(
-        self, field_id: str
+        self, field_id: str, scope=None, qualifiers=None
     ) -> IndexedFieldValueCounts:
         term = self.get_term(field_id)
         if isinstance(term.opensearch_field, OpenSearchOntologyOrValue):
@@ -133,7 +134,7 @@ class MockOntologyTermCacheService(OntologyTermCacheService):
 class MockSuggestionsAndValuesBeaconService(MockBeaconService):
     @override
     async def get_indexed_field_value_counts(
-        self, field_id: str
+        self, field_id: str, scope=None, qualifiers=None
     ) -> IndexedFieldValueCounts:
         if field_id in SUGGESTIONS_AND_VALUES_INDEXED_COUNTS:
             return SUGGESTIONS_AND_VALUES_INDEXED_COUNTS[field_id]
@@ -472,3 +473,89 @@ def test_filtering_term_suggestions_excludes_unexpected():
 
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+def test_filtering_qualifiers(client: TestClient):
+    response = client.get("/filtering_qualifiers")
+    assert response.status_code == 200
+    assert response.json() == [q.model_dump() for q in BP_FILTERING_QUALIFIERS]
+
+
+def test_query_rejects_unknown_qualifier(client: TestClient):
+    request = BeaconQueryRequest(
+        query=BeaconQuery(requestedQualifiers={"certainty": ["confirmed"]})
+    )
+    response = client.post("/query", json=request.model_dump())
+    assert response.status_code == 400
+    assert "Unsupported qualifier" in response.text
+
+
+def test_query_rejects_unknown_qualifier_value(client: TestClient):
+    request = BeaconQueryRequest(
+        query=BeaconQuery(requestedQualifiers={"observation": ["known"]})
+    )
+    response = client.post("/query", json=request.model_dump())
+    assert response.status_code == 400
+    assert "Unsupported value(s) ['known']" in response.text
+
+
+def test_query_accepts_absent_qualifiers(client: TestClient):
+    """An absent qualifier is not filtered on, so the query is valid without one."""
+    request = BeaconQueryRequest(query=BeaconQuery(requestedGranularity="boolean"))
+    assert request.query.requestedQualifiers == {}
+    assert client.post("/query", json=request.model_dump()).status_code == 200
+
+
+@pytest.mark.parametrize("path", ["values", "suggestions"])
+def test_filtering_term_qualifier_param_is_validated(client: TestClient, path: str):
+    params = {"qualifier": "observation:confirmed"}
+    if path == "suggestions":
+        params["term"] = "a"
+    assert client.get(f"/filtering_terms/sex/{path}", params=params).status_code == 200
+
+    # A malformed param names no value.
+    bad = dict(params, qualifier="observation")
+    response = client.get(f"/filtering_terms/sex/{path}", params=bad)
+    assert response.status_code == 400
+    assert "expected '<qualifier id>:<value>'" in response.text
+
+
+@pytest.mark.parametrize("path", ["values", "suggestions"])
+def test_filtering_term_scope_param_is_validated(client: TestClient, path: str):
+    params = {"scope": "clinical"}
+    if path == "suggestions":
+        params["term"] = "a"
+    assert client.get(f"/filtering_terms/sex/{path}", params=params).status_code == 200
+
+    bad = dict(params, scope="preclinical")
+    response = client.get(f"/filtering_terms/sex/{path}", params=bad)
+    assert response.status_code == 400
+    assert "Unsupported scope: 'preclinical'" in response.text
+
+
+@pytest.mark.parametrize("path", ["values", "suggestions"])
+def test_filtering_term_without_scope_or_qualifier_counts_everything(
+    client: TestClient, path: str
+):
+    """Neither axis has a default, so omitting both restricts nothing."""
+    params = {"term": "a"} if path == "suggestions" else {}
+    assert client.get(f"/filtering_terms/sex/{path}", params=params).status_code == 200
+
+
+@pytest.mark.parametrize("path", ["values", "suggestions"])
+def test_filtering_term_rejects_a_scope_the_field_is_not_in(
+    client: TestClient, path: str
+):
+    """diagnosis is clinical-only, so counting it as non-clinical is a client error."""
+    params = {"scope": "non_clinical"}
+    if path == "suggestions":
+        params["term"] = "a"
+    response = client.get(f"/filtering_terms/diagnosis/{path}", params=params)
+    assert response.status_code == 400
+    assert "Field 'diagnosis' is not in scope 'non_clinical'" in response.text
+
+    # Its own scope is accepted.
+    ok = dict(params, scope="clinical")
+    assert (
+        client.get(f"/filtering_terms/diagnosis/{path}", params=ok).status_code == 200
+    )

@@ -1,4 +1,5 @@
 from search_api.api.opensearch.document import build_document
+from search_api.api.opensearch.models import ExtractedDocument
 from search_api.api.bigpicture.extract import (
     BigpictureSpecimenFields,
     BigpictureCodeAttributeValue,
@@ -38,7 +39,9 @@ def test_to_opensearch_field_values():
         },
         staining={BigpictureStainingFields(staining_target="Nucleus")},
     )
-    payload = build_document(to_opensearch_field_values(fields))
+    payload = build_document(
+        ExtractedDocument(id="img", values=to_opensearch_field_values(fields))
+    )
 
     assert payload["image_id"] == "img"
     assert payload["dataset_id"] == "ds"

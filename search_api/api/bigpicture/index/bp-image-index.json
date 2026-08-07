@@ -11,6 +11,9 @@
   },
   "mappings": {
     "properties": {
+      "scope": {
+        "type": "keyword"
+      },
       "image_id": {
         "type": "keyword"
       },
@@ -23,9 +26,6 @@
       "dataset_short_name": {
         "type": "text",
         "analyzer": "english_text"
-      },
-      "scope": {
-        "type": "keyword"
       },
       "dataset_title": {
         "type": "text",
@@ -61,6 +61,9 @@
           },
           "fixation_type_other": {
             "type": "keyword"
+          },
+          "qualifiers": {
+            "type": "keyword"
           }
         }
       },
@@ -81,14 +84,45 @@
           },
           "staining_substance_other": {
             "type": "keyword"
+          },
+          "qualifiers": {
+            "type": "keyword"
           }
         }
       },
       "diagnosis": {
-        "type": "keyword"
+        "type": "nested",
+        "properties": {
+          "diagnosis": {
+            "type": "keyword"
+          },
+          "qualifiers": {
+            "type": "keyword"
+          }
+        }
       },
-      "diagnosis_candidate": {
-        "type": "keyword"
+      "finding": {
+        "type": "nested",
+        "properties": {
+          "finding": {
+            "type": "keyword"
+          },
+          "finding_severity": {
+            "type": "keyword"
+          },
+          "finding_chronicity": {
+            "type": "keyword"
+          },
+          "finding_distribution": {
+            "type": "keyword"
+          },
+          "finding_result_category": {
+            "type": "keyword"
+          },
+          "qualifiers": {
+            "type": "keyword"
+          }
+        }
       }
     }
   }

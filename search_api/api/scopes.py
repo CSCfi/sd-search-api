@@ -8,7 +8,37 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from search_api.api.beacon.models import BeaconFilteringScope, BeaconFilteringTerm
 from search_api.api.fields import _format_validation_error
-from search_api.exceptions import ConfigurationException
+from search_api.api.opensearch.models import OpenSearchField
+from search_api.exceptions import ConfigurationException, UserException
+
+
+SCOPE_FIELD = "scope"
+
+
+def scope_field() -> OpenSearchField:
+    """Returns the OpenSearch field a document's scope is indexed in."""
+    return OpenSearchField(id=SCOPE_FIELD, type="keyword")
+
+
+def validate_document_scope(
+    scope: str | None, filtering_scopes: Sequence[BeaconFilteringScope]
+) -> None:
+    """Check an extracted document's scope against the declared scopes.
+
+    A document must carry a scope when the deployment declares any, so that a
+    scoped query cannot silently miss it.
+
+    :raises UserException: if the scope is missing or is not declared.
+    """
+    if not filtering_scopes:
+        return
+    valid = {s.id for s in filtering_scopes}
+    if scope is None:
+        raise UserException(f"Missing scope; valid scopes: {sorted(valid)}.")
+    if scope not in valid:
+        raise UserException(
+            f"Unsupported scope: {scope!r}. Valid scopes: {sorted(valid)}."
+        )
 
 
 class ScopesConfig(BaseModel):

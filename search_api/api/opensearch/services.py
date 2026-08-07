@@ -120,50 +120,128 @@ async def index_documents(
         raise SystemException(f"{failed} document(s) failed to index")
 
 
+# Names the reverse_nested aggregation that counts documents rather than group items.
+_DOCUMENTS_AGG_NAME = "documents"
+
+_MAX_KEYWORD_VALUES = 10000  # Upper bound on distinct values for one field.
+
+
 @cached(ttl=_FETCH_INDEXED_KEYWORDS_TTL)
 async def fetch_indexed_keywords(
-    search: AsyncOpenSearch, index_name: str, field_name: str
+    search: AsyncOpenSearch,
+    index_name: str,
+    field_name: str,
+    *,
+    document_filter: dict[str, Any] | None = None,
+    group_item_filter: dict[str, Any] | None = None,
 ) -> dict[str, int]:
-    """Return all keyword values and their document counts for a keyword field.
+    """Return each distinct value of a keyword field with its count.
 
-    For nested fields (e.g. ``"blocks.species"``) a nested aggregation is used
-    automatically.
+    Example for ``field_name="diagnosis.diagnosis"`` over document::
+        {
+         "scope": "clinical",
+         "diagnosis": [{"diagnosis": "73211009",
+                        "qualifiers": ["observation:confirmed"]},
+                       {"diagnosis": "38341003",
+                        "qualifiers": ["observation:candidate"]}]
+        }
+
+    called with
+    ``document_filter={"term": {"scope": "clinical"}}``
+    and
+    ``group_item_filter={"terms": {"diagnosis.qualifiers": ["observation:confirmed"]}}``,
+
+    The request body built is::
+
+        {"size": 0,                                    # aggregations only, no hits
+         "query": {"term": {"scope": "clinical"}},     # document_filter: which documents
+         "aggs": {"group_items": {                     # count over the diagnosis items
+           "nested": {"path": "diagnosis"},
+           "aggs": {"qualified_items": {               # group_item_filter: which items
+             "filter": {"terms": {"diagnosis.qualifiers": ["observation:confirmed"]}},
+             "aggs": {"field_values": {                # one bucket per diagnosis value
+               "terms": {"field": "diagnosis.diagnosis"},
+               "aggs": {"documents": {                 # count documents, not items
+                 "reverse_nested": {}}}}}}}}}}
+
+    The response nests using the aggregation names::
+
+        {"aggregations": {
+          "group_items": {
+           "qualified_items": {
+            "field_values": {
+             "buckets": [{"key": "73211009",
+                          "doc_count": 2,               # matching items
+                          "documents": {"doc_count": 1}}]}}}}}
+
+        ->  {"73211009": 1}
+
+    A bucket's own ``doc_count`` counts group items, so one document holding two
+    matching items would count twice for the same value. The reverse_nested
+    aggregation climbs back to the documents, and its count is the one returned.
+
+    A field with no group has no wrappers: ``field_values`` sits directly under
+    ``aggs``, its buckets already count documents, and no reverse_nested is added.
 
     Args:
         search: OpenSearch client.
         index_name: OpenSearch index to query.
         field_name: Full dotted field path.
+        document_filter: Restricts which documents are included.
+        group_item_filter: Restricts which of a group's items within those
+            documents are included. Nested fields only.
 
     Returns:
-        Mapping of keyword value to document count.
+        Mapping of keyword value to the number of documents carrying it.
     """
-    parts = field_name.split(".", 1)
-    if len(parts) == 2:
-        nested_path = parts[0]
-        body: dict[str, Any] = {
-            "size": 0,
-            "aggs": {
-                "nested_values": {
-                    "nested": {"path": nested_path},
-                    "aggs": {
-                        "values": {"terms": {"field": field_name, "size": 10000}},
-                    },
-                }
-            },
-        }
-        resp = await search.search(index=index_name, body=body)
-        buckets = resp["aggregations"]["nested_values"]["values"]["buckets"]
-    else:
-        body = {
-            "size": 0,
-            "aggs": {
-                "values": {"terms": {"field": field_name, "size": 10000}},
-            },
-        }
-        resp = await search.search(index=index_name, body=body)
-        buckets = resp["aggregations"]["values"]["buckets"]
+    nested_path, separator, _ = field_name.partition(".")
+    is_nested = bool(separator)
 
-    return {bucket["key"]: bucket["doc_count"] for bucket in buckets}
+    if group_item_filter is not None and not is_nested:
+        raise SystemException(
+            f"Cannot filter the group items of '{field_name}' because the field is not in a group."
+        )
+
+    # Aggregations are built from the inside out. A bucket's own doc_count counts
+    # group items, so for a field in a group reverse_nested climbs back to the
+    # documents holding those items and counts documents instead.
+    field_values: dict[str, Any] = {
+        "terms": {"field": field_name, "size": _MAX_KEYWORD_VALUES}
+    }
+    if is_nested:
+        field_values["aggs"] = {_DOCUMENTS_AGG_NAME: {"reverse_nested": {}}}
+    aggregations: dict[str, Any] = {"field_values": field_values}
+    if group_item_filter is not None:
+        aggregations = {
+            "qualified_items": {"filter": group_item_filter, "aggs": aggregations}
+        }
+    if is_nested:
+        aggregations = {
+            "group_items": {"nested": {"path": nested_path}, "aggs": aggregations}
+        }
+
+    # "size": 0 discards the matching hits, leaving only the aggregations.
+    body: dict[str, Any] = {"size": 0, "aggs": aggregations}
+    if document_filter is not None:
+        body["query"] = document_filter
+
+    response = await search.search(index=index_name, body=body)
+
+    # The response nests like the request.
+    result = response["aggregations"]
+    if is_nested:
+        result = result["group_items"]
+    if group_item_filter is not None:
+        result = result["qualified_items"]
+
+    return {
+        bucket["key"]: (
+            bucket[_DOCUMENTS_AGG_NAME]["doc_count"]
+            if is_nested
+            else bucket["doc_count"]
+        )
+        for bucket in result["field_values"]["buckets"]
+    }
 
 
 def build_match_query(field_id: str, value: str) -> dict[str, Any]:

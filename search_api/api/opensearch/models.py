@@ -103,6 +103,9 @@ class OpenSearchFieldValue(BaseModel):
     value: str | int | tuple[str, str]
     index: int = 0
 
+    # Qualifier id -> its values for nested fields.
+    qualifiers: dict[str, list[str]] = Field(default_factory=dict)
+
     @model_validator(mode="after")
     def validate_value(self) -> "OpenSearchFieldValue":
         expected = _VALUE_TYPES[self.field.type]
@@ -121,5 +124,6 @@ class ExtractedDocument(BaseModel):
     """
 
     id: str
-    modified_at: datetime | None = None
+    scope: str | None = None
     values: list[OpenSearchFieldValue]
+    modified_at: datetime | None = None

@@ -5,7 +5,7 @@ import re
 from collections.abc import Iterable, Sequence, Set
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator, Literal, TypeVar, cast
+from typing import Any, Iterator, Literal, TypeVar, cast, get_args
 from lxml.etree import _Element as Element, _ElementTree as ElementTree  # noqa
 
 import fsspec  # type: ignore
@@ -14,7 +14,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
 from search_api.api.bigpicture.models import BP_DOCUMENT_FIELDS
+from search_api.api.qualifiers import QUALIFIERS_FIELD
 from search_api.exceptions import SystemException, UserException
+from search_api.services.ontology.send import SEND_ONTOLOGY_ID
 from search_api.api.opensearch.models import ExtractedDocument, OpenSearchFieldValue
 from search_api.utils.crypt import load_c4gh_keys, read_file, resolve_path
 from search_api.utils.dir import list_directories
@@ -91,6 +93,39 @@ class BigpictureStainingFields(BaseModel):
     staining_target: str | None = None
 
 
+OBSERVATION_QUALIFIER = "observation"
+OBSERVATION_CONFIRMED = "confirmed"
+OBSERVATION_CANDIDATE = "candidate"
+
+
+class BigpictureDiagnosisFields(BaseModel):
+    """Bigpicture clinical diagnosis search fields.
+
+    One instance per distinct diagnosis.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    diagnosis: BigpictureCodeAttributeValue | None = None
+    qualifiers: frozenset[tuple[str, str]] = frozenset()
+
+
+class BigpictureFindingFields(BaseModel):
+    """Bigpicture non-clinical finding search fields.
+
+    One instance per ``Finding`` statement.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    finding: BigpictureCodeAttributeValue | None = None
+    finding_severity: BigpictureCodeAttributeValue | None = None
+    finding_chronicity: BigpictureCodeAttributeValue | None = None
+    finding_distribution: BigpictureCodeAttributeValue | None = None
+    finding_result_category: BigpictureCodeAttributeValue | None = None
+    qualifiers: frozenset[tuple[str, str]] = frozenset()
+
+
 class BigpictureFields(BaseModel):
     """Bigpicture IDs and search fields."""
 
@@ -103,10 +138,24 @@ class BigpictureFields(BaseModel):
     dataset_description: str | None = None
     specimen: set[BigpictureSpecimenFields] = Field(default_factory=set)
     staining: set[BigpictureStainingFields] = Field(default_factory=set)
-    diagnosis: set[BigpictureCodeAttributeValue] = Field(default_factory=set)
-    diagnosis_candidate: set[BigpictureCodeAttributeValue] = Field(default_factory=set)
+    diagnosis: set[BigpictureDiagnosisFields] = Field(default_factory=set)
+    finding: set[BigpictureFindingFields] = Field(default_factory=set)
     # Newest file modification date in the dataset.
     dataset_modified_at: datetime | None = None
+
+
+def _nested_groups() -> tuple[str, ...]:
+    """Return the Bigpicture nested group names."""
+    return tuple(
+        name
+        for name, info in BigpictureFields.model_fields.items()
+        if (args := get_args(info.annotation))
+        and isinstance(args[0], type)
+        and issubclass(args[0], BaseModel)
+    )
+
+
+_NESTED_GROUPS = _nested_groups()
 
 
 def _has_value(value: Any) -> bool:
@@ -122,7 +171,12 @@ def to_opensearch_field_values(fields: BigpictureFields) -> list[OpenSearchField
     """Convert extracted field models to OpenSearch field values."""
     values: list[OpenSearchFieldValue] = []
 
-    def add_value(index: int, field_name: str, value: Any) -> None:
+    def add_value(
+        index: int,
+        field_name: str,
+        value: Any,
+        qualifiers: dict[str, list[str]] | None = None,
+    ) -> None:
         if not _has_value(value):
             return
         field = BP_DOCUMENT_FIELDS.get(field_name)
@@ -130,17 +184,30 @@ def to_opensearch_field_values(fields: BigpictureFields) -> list[OpenSearchField
             raise SystemException(
                 f"Field {field_name!r} is not registered in BP_DOCUMENT_FIELDS"
             )
+        qualifiers = qualifiers or {}
         if isinstance(value, BigpictureCodeAttributeValue):
             values.append(
-                OpenSearchFieldValue(field=field, value=value.code, index=index)
+                OpenSearchFieldValue(
+                    field=field, value=value.code, index=index, qualifiers=qualifiers
+                )
             )
         elif isinstance(value, Set):
-            for item in value:
+            # A multivalued field.
+            for code in value:
                 values.append(
-                    OpenSearchFieldValue(field=field, value=item.code, index=index)
+                    OpenSearchFieldValue(
+                        field=field,
+                        value=code.code,
+                        index=index,
+                        qualifiers=qualifiers,
+                    )
                 )
         elif isinstance(value, (tuple, int, str)):
-            values.append(OpenSearchFieldValue(field=field, value=value, index=index))
+            values.append(
+                OpenSearchFieldValue(
+                    field=field, value=value, index=index, qualifiers=qualifiers
+                )
+            )
         else:
             raise SystemException(
                 f"Field {field_name!r} has an unexpected value type: {type(value).__name__!r}"
@@ -148,16 +215,21 @@ def to_opensearch_field_values(fields: BigpictureFields) -> list[OpenSearchField
 
     # Add root level fields.
     for field_name in type(fields).model_fields:
-        if field_name in BP_DOCUMENT_FIELDS:
+        if field_name in BP_DOCUMENT_FIELDS and field_name not in _NESTED_GROUPS:
             add_value(0, field_name, getattr(fields, field_name))
 
     # Add nested fields.
-    for items in (fields.specimen, fields.staining):
+    for group in _NESTED_GROUPS:
         index = 0
-        for item in items:
+        for item in getattr(fields, group):
+            qualifiers: dict[str, list[str]] = {}
+            for qualifier_id, qualifier_value in getattr(item, QUALIFIERS_FIELD, ()):
+                qualifiers.setdefault(qualifier_id, []).append(qualifier_value)
             before = len(values)
             for field_name in type(item).model_fields:
-                add_value(index, field_name, getattr(item, field_name))
+                if field_name == QUALIFIERS_FIELD:
+                    continue
+                add_value(index, field_name, getattr(item, field_name), qualifiers)
             if len(values) > before:
                 # Index advances if a new value was added.
                 index += 1
@@ -181,10 +253,10 @@ SAMPLE_XML_SCHEMA_FILE = "BP.sample.xsd"
 STAINING_XML_SCHEMA_FILE = "BP.staining.xsd"
 OBSERVATION_XML_SCHEMA_FILE = "BP.observation.xsd"
 
-
 # XML <SCHEME> value(s) for each supported ontology scheme.
 _SCHEME_ALIASES: dict[str, frozenset[str]] = {
     SNOMED_ONTOLOGY_ID: frozenset({"snomedct", "snomed", "sct"}),
+    SEND_ONTOLOGY_ID: frozenset({"send"}),
 }
 
 
@@ -653,10 +725,14 @@ def extract_dataset_documents(
             for block_ids in _related_ids(
                 specimen_ids.keys, map_specimen_key_to_block_ids
             ):
+                being_values = biological_being_fields.model_dump()
+                if is_clinical:
+                    # Animal species is a non-clinical field only.
+                    being_values["animal_species"] = None
                 specimen = BigpictureSpecimenFields(
                     **map_block_id_to_fields[block_ids.id].model_dump(),
                     **map_specimen_id_to_fields[specimen_ids.id].model_dump(),
-                    **biological_being_fields.model_dump(),
+                    **being_values,
                 )
                 for image_id in _image_ids_from_blocks(
                     block_ids.keys,
@@ -680,8 +756,9 @@ def extract_dataset_documents(
                 ):
                     fields[image_id].staining.add(staining_fields)
 
-    # Add observation fields.
-    if is_clinical and observation_file_path is not None:
+    # Add observation fields. A clinical dataset carries diagnoses, a
+    # non-clinical one findings; the statement type decides which.
+    if observation_file_path is not None:
 
         def _images_for_ref(_tag: str, ref_keys: Sequence[ObjectKey]) -> set[str]:
             if _tag == _OBSERVATION_IMAGE_REF:
@@ -721,26 +798,45 @@ def extract_dataset_documents(
 
         observation_xml = parse_xml(read_file(fs, observation_file_path, keys))
         validate_xml(observation_xml, XML_SCHEMA_DIR, OBSERVATION_XML_SCHEMA_FILE)
+
         for observation in observation_xml.xpath(
             "/OBSERVATION | /OBSERVATION_SET/OBSERVATION"
         ):
             statement = observation.find("STATEMENT")
-            if statement is None or statement.findtext("STATEMENT_TYPE") != "Diagnosis":
+            if statement is None:
                 continue
-            codes = _extract_diagnoses(statement)
-            if not codes:
+            statement_type = statement.findtext("STATEMENT_TYPE")
+            if statement_type not in ("Diagnosis", "Finding"):
                 continue
             status = statement.findtext("STATEMENT_STATUS")
             for tag in _OBSERVATION_REFS:
                 ref = observation.find(tag)
                 if ref is None:
                     continue
-                # Diagnosis linked directly to an image is considered distinct
-                # regardless of statement status.
-                distinct = tag == _OBSERVATION_IMAGE_REF or status == "Distinct"
-                field_name = "diagnosis" if distinct else "diagnosis_candidate"
-                for image_id in _images_for_ref(tag, _object_keys(ref)):
-                    getattr(fields[image_id], field_name).update(codes)
+                # A statement is always considered confirmed if it is linked directly
+                # to an image.
+                confirmed = tag == _OBSERVATION_IMAGE_REF or status == "Distinct"
+                qualifier_value = (
+                    OBSERVATION_CONFIRMED if confirmed else OBSERVATION_CANDIDATE
+                )
+                ref_image_ids = _images_for_ref(tag, _object_keys(ref))
+                qualifier = {
+                    QUALIFIERS_FIELD: frozenset(
+                        {(OBSERVATION_QUALIFIER, qualifier_value)}
+                    )
+                }
+                if statement_type == "Diagnosis":
+                    group = "diagnosis"
+                    items: list[BaseModel] = [
+                        BigpictureDiagnosisFields(diagnosis=code, **qualifier)
+                        for code in _extract_diagnoses(statement)
+                    ]
+                else:
+                    group = "finding"
+                    finding = _extract_finding(statement, **qualifier)
+                    items = [finding] if finding is not None else []
+                for ref_image_id in ref_image_ids:
+                    getattr(fields[ref_image_id], group).update(items)
                 break
 
     # Return iterator of extracted documents.
@@ -751,6 +847,7 @@ def extract_dataset_documents(
             id=map_image_id_to_document_id[image_id],
             modified_at=bp_fields.dataset_modified_at,
             values=to_opensearch_field_values(bp_fields),
+            scope=bp_fields.scope,
         )
 
 
@@ -911,6 +1008,37 @@ def _extract_diagnoses(
         if not _is_nil(v)
     }
     return set(_filter_by_scheme(codes, SNOMED_ONTOLOGY_ID))
+
+
+# SEND CODE_ATTRIBUTE tag for each finding field.
+_FINDING_TAGS = (
+    ("finding", "MISTRESC"),
+    ("finding_severity", "MISEV"),
+    ("finding_chronicity", "MICHRON"),
+    ("finding_distribution", "MIDISTR"),
+    ("finding_result_category", "MIRESCAT"),
+)
+
+
+def _extract_finding(
+    statement: ElementTree, qualifiers: frozenset[tuple[str, str]]
+) -> BigpictureFindingFields | None:
+    """Build one finding from a ``Finding`` statement, or None if it holds none.
+
+    If a tag repeats within a statement the first value is used.
+    """
+    code_attributes = statement.xpath("CODE_ATTRIBUTES")
+    if not code_attributes:
+        return None
+    values = {
+        field_name: _extract_code_attribute_value(
+            code_attributes[0], tag, SEND_ONTOLOGY_ID, is_attributes=False
+        )
+        for field_name, tag in _FINDING_TAGS
+    }
+    if not any(value is not None for value in values.values()):
+        return None
+    return BigpictureFindingFields(**values, qualifiers=qualifiers)
 
 
 def _extract_anatomical_sites(

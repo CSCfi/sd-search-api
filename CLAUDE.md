@@ -105,13 +105,25 @@ pattern: `BP_DOMAIN`, `BP_LOADER`).
    `SyncService` (`services/sync.py`, constructed with the index name) reads unsynced rows, bulk-indexes
    via `index_documents`, then stamps `synced_at`.
 
-The OpenSearch-shaped payload is produced at **load** time by `build_document`
+The OpenSearch-shaped payload is produced at **load** time by `build_document(document)`
 (`api/opensearch/document.py`), which converts each `OpenSearchFieldValue`; `age_at_extraction`
 ISO-8601 duration tuples become `{gte, lte}` day ranges via `iso8601_duration_to_days`.
 
+`ExtractedDocument` carries three things beyond its values: `id`, `modified_at` and **`scope`**.
+Scope is not a filtering term — it partitions documents rather than being searched — so it lives on
+the document, is indexed at the root under `SCOPE_FIELD` (`api/scopes.py`), and `Domain`
+contributes that field to `opensearch_fields` whenever the deployment declares any scope.
+An `OpenSearchFieldValue` additionally carries **`qualifiers`** (`{qualifier id: [values]}`); the
+qualifiers of every value sharing a nested `(group, index)` are merged into that one nested item, so
+stating them on a single value of the item is enough.
+
+`LoadService.validate_document` is the boundary where a deployment's extraction meets the generic
+store: it checks `scope` against `filtering_scopes` and every qualifier id/value against
+`filtering_qualifiers`, so each extractor does not restate the declared configuration.
+
 ### XML ingestion (`search_api/api/bigpicture/extract.py`)
 
-`extract_documents(root, single_dir, c4gh_private_key_file, c4gh_passphrase) → Iterator[ExtractedDocument]`
+`extract_documents(root, fs, single_dir, c4gh_private_key_file, c4gh_passphrase) → Iterator[ExtractedDocument]`
 walks a directory tree and reads six XML files per dataset:
 
 | File | Extracts |
@@ -121,7 +133,7 @@ walks a directory tree and reads six XML files per dataset:
 | `METADATA/policy.xml` | `scope` (see below) |
 | `METADATA/sample.xml` | biological beings, cases, specimens, blocks |
 | `METADATA/staining.xml` | staining procedures, substances, targets |
-| `METADATA/observation.xml` | `diagnosis` / `diagnosis_candidate` (optional file) |
+| `METADATA/observation.xml` | `diagnosis` and `finding` groups, each with the `observation` qualifier (optional file) |
 
 `scope` comes from the policy's `type_of_dataset` attribute, whose value is
 `"<scope>/<de-identification>"` (`Clinical/Anonymized`, `Clinical/Pseudonymized`,
@@ -139,9 +151,20 @@ is an ISO-8601 duration tuple `(start, end)` — e.g. `("P40Y", "P41Y")` — com
 and dropped. `.c4gh`-encrypted XML is decrypted on the fly (`utils/crypt.py`).
 
 The parsing models are also in `extract.py`; `BigpictureFields` is the per-image root, holding the
-ids, `scope`, the dataset fields, `diagnosis`/`diagnosis_candidate`, and the `specimen` and
-`staining` sets. `BigpictureSpecimenFields` flattens the biological being, specimen and block
+ids, `scope`, the dataset fields, and the `specimen`, `staining`, `diagnosis` and `finding` sets. `BigpictureSpecimenFields` flattens the biological being, specimen and block
 fields into one model (see the grouping rationale in `fields.yaml`).
+
+`scope` is not in `fields.yaml` — it is `ExtractedDocument.scope`, produced by `_extract_scope`.
+
+An observation statement contributes to the `diagnosis` or `finding` set depending on its
+`STATEMENT_TYPE`; the parsing is otherwise identical, including how statements reach images. Both
+carry the `observation` qualifier (`confirmed` / `candidate`, constants in `extract.py`): a statement
+linked by `IMAGE_REF`, or whose `STATEMENT_STATUS` is `Distinct`, is `confirmed` for the image, and
+anything reaching several images through another ref is a `candidate` for each. Each statement yields
+**one nested item**, carrying the single qualifier value that statement was made under; items are not
+merged across statements. The group is a `set`, so a statement repeated verbatim for an image
+collapses. The same codes stated `confirmed` by one statement and `candidate` by another therefore
+appear as two items — which no consumer can see, since facet counts are document counts.
 
 Because `specimen` and `staining` are held in `set`s their models must be hashable — hence
 `frozen=True`, and `frozenset` for `anatomical_site`. The `@field_serializer` on `anatomical_site`
@@ -167,6 +190,42 @@ ontologyRestriction:
   include_descendants: true      # the subtree; false means exactly these concepts
 ```
 
+### Filtering qualifiers (`api/qualifiers.py`, `config/qualifiers.yaml`)
+
+A **qualifier** is a second axis on the values of a nested group. Where a scope partitions
+documents, a qualifier labels the values *within* a group. The indexed field is multivalued, so a
+group item can carry several qualifier values, though Bigpicture sets exactly one per item. This
+replaces duplicating a field into known/candidate copies:
+Bigpicture declares one qualifier, `observation` (`confirmed` / `candidate`), over the `diagnosis`
+and `finding` groups.
+
+```yaml
+filtering_qualifiers:
+  - id: observation
+    values: [ confirmed, candidate ]
+    groups: [ diagnosis, finding ]   # nested groups whose values it qualifies
+```
+
+A qualifier is **not** a filtering term, so it is absent from `BP_DOCUMENT_FIELDS`. Every nested
+group holds all of its qualifier values in **one** multivalued `keyword` field,
+`<group>.qualifiers` (`QUALIFIERS_FIELD`), with each value encoded as `<qualifier id>:<value>` by
+`encode_qualifier_value` — e.g. `observation:confirmed`. `Domain.opensearch_fields` emits that field
+for **every** nested group, not only the qualified ones, so declaring a qualifier — or applying an
+existing one to another group — never requires an index recreate.
+
+`groups` therefore no longer drives the mapping; it declares where a qualifier is *meaningful*, which
+the query side still needs: applying a qualifier clause to a group that carries no qualifier values
+would match nothing and silently zero the results.
+
+`validate_filtering_qualifiers` rejects a qualifier naming an unknown group, a duplicate id, a
+filtering term that would collide with the reserved `qualifiers` field, and an id or value containing
+the reserved `:` separator.
+
+A query restricts a qualifier via `BeaconQuery.requestedQualifiers` (`{qualifier id: [values]}`) or,
+on the values/suggestions endpoints, a repeatable `qualifier=<id>:<value>` param. **A qualifier that
+is absent is not filtered on**, so all of its values match — there is no default.
+`validate_requested_qualifiers` checks ids and values, and is shared by the router and the loader.
+
 ### API layer & routes
 
 The Beacon router is generic, built per domain by `make_beacon_router(domain)`
@@ -180,10 +239,16 @@ override them via `app.dependency_overrides`.
 | `GET /filtering_terms` | Available filter definitions |
 | `GET /filtering_groups` | UI groupings of filtering terms |
 | `GET /filtering_scopes` | Available scopes (e.g. `clinical` / `non_clinical`) |
+| `GET /filtering_qualifiers` | Available qualifiers of the values in a nested group |
 | `POST /query` | Beacon V2 search |
 | `POST /ai/query` | Natural-language search (gated by `FEATURE_AI`) |
 | `GET /filtering_terms/{field_id}/values` | Indexed values with counts; ontology fields resolve concept IDs to preferred terms |
 | `GET /filtering_terms/{field_id}/suggestions` | Autocomplete restricted to indexed values |
+
+`values` and `suggestions` both accept `scope=<id>` and repeatable `qualifier=<id>:<value>`, and
+restrict their counts by both. Neither has a default: omitting one does not filter on it. A scope the
+field does not declare is a `400` rather than an empty list, since the field is never indexed for
+those documents (`validate_field_scope`).
 | `GET /health` | Health check |
 
 Admin routes (`api/admin/routes.py`, `/admin` prefix, mounted only when `ADMIN_KEY` set, SNOMED-specific):
@@ -214,8 +279,20 @@ builder (`api/opensearch/services.py`):
 | `ontology` / `ontologyOrValue` | `build_term_query` | exact concept-ID match |
 | `iso8601Range` | `build_iso8601_range_query` | ISO-8601 duration range, converted to days |
 
-Filters mapping to multiple OpenSearch fields are combined with `or_queries`; filters on `specimen`
-or `staining` are wrapped in nested queries. Response granularity (`boolean` / `count` / `record`)
+Filters mapping to multiple OpenSearch fields are combined with `or_queries`; filters on a nested
+group (`specimen`, `staining`, `diagnosis`, `finding`) are wrapped in nested queries. A requested
+qualifier adds a `terms` clause **inside** the nested query of each group it qualifies, so it must
+hold for the very nested item that matched rather than for any item in the group. A group that no
+filter targets gets no nested query, so a qualifier alone never constrains it. `get_indexed_field_value_counts(field_id, scope, qualifiers)` applies both restrictions to the facet
+aggregation so counts match what the equivalent query returns: `scope` becomes the aggregation's
+document `query`, and the qualifier clause becomes `fetch_indexed_keywords`'s `group_item_filter`. Counts
+therefore never overlap — with neither given everything is counted, and a qualifier is only applied
+to the groups that declare it, so it cannot zero an unqualified group's counts.
+
+**Counts are document counts.** A bucket inside a `nested` aggregation counts group items, so a
+`reverse_nested` sub-aggregation (`documents`) climbs back to the documents holding them and its
+count is the one returned. Without it an image with two `Female` specimens would count twice for
+`Female`. Top-level fields need no reverse_nested — their buckets already count documents. Response granularity (`boolean` / `count` / `record`)
 comes from `request.query.requestedGranularity`.
 
 ### Ontology providers (`search_api/services/ontology/service.py`)
@@ -328,7 +405,8 @@ constrains the LLM to emit JSON matching the model; `result.output` is the concr
 
 ### OpenSearch index mapping highlights
 
-- `specimen` and `staining` are **nested** types
+- `specimen`, `staining`, `diagnosis` and `finding` are **nested** types, each with a
+  multivalued `qualifiers` keyword field
 - All code/keyword fields are `keyword` (support array values natively)
 - `age_at_extraction` is `integer_range` — stored as `{gte: <days>, lte: <days>}` (1 year = 365
   days, 1 month = 30 days; invalid input logged and dropped)

@@ -9,6 +9,7 @@ from search_api.api.bigpicture.models import (
     BP_BEACON_NAME,
     BP_DOMAIN_NAME,
     BP_FILTERING_GROUPS,
+    BP_FILTERING_QUALIFIERS,
     BP_FILTERING_SCOPES,
     BP_FILTERING_TERMS,
     BP_NON_FILTERING_FIELDS,
@@ -92,10 +93,11 @@ BP_DOMAIN = Domain(
     filtering_terms=BP_FILTERING_TERMS,
     filtering_groups=BP_FILTERING_GROUPS,
     filtering_scopes=BP_FILTERING_SCOPES,
+    filtering_qualifiers=BP_FILTERING_QUALIFIERS,
     non_filtering_fields=BP_NON_FILTERING_FIELDS,
     loader=BP_LOADER,
     beacon_service_factory=lambda search: BigpictureOpenSearchBeaconService(
-        search, BP_OPENSEARCH_INDEX, BP_FILTERING_TERMS
+        search, BP_OPENSEARCH_INDEX, BP_FILTERING_TERMS, BP_FILTERING_QUALIFIERS
     ),
     beacon_id=BP_BEACON_ID,
     beacon_name=BP_BEACON_NAME,

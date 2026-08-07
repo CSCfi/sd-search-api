@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+from collections.abc import Mapping, Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 
@@ -11,6 +12,8 @@ from search_api.api.beacon.models import (
     BeaconBooleanResponse,
     BeaconCountResponse,
     BeaconFilteringGroup,
+    BeaconFilteringQualifier,
+    BeaconFilteringTerm,
     BeaconFilteringScope,
     BeaconFilteringTerms,
     BeaconFilteringTermsResponse,
@@ -26,6 +29,10 @@ from search_api.api.beacon.models import (
 from search_api.api.beacon.services import BeaconService
 from search_api.api.domain import Domain
 from search_api.api.models import AIQueryRequest, FieldValue
+from search_api.api.qualifiers import (
+    QUALIFIER_VALUE_SEPARATOR,
+    validate_requested_qualifiers,
+)
 from search_api.conf import feature_config
 from search_api.exceptions import SystemException, UserException
 from search_api.services.ontology.service import get_ontology_service
@@ -62,6 +69,47 @@ def make_beacon_router(domain: Domain) -> APIRouter:
     result_sets_response_model = domain.result_sets_response_model
     ontology_id_by_field = domain.ontology_id_by_field
     valid_scopes = {scope.id for scope in domain.filtering_scopes}
+
+    def validate_scope(scope: str | None) -> str | None:
+        """Reject a scope the deployment does not declare."""
+        if scope is not None and scope not in valid_scopes:
+            raise UserException(
+                f"Unsupported scope: {scope!r}. Valid scopes: {sorted(valid_scopes)}."
+            )
+        return scope
+
+    def validate_field_scope(
+        term: BeaconFilteringTerm, scope: str | None
+    ) -> str | None:
+        """Reject a scope the field does not belong to.
+
+        A field is only indexed for documents in its own scopes, so counting its
+        values in another scope would always return nothing.
+        """
+        validate_scope(scope)
+        if scope is not None and scope not in term.scopes:
+            raise UserException(
+                f"Field '{term.id}' is not in scope {scope!r}. "
+                f"Field scopes: {sorted(term.scopes)}."
+            )
+        return scope
+
+    def validate_qualifiers(qualifiers: Mapping[str, Sequence[str]]) -> None:
+        validate_requested_qualifiers(qualifiers, domain.filtering_qualifiers)
+
+    def parse_qualifiers(params: Sequence[str]) -> dict[str, list[str]]:
+        """Parse <qualifier id>:<value> params."""
+        parsed: dict[str, list[str]] = {}
+        for item in params:
+            qualifier_id, separator, value = item.partition(QUALIFIER_VALUE_SEPARATOR)
+            if not separator or not value:
+                raise UserException(
+                    f"Invalid qualifier {item!r}; expected "
+                    f"'<qualifier id>{QUALIFIER_VALUE_SEPARATOR}<value>'."
+                )
+            parsed.setdefault(qualifier_id, []).append(value)
+        validate_qualifiers(parsed)
+        return parsed
 
     # The info and filtering_terms responses share the same beacon meta.
     meta = BeaconInfoMeta(
@@ -105,6 +153,10 @@ def make_beacon_router(domain: Domain) -> APIRouter:
     async def filtering_scopes() -> list[BeaconFilteringScope]:
         return list(domain.filtering_scopes)
 
+    @router.get("/filtering_qualifiers", response_model=list[BeaconFilteringQualifier])
+    async def filtering_qualifiers() -> list[BeaconFilteringQualifier]:
+        return list(domain.filtering_qualifiers)
+
     @router.post(
         "/query",
         response_model=(
@@ -119,14 +171,8 @@ def make_beacon_router(domain: Domain) -> APIRouter:
             get_ontology_term_services
         ),
     ):
-        if (
-            request.query.requestedScope is not None
-            and request.query.requestedScope not in valid_scopes
-        ):
-            raise UserException(
-                f"Unsupported scope: {request.query.requestedScope!r}. "
-                f"Valid scopes: {sorted(valid_scopes)}."
-            )
+        validate_scope(request.query.requestedScope)
+        validate_qualifiers(request.query.requestedQualifiers)
 
         ontology_filters = [
             f for f in request.query.filters if f.id in ontology_id_by_field
@@ -158,7 +204,10 @@ def make_beacon_router(domain: Domain) -> APIRouter:
         granularity = request.query.requestedGranularity
         filters = other_filters + resolved_ontology_filters
         response = await beacon_service.query(
-            filters=filters, granularity=granularity, scope=request.query.requestedScope
+            filters=filters,
+            granularity=granularity,
+            scope=request.query.requestedScope,
+            qualifiers=request.query.requestedQualifiers,
         )
         num_results = len(response.resultSet)
         exists = num_results > 0
@@ -224,6 +273,21 @@ def make_beacon_router(domain: Domain) -> APIRouter:
             default=True,
             description="When True, include free-text ontology field values.",
         ),
+        scope: str | None = Query(
+            default=None,
+            description=(
+                "Count only values of documents in this scope. All scopes are "
+                "counted when it is not given."
+            ),
+        ),
+        qualifier: list[str] = Query(
+            default=[],
+            description=(
+                "Restrict a qualifier to the given values, as '<qualifier id>:<value>'. "
+                "Repeat the parameter for several values. A qualifier that is not "
+                "given is not filtered on, so all of its values are counted."
+            ),
+        ),
         beacon_service: BeaconService = Depends(get_beacon_service),
         ontology_term_services: dict[str, OntologyTermCacheService] = Depends(
             get_ontology_term_services
@@ -254,7 +318,11 @@ def make_beacon_router(domain: Domain) -> APIRouter:
             return any(word.startswith(term_lower) for word in value_lower.split())
 
         if filtering_term.type in ("controlledValue", "keyword"):
-            field_counts = await beacon_service.get_indexed_field_value_counts(field_id)
+            field_counts = await beacon_service.get_indexed_field_value_counts(
+                field_id,
+                validate_field_scope(filtering_term, scope),
+                parse_qualifiers(qualifier),
+            )
             counts = field_counts.counts
             if (
                 filtering_term.type == "controlledValue"
@@ -268,7 +336,11 @@ def make_beacon_router(domain: Domain) -> APIRouter:
                 for v in sorted(v for v in candidates if _matches(v))
             ]
 
-        field_counts = await beacon_service.get_indexed_field_value_counts(field_id)
+        field_counts = await beacon_service.get_indexed_field_value_counts(
+            field_id,
+            validate_field_scope(filtering_term, scope),
+            parse_qualifiers(qualifier),
+        )
         counts = field_counts.counts
         term_service = ontology_term_services[ontology_id_by_field[field_id]]
         preferred_terms = await term_service.get_preferred_terms(
@@ -311,6 +383,20 @@ def make_beacon_router(domain: Domain) -> APIRouter:
             default=True,
             description="When True, include free-text ontology field values.",
         ),
+        scope: str | None = Query(
+            default=None,
+            description=(
+                "Include values in this scope. All values included when scope is not given."
+            ),
+        ),
+        qualifier: list[str] = Query(
+            default=[],
+            description=(
+                "Include values labelled with this qualifier, provided as '<qualifier id>:<value>'. "
+                "Repeat the parameter for several values. A qualifier that is not given is "
+                "not filtered on."
+            ),
+        ),
         beacon_service: BeaconService = Depends(get_beacon_service),
         ontology_term_services: dict[str, OntologyTermCacheService] = Depends(
             get_ontology_term_services
@@ -333,7 +419,11 @@ def make_beacon_router(domain: Domain) -> APIRouter:
                 f"Values are not supported for field '{field_id}' (type '{filtering_term.type}')."
             )
 
-        field_counts = await beacon_service.get_indexed_field_value_counts(field_id)
+        field_counts = await beacon_service.get_indexed_field_value_counts(
+            field_id,
+            validate_field_scope(filtering_term, scope),
+            parse_qualifiers(qualifier),
+        )
         counts = field_counts.counts
 
         if filtering_term.type in ("controlledValue", "keyword"):

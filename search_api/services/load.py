@@ -5,9 +5,15 @@ from collections.abc import Iterator, Sequence
 
 from psycopg import AsyncCursor
 
-from search_api.api.beacon.models import BeaconFilteringTerm
+from search_api.api.beacon.models import (
+    BeaconFilteringQualifier,
+    BeaconFilteringScope,
+    BeaconFilteringTerm,
+)
 from search_api.api.opensearch.document import build_document
 from search_api.api.opensearch.models import ExtractedDocument, OpenSearchFieldValue
+from search_api.api.qualifiers import validate_requested_qualifiers
+from search_api.api.scopes import validate_document_scope
 from search_api.database.document import get_modified_at, upsert_document
 from search_api.database.repository import get_cursor
 from search_api.services.ontology.service import (
@@ -15,6 +21,7 @@ from search_api.services.ontology.service import (
     get_ontology_id_by_field,
     get_ontology_service,
 )
+from search_api.exceptions import UserException
 from search_api.services.ontology.term_cache import OntologyTermCacheService
 
 logger = logging.getLogger(__name__)
@@ -54,15 +61,36 @@ class LoadService:
         self,
         term_caches: dict[str, OntologyTermCacheService],
         filtering_terms: Sequence[BeaconFilteringTerm],
+        filtering_scopes: Sequence[BeaconFilteringScope] = (),
+        filtering_qualifiers: Sequence[BeaconFilteringQualifier] = (),
     ) -> None:
         self._term_caches = term_caches
         self._ontology_id_by_field = get_ontology_id_by_field(filtering_terms)
         self._ontology_by_field = ontology_services_by_field(filtering_terms)
+        self._filtering_scopes = filtering_scopes
+        self._filtering_qualifiers = filtering_qualifiers
 
-    @staticmethod
-    async def store_document(cur: AsyncCursor, doc: ExtractedDocument) -> None:
+    def validate_document(self, doc: ExtractedDocument) -> None:
+        """Check an extracted document's scope and qualifiers against the
+        deployment.
+
+        This is where a deployment's extraction meets the generic service.
+
+        :raises UserException: if the scope or a qualifier value is not declared.
+        """
+        try:
+            validate_document_scope(doc.scope, self._filtering_scopes)
+            for value in doc.values:
+                validate_requested_qualifiers(
+                    value.qualifiers, self._filtering_qualifiers
+                )
+        except UserException as e:
+            raise UserException(f"Document '{doc.id}': {e}") from e
+
+    async def store_document(self, cur: AsyncCursor, doc: ExtractedDocument) -> None:
         """Store one extracted document to the database."""
-        await upsert_document(cur, doc.id, build_document(doc.values), doc.modified_at)
+        self.validate_document(doc)
+        await upsert_document(cur, doc.id, build_document(doc), doc.modified_at)
 
     async def store_documents(self, docs_iter: Iterator[ExtractedDocument]) -> None:
         """
@@ -92,7 +120,7 @@ class LoadService:
                     skipped += 1
                     continue
 
-                await LoadService.store_document(cur, doc)
+                await self.store_document(cur, doc)
                 loaded += 1
                 logger.debug("Loaded document %s.", doc.id)
 

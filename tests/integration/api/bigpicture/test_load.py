@@ -11,6 +11,7 @@ from search_api.api.bigpicture.extract import (
     BigpictureSpecimenFields,
     to_opensearch_field_values,
 )
+from search_api.api.bigpicture.domain import BP_DOMAIN
 from search_api.api.bigpicture.models import BP_OPENSEARCH_INDEX
 from search_api.services.sync import SyncService
 from search_api.database.document import get_document
@@ -67,17 +68,26 @@ async def test_load_and_sync_fields():
     )
 
     sync_service = SyncService(BP_OPENSEARCH_INDEX)
+    load_service = LoadService(
+        term_caches={},
+        filtering_terms=BP_DOMAIN.filtering_terms,
+        filtering_scopes=BP_DOMAIN.filtering_scopes,
+        filtering_qualifiers=BP_DOMAIN.filtering_qualifiers,
+    )
 
     async with get_connection() as conn:
         async with conn.cursor() as cur:
             doc = ExtractedDocument(
-                id=image_id, values=to_opensearch_field_values(fields)
+                id=image_id,
+                scope=fields.scope,
+                values=to_opensearch_field_values(fields),
             )
-            await LoadService.store_document(cur, doc)
+            await load_service.store_document(cur, doc)
 
             payload = await get_document(cur, image_id)
             assert payload is not None
 
+            assert payload["scope"] == "clinical"
             assert payload["image_id"] == image_id
             assert payload["dataset_id"] == dataset_id
             assert payload["dataset_image_cnt"] == dataset_image_cnt

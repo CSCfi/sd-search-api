@@ -1,6 +1,6 @@
 import asyncio
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, Generic, TypeVar, override
 
 from opensearchpy import AsyncOpenSearch
@@ -13,10 +13,13 @@ from search_api.api.opensearch.services import (
     build_iso8601_range_query,
     or_queries,
 )
+from search_api.api.qualifiers import QUALIFIERS_FIELD, encode_qualifier_value
+from search_api.api.scopes import SCOPE_FIELD
 from search_api.exceptions import SystemException, UserException
 from search_api.services.ontology.service import get_ontology_service
 
 from search_api.api.beacon.models import (
+    BeaconFilteringQualifier,
     BeaconFilteringTerm,
     BeaconQueryFilter,
     BeaconQueryGranularity,
@@ -85,6 +88,7 @@ class BeaconService(ABC, Generic[T, S]):
         filters: list[BeaconQueryFilter],
         granularity: BeaconQueryGranularity = "record",
         scope: str | None = None,
+        qualifiers: Mapping[str, Sequence[str]] | None = None,
     ) -> BeaconResultSets[S]:
         pass
 
@@ -94,13 +98,17 @@ class BeaconService(ABC, Generic[T, S]):
 
     @abstractmethod
     async def get_indexed_field_value_counts(
-        self, field_id: str
+        self,
+        field_id: str,
+        scope: str | None = None,
+        qualifiers: Mapping[str, Sequence[str]] | None = None,
     ) -> IndexedFieldValueCounts:
         """Return value counts for the indexed fields mapped to field_id.
 
         For simple fields, only ``counts`` is populated.
         For ``ontologyOrValue`` fields, ``counts`` holds ontology value counts and
         ``other_counts`` holds free-text value counts.
+        ``scope`` and ``qualifiers`` optionally restrict what is counted.
         Raises ValueError if field_id is unknown.
         """
         pass
@@ -119,10 +127,36 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm, S]):
         client: AsyncOpenSearch,
         index_name: str,
         filtering_terms: Sequence[OpenSearchBeaconFilteringTerm],
+        filtering_qualifiers: Sequence[BeaconFilteringQualifier] = (),
     ) -> None:
         super().__init__(filtering_terms)
         self.client = client
         self.index_name = index_name
+        self.filtering_qualifiers = filtering_qualifiers
+
+    def _qualifier_clauses(
+        self, qualifiers: Mapping[str, Sequence[str]] | None
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Return the qualifier filter clauses to apply, keyed by nested path.
+
+        A qualifier filters nested groups by the qualifier id and value. A
+        qualifier that is absent from ``qualifiers`` is not filtered on.
+        Clauses are only produced for the groups that use the particular
+        qualifier.
+        """
+        clauses: dict[str, list[dict[str, Any]]] = {}
+        for qualifier in self.filtering_qualifiers:
+            values = (qualifiers or {}).get(qualifier.id)
+            if not values:
+                continue
+            for group in qualifier.groups:
+                clauses.setdefault(group, []).append(
+                    build_terms_query(
+                        f"{group}.{QUALIFIERS_FIELD}",
+                        [encode_qualifier_value(qualifier.id, v) for v in values],
+                    )
+                )
+        return clauses
 
     @staticmethod
     def _nested_path(field: str | OpenSearchOntologyOrValue) -> str | None:
@@ -146,23 +180,48 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm, S]):
 
     @override
     async def get_indexed_field_value_counts(
-        self, field_id: str
+        self,
+        field_id: str,
+        scope: str | None = None,
+        qualifiers: Mapping[str, Sequence[str]] | None = None,
     ) -> IndexedFieldValueCounts:
-        field = self.get_term(field_id).opensearch_field
+        term = self.get_term(field_id)
+        field = term.opensearch_field
+        document_filter = (
+            build_term_query(SCOPE_FIELD, scope) if scope is not None else None
+        )
+        qualifier_clauses = self._qualifier_clauses(qualifiers).get(term.group or "")
+        group_item_filter = (
+            {"bool": {"filter": qualifier_clauses}} if qualifier_clauses else None
+        )
         if isinstance(field, OpenSearchOntologyOrValue):
             concept_counts, other_counts = await asyncio.gather(
                 fetch_indexed_keywords(
-                    self.client, self.index_name, field.concept_value_field
+                    self.client,
+                    self.index_name,
+                    field.concept_value_field,
+                    document_filter=document_filter,
+                    group_item_filter=group_item_filter,
                 ),
                 fetch_indexed_keywords(
-                    self.client, self.index_name, field.other_value_field
+                    self.client,
+                    self.index_name,
+                    field.other_value_field,
+                    document_filter=document_filter,
+                    group_item_filter=group_item_filter,
                 ),
             )
             return IndexedFieldValueCounts(
                 counts=concept_counts, other_counts=other_counts
             )
         return IndexedFieldValueCounts(
-            counts=await fetch_indexed_keywords(self.client, self.index_name, field)
+            counts=await fetch_indexed_keywords(
+                self.client,
+                self.index_name,
+                field,
+                document_filter=document_filter,
+                group_item_filter=group_item_filter,
+            )
         )
 
     @staticmethod
@@ -170,37 +229,47 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm, S]):
         filters: list[BeaconQueryFilter],
         filtering_terms: Sequence[OpenSearchBeaconFilteringTerm],
         scope: str | None = None,
+        qualifier_clauses: Mapping[str, list[dict[str, Any]]] | None = None,
     ) -> dict[str, Any]:
         """Build an OpenSearch bool/must query from Beacon filters.
 
-        Filters on nested fields are grouped by path and wrapped in nested
-        queries. Top-level filters are added as direct must clauses. Scope
-        restricts to documents of that scope.
+        Filters on fields in a group are collected per group and wrapped in one
+        nested query each. Top-level filters are added as direct must clauses.
+        Scope restricts to documents of that scope. A group's qualifier clauses
+        join its filters inside the same nested query, so both must hold for the
+        very item that matched.
         """
         terms_by_id = {t.id: t for t in filtering_terms}
         must_clauses: list[dict[str, Any]] = []
-        nested_filters: dict[str, list[dict[str, Any]]] = {}
+        filters_by_group: dict[str, list[dict[str, Any]]] = {}
 
         if scope is not None:
-            must_clauses.append(build_term_query("scope", scope))
+            must_clauses.append(build_term_query(SCOPE_FIELD, scope))
 
         for f in filters:
             if f.id not in terms_by_id:
                 raise UserException(f"Unsupported field: {f.id}")
             term = terms_by_id[f.id]
-            path = OpenSearchBeaconService._nested_path(term.opensearch_field)
+            group = OpenSearchBeaconService._nested_path(term.opensearch_field)
             q = build_opensearch_query(term, f.value)
-            if path is None:
+            if group is None:
                 must_clauses.append(q)
             else:
-                nested_filters.setdefault(path, []).append(q)
+                filters_by_group.setdefault(group, []).append(q)
 
-        for path, path_filters in nested_filters.items():
+        for group, group_filters in filters_by_group.items():
             must_clauses.append(
                 {
                     "nested": {
-                        "path": path,
-                        "query": {"bool": {"filter": path_filters}},
+                        "path": group,
+                        "query": {
+                            "bool": {
+                                "filter": [
+                                    *group_filters,
+                                    *(qualifier_clauses or {}).get(group, []),
+                                ]
+                            }
+                        },
                     }
                 }
             )
@@ -225,12 +294,20 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm, S]):
         return results
 
     def get_boolean_query(
-        self, filters: list[BeaconQueryFilter], scope: str | None = None
+        self,
+        filters: list[BeaconQueryFilter],
+        scope: str | None = None,
+        qualifiers: Mapping[str, Sequence[str]] | None = None,
     ) -> dict[str, Any]:
         """Build a query for boolean granularity."""
         return {
             "size": 0,
-            "query": self._get_query(filters, self.filtering_terms, scope),
+            "query": self._get_query(
+                filters,
+                self.filtering_terms,
+                scope,
+                self._qualifier_clauses(qualifiers),
+            ),
         }
 
     @override
@@ -239,15 +316,19 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm, S]):
         filters: list[BeaconQueryFilter],
         granularity: BeaconQueryGranularity = "record",
         scope: str | None = None,
+        qualifiers: Mapping[str, Sequence[str]] | None = None,
     ) -> BeaconResultSets[S]:
         """Execute a query. Boolean query granularity is handled here. Count
         and record granularity is delegated to _get_result."""
 
         if granularity == "boolean":
             resp = await self.client.search(
-                index=self.index_name, body=self.get_boolean_query(filters, scope)
+                index=self.index_name,
+                body=self.get_boolean_query(filters, scope, qualifiers),
             )
             return OpenSearchBeaconService._get_boolean_result(resp)
 
-        query_clause = self._get_query(filters, self.filtering_terms, scope)
+        query_clause = self._get_query(
+            filters, self.filtering_terms, scope, self._qualifier_clauses(qualifiers)
+        )
         return await self._get_result(query_clause, granularity)

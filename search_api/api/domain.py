@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from search_api.ai.models import AISearchResult
 from search_api.api.beacon.models import (
     BeaconFilteringGroup,
+    BeaconFilteringQualifier,
     BeaconFilteringScope,
     BeaconResultSetsResponse,
 )
@@ -19,6 +20,8 @@ from search_api.api.opensearch.models import (
     OpenSearchField,
 )
 from search_api.api.opensearch.services import create_search
+from search_api.api.qualifiers import qualifier_fields
+from search_api.api.scopes import scope_field
 from search_api.services.ontology.service import (
     get_ontology_id_by_field,
     get_ontology_service,
@@ -53,6 +56,7 @@ class Domain:
     filtering_terms: Sequence[OpenSearchBeaconFilteringTerm]
     filtering_groups: Sequence[BeaconFilteringGroup]
     filtering_scopes: Sequence[BeaconFilteringScope]
+    filtering_qualifiers: Sequence[BeaconFilteringQualifier]
     non_filtering_fields: Sequence[OpenSearchField]
     loader: Loader[Any]
     beacon_service_factory: Callable[[Any], BeaconService]
@@ -65,9 +69,24 @@ class Domain:
     ai_result_instructions: str
 
     @property
+    def nested_groups(self) -> set[str]:
+        """The nested groups the filtering terms place fields in."""
+        return {term.group for term in self.filtering_terms if term.group is not None}
+
+    @property
     def opensearch_fields(self) -> list[OpenSearchField]:
-        """All indexed fields (non-filtering first, then filtering terms)."""
-        return [*self.non_filtering_fields, *self.filtering_terms]
+        """Every field indexed for this deployment.
+
+        Filtering terms, index-only fields, the scope field, and
+        the qualifiers field of every nested group.
+        """
+        scope = [scope_field()] if self.filtering_scopes else []
+        return [
+            *scope,
+            *self.non_filtering_fields,
+            *self.filtering_terms,
+            *qualifier_fields(self.nested_groups),
+        ]
 
     @property
     def ontology_id_by_field(self) -> dict[str, str]:

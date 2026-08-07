@@ -5,6 +5,8 @@ metadata:
   namespace: sd-search
   labels:
     app: opensearch-dashboards
+    app.kubernetes.io/part-of: sd-search
+    app.kubernetes.io/name: opensearch-dashboards
 spec:
   replicas: 1
   selector:
@@ -14,6 +16,8 @@ spec:
     metadata:
       labels:
         app: opensearch-dashboards
+        app.kubernetes.io/part-of: sd-search
+        app.kubernetes.io/name: opensearch-dashboards
     spec:
       containers:
         - name: opensearch-dashboards

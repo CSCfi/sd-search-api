@@ -5,6 +5,8 @@ metadata:
   namespace: sd-search
   labels:
     app: sd-search-api
+    app.kubernetes.io/part-of: sd-search
+    app.kubernetes.io/name: sd-search-api
 spec:
   ports:
     - name: http

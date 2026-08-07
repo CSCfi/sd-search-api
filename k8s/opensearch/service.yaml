@@ -5,6 +5,8 @@ metadata:
   namespace: sd-search
   labels:
     app: opensearch
+    app.kubernetes.io/part-of: sd-search
+    app.kubernetes.io/name: opensearch
 spec:
   ports:
     - name: https

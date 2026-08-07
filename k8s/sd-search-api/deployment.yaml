@@ -5,6 +5,8 @@ metadata:
   namespace: sd-search
   labels:
     app: sd-search-api
+    app.kubernetes.io/part-of: sd-search
+    app.kubernetes.io/name: sd-search-api
 spec:
   replicas: 1
   selector:
@@ -14,6 +16,8 @@ spec:
     metadata:
       labels:
         app: sd-search-api
+        app.kubernetes.io/part-of: sd-search
+        app.kubernetes.io/name: sd-search-api
     spec:
       containers:
         - name: sd-search-api

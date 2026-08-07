@@ -5,6 +5,8 @@ metadata:
   namespace: sd-search
   labels:
     app: sd-search-ui
+    app.kubernetes.io/part-of: sd-search
+    app.kubernetes.io/name: sd-search-ui
 spec:
   host: sd-search-ui.apps.example.com
   path: /

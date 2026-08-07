@@ -5,6 +5,8 @@ metadata:
   namespace: sd-search
   labels:
     app: opensearch
+    app.kubernetes.io/part-of: sd-search
+    app.kubernetes.io/name: opensearch
 spec:
   serviceName: opensearch
   replicas: 1
@@ -15,6 +17,8 @@ spec:
     metadata:
       labels:
         app: opensearch
+        app.kubernetes.io/part-of: sd-search
+        app.kubernetes.io/name: opensearch
     spec:
       serviceAccountName: default
       containers:

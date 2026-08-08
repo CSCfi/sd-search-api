@@ -1,7 +1,9 @@
 """Ontology cached in ontology_cache table."""
 
+import asyncio
 import logging
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import override
 
 from psycopg.types.json import Jsonb
@@ -56,13 +58,20 @@ class CachedOntologySource(ABC):
 
 
 class CachedOntologyStore(ABC):
-    """Reads and writes the cached ontology."""
+    """Reads and writes the cached ontology.
+
+    ``updated_at`` lets a reader poll for another process's write without reading
+    the ontology itself, which is a whole concept table.
+    """
 
     @abstractmethod
     async def read(self) -> CachedOntology | None: ...
 
     @abstractmethod
     async def write(self, fetched: CachedOntology) -> None: ...
+
+    @abstractmethod
+    async def updated_at(self) -> datetime | None: ...
 
 
 class PostgresOntologyStore(CachedOntologyStore):
@@ -84,6 +93,15 @@ class PostgresOntologyStore(CachedOntologyStore):
         version, sha256, data = row
         concepts = [CachedOntologyConcept.model_validate(c) for c in data]
         return CachedOntology(version=version, sha256=sha256, concepts=concepts)
+
+    async def updated_at(self) -> datetime | None:
+        async with get_cursor() as cur:
+            await cur.execute(
+                f"SELECT updated_at FROM {ONTOLOGY_CACHE_TABLE} WHERE ontology_id = %s",
+                (self._ontology_id,),
+            )
+            row = await cur.fetchone()
+        return row[0] if row else None
 
     async def write(self, fetched: CachedOntology) -> None:
         data = [c.model_dump(mode="json") for c in fetched.concepts]
@@ -134,15 +152,23 @@ class BootstrapCachedOntologySource(CachedOntologySource):
     def is_newer(self, version: str, other: str) -> bool:
         return self._source.is_newer(version, other)
 
+    async def updated_at(self) -> datetime | None:
+        return await self._store.updated_at()
+
 
 class CachedOntologyService(OntologyService):
     """Cached ontology service.
 
-    Initialised at startup without automatic refresh.
+    Loaded at startup and reloaded when the stored ontology changes.
     """
 
-    def __init__(self, source: BootstrapCachedOntologySource) -> None:
+    def __init__(
+        self, source: BootstrapCachedOntologySource, refresh_interval: float = 300.0
+    ) -> None:
         self._source = source
+        self._refresh_interval = refresh_interval
+        self._updated_at: datetime | None = None
+        self._task: asyncio.Task | None = None
         self._version: str | None = None
         self._by_id: dict[str, CachedOntologyConcept] = {}
         self._by_value: dict[
@@ -178,6 +204,36 @@ class CachedOntologyService(OntologyService):
     @override
     async def init(self) -> None:
         self._set_concepts(await self._source.fetch())
+        self._updated_at = await self._source.updated_at()
+
+    @override
+    def start(self) -> None:
+        """Start the background task that refreshes the cache when it changes."""
+        if self._task is not None and not self._task.done():
+            return
+        self._task = asyncio.create_task(self._refresh_loop())
+
+    @override
+    def stop(self) -> None:
+        """Stop the background task that refreshes the cache when it changes."""
+        if self._task is not None:
+            self._task.cancel()
+            self._task = None
+
+    async def _refresh_loop(self) -> None:
+        while True:
+            await asyncio.sleep(self._refresh_interval)
+            try:
+                updated_at = await self._source.updated_at()
+                if updated_at is None or updated_at == self._updated_at:
+                    continue
+                self._set_concepts(await self._source.fetch())
+                self._updated_at = updated_at
+                logger.info("Refreshed the ontology.")
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Failed to refresh the ontology.")
 
     @override
     def is_concept_id(self, value: str) -> bool:

@@ -21,9 +21,6 @@ data:
   # Snowstorm SNOMED CT server
   SNOWSTORM_URL: "https://snowstorm.example.com"
 
-  # SNOMED term cache refresh interval in seconds
-  SNOMED_CACHE_REFRESH: "300"
-
   # Set to "true" to enable POST /ai/query; also set LLM_* vars in the secret
   FEATURE_AI: "false"
 

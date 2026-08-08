@@ -390,8 +390,10 @@ per-field incremental cache above:
 - `CachedOntologySource` (ABC) — one method, `fetch() -> CachedOntology`.
   `CachedOntologyStore` (ABC) — `read() -> CachedOntology | None` / `write(CachedOntology)`.
 - `CachedOntologyService` — `OntologyService` fed by a `BootstrapCachedOntologySource`; fetches once
-  at startup (`init`) and serves lookups from that in-memory table. No automatic background refresh;
-  a newer release only takes effect on the next process start. Its `_find_concept_ids` hook
+  at startup (`init`) and serves lookups from that in-memory table. `start()` then polls
+  `CachedOntologyStore.updated_at` every `ONTOLOGY_CACHE_REFRESH` seconds and reloads when it moves,
+  so a `send refresh` by the admin CLI reaches a running server without a restart. The watermark is
+  read rather than the ontology itself, so an unchanged store costs one row. Its `_find_concept_ids` hook
   matches a concept id, preferred term or synonym via `normalise_term`, resolving to every concept
   carrying that value and then keeping only those permitted by the field's `ontologyRestriction`
   (in SEND ~260 terms are shared between code lists, so the restriction is what disambiguates
@@ -439,7 +441,7 @@ constrains the LLM to emit JSON matching the model; `result.output` is the concr
 
 Settings come from the environment (pydantic-settings); most fields are **required** (no hardcoded
 host/db/password defaults). Defaults that exist: `POSTGRES_PORT=5432`, `OPENSEARCH_PORT=9200`,
-`DEPLOYMENT_ENV=dev`, `SNOMED_CACHE_REFRESH=300`, `FEATURE_AI=false`, `ADMIN_KEY=None` (admin
+`DEPLOYMENT_ENV=dev`, `TERM_CACHE_REFRESH=300`, `ONTOLOGY_CACHE_REFRESH=300`, `FEATURE_AI=false`, `ADMIN_KEY=None` (admin
 endpoints unmounted when unset), plus `OIDC_SCOPE`, `OIDC_SECURE_COOKIE=true`, `JWT_ISSUER` and
 `JWT_ALGORITHM=HS256`. `DEPLOYMENT_TYPE`, `SNOWSTORM_URL`, `LLM_BASE_URL`/`LLM_API_KEY`, the
 `OIDC_*` client settings and `JWT_KEY` (base64, must decode to ≥32 bytes) have no defaults.

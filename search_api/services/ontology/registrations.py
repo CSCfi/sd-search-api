@@ -8,7 +8,7 @@ are populated before a domain resolves or initialises an ontology.
 """
 
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
-from search_api.conf import snomed_term_cache_config
+from search_api.conf import cache_config
 from search_api.services.ontology.cached import CachedOntologyService
 from search_api.services.ontology.service import register_ontology_service
 from search_api.services.ontology.term_cache import (
@@ -20,21 +20,21 @@ from search_api.services.ontology.send import SEND_ONTOLOGY_ID, send_ontology_so
 from search_api.services.ontology.snomed import SnomedService
 
 
-def _snomed_term_cache() -> OntologyTermCacheService:
+def _term_cache(ontology_id: str) -> OntologyTermCacheService:
     return PostgresOntologyTermCacheService(
-        ontology_id=SNOMED_ONTOLOGY_ID,
-        refresh_interval=snomed_term_cache_config().SNOMED_CACHE_REFRESH,
+        ontology_id=ontology_id,
+        refresh_interval=cache_config().TERM_CACHE_REFRESH,
     )
 
 
-def _send_term_cache() -> OntologyTermCacheService:
-    return PostgresOntologyTermCacheService(ontology_id=SEND_ONTOLOGY_ID)
-
-
 register_ontology_service(SNOMED_ONTOLOGY_ID, SnomedService())
-register_term_cache(SNOMED_ONTOLOGY_ID, _snomed_term_cache)
+register_term_cache(SNOMED_ONTOLOGY_ID, lambda: _term_cache(SNOMED_ONTOLOGY_ID))
 
 register_ontology_service(
-    SEND_ONTOLOGY_ID, CachedOntologyService(send_ontology_source())
+    SEND_ONTOLOGY_ID,
+    CachedOntologyService(
+        send_ontology_source(),
+        refresh_interval=cache_config().ONTOLOGY_CACHE_REFRESH,
+    ),
 )
-register_term_cache(SEND_ONTOLOGY_ID, _send_term_cache)
+register_term_cache(SEND_ONTOLOGY_ID, lambda: _term_cache(SEND_ONTOLOGY_ID))

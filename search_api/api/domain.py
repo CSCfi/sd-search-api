@@ -120,11 +120,17 @@ def make_lifespan(domain: Domain) -> Callable[[FastAPI], Any]:
         app.state.ontology_term_services = ontology_term_services
 
         # Initialise ontology services used by the domain.
-        for ontology_id in domain.ontology_ids:
-            await get_ontology_service(ontology_id).init()
+        ontology_services = [
+            get_ontology_service(ontology_id) for ontology_id in domain.ontology_ids
+        ]
+        for ontology_service in ontology_services:
+            await ontology_service.init()
+            ontology_service.start()
 
         yield
 
+        for ontology_service in ontology_services:
+            ontology_service.stop()
         for term_service in ontology_term_services.values():
             term_service.stop()
         await app.state.search.close()

@@ -2,6 +2,9 @@
 
 from collections.abc import Sequence
 
+import asyncio
+from datetime import datetime, timezone
+
 import pytest
 
 from search_api.api.beacon.models import (
@@ -70,6 +73,7 @@ class MockStore(CachedOntologyStore):
     def __init__(self) -> None:
         self.stored: CachedOntology | None = None
         self.write_count = 0
+        self.stored_at: datetime | None = None
 
     async def read(self) -> CachedOntology | None:
         return self.stored
@@ -77,6 +81,10 @@ class MockStore(CachedOntologyStore):
     async def write(self, fetched: CachedOntology) -> None:
         self.write_count += 1
         self.stored = fetched
+        self.stored_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    async def updated_at(self) -> datetime | None:
+        return self.stored_at
 
 
 def term(
@@ -257,3 +265,54 @@ async def test_bootstrap_source_propagates_live_failure_when_store_is_empty():
 
     with pytest.raises(ConnectionError):
         await source.fetch()
+
+
+# Refresh ontology cache.
+#
+
+
+def _cached_ontology_v1() -> CachedOntology:
+    return CachedOntology(version="2026-01-01", sha256="a", concepts=V1_CONCEPTS)
+
+
+def _cached_ontology_v2() -> CachedOntology:
+    return CachedOntology(version="2026-02-01", sha256="b", concepts=V2_CONCEPTS)
+
+
+def _service(store: MockStore) -> CachedOntologyService:
+    source = BootstrapCachedOntologySource(store, MockSource(_cached_ontology_v1()))
+    return CachedOntologyService(source, refresh_interval=0.01)
+
+
+@pytest.mark.asyncio
+async def test_refresh_cache():
+    store = MockStore()
+    await store.write(_cached_ontology_v1())
+    service = _service(store)
+    await service.init()
+    assert service.is_concept_id("C1")
+
+    # Ontology changed in mock store.
+    store.stored = _cached_ontology_v2()
+    store.stored_at = datetime(2026, 2, 1, tzinfo=timezone.utc)
+
+    service.start()
+    try:
+        await asyncio.sleep(0.05)
+    finally:
+        service.stop()
+
+    assert service.is_concept_id("C6")
+    assert not service.is_concept_id("C1")
+
+
+@pytest.mark.asyncio
+async def test_stop_refresh():
+    service = _service(MockStore())
+    service.start()
+    task = service._task
+    service.stop()
+    await asyncio.sleep(0)
+
+    assert task is not None and task.done()
+    assert service._task is None

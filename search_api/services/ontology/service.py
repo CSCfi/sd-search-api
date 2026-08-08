@@ -115,6 +115,12 @@ class OntologyService(ABC):
     async def init(self) -> None:
         """Perform any startup initialisation"""
 
+    def start(self) -> None:
+        """Start a background task."""
+
+    def stop(self) -> None:
+        """Stop a background task."""
+
 
 def get_ontology_id_by_field(
     filtering_terms: Sequence[BeaconFilteringTerm],

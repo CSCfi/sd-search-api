@@ -194,7 +194,7 @@ filtering_terms:
     group: finding
     scopes: [ non_clinical ]
     label: "Finding"
-    description: "Microscopic finding."
+    description: "Microscopic finding (MISTRESC)."
     ontology:
       id: SEND
     ui_group: "finding"
@@ -204,7 +204,7 @@ filtering_terms:
     group: finding
     scopes: [ non_clinical ]
     label: "Severity"
-    description: "Severity of the microscopic finding."
+    description: "Severity of the microscopic finding (MISEV)."
     ontology:
       id: SEND
     ontologyRestriction:
@@ -217,7 +217,7 @@ filtering_terms:
     group: finding
     scopes: [ non_clinical ]
     label: "Chronicity"
-    description: "Chronicity of the microscopic finding."
+    description: "Chronicity of the microscopic finding (MICHRON)."
     ontology:
       id: SEND
     ontologyRestriction:
@@ -230,7 +230,7 @@ filtering_terms:
     group: finding
     scopes: [ non_clinical ]
     label: "Distribution"
-    description: "Distribution of the microscopic finding."
+    description: "Distribution of the microscopic finding (MIDISTR)."
     ontology:
       id: SEND
     ontologyRestriction:
@@ -243,7 +243,7 @@ filtering_terms:
     group: finding
     scopes: [ non_clinical ]
     label: "Result category"
-    description: "Result category."
+    description: "Result category (MIRESCAT)."
     ontology:
       id: SEND
     ontologyRestriction:

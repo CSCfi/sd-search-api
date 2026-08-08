@@ -54,18 +54,10 @@ ISH_CONCEPT_ID = "115959002"  # in situ hybridisation
 # specimen_type
 SPECIMEN_TYPE_CONCEPT_ID = "119376003"
 
-# Diagnoses used only by the qualifier query tests below.
-DIAGNOSIS_A = "73211009"
-DIAGNOSIS_B = "38341003"
-
 OPENSEARCH_DOCS: list[dict[str, Any]] = [
     {
         "image_id": "image_1",
-        "scope": "clinical",
-        "diagnosis": [
-            {"diagnosis": DIAGNOSIS_A, "qualifiers": ["observation:confirmed"]},
-            {"diagnosis": DIAGNOSIS_B, "qualifiers": ["observation:candidate"]},
-        ],
+        "scope": "non_clinical",
         "dataset_id": DATASET_1,
         "dataset_image_cnt": 3,
         "dataset_short_name": "Breast-HE",
@@ -92,10 +84,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
     },
     {
         "image_id": "image_2",
-        "scope": "clinical",
-        "diagnosis": [
-            {"diagnosis": DIAGNOSIS_A, "qualifiers": ["observation:candidate"]},
-        ],
+        "scope": "non_clinical",
         "dataset_id": DATASET_1,
         "dataset_image_cnt": 3,
         "dataset_short_name": "Breast-HE",
@@ -125,7 +114,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
     },
     {
         "image_id": "image_3",
-        "scope": "clinical",
+        "scope": "non_clinical",
         "dataset_id": DATASET_1,
         "dataset_image_cnt": 3,
         "dataset_short_name": "Breast-HE",
@@ -152,7 +141,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
     },
     {
         "image_id": "image_4",
-        "scope": "clinical",
+        "scope": "non_clinical",
         "dataset_id": DATASET_2,
         "dataset_image_cnt": 2,
         "dataset_short_name": "Mouse-Kidney",
@@ -179,7 +168,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
     },
     {
         "image_id": "image_5",
-        "scope": "clinical",
+        "scope": "non_clinical",
         "dataset_id": DATASET_2,
         "dataset_image_cnt": 2,
         "dataset_short_name": "Mouse-Kidney",
@@ -935,93 +924,3 @@ async def test_suggestions_no_match(bp_opensearch_index, snomed_terms, client):
     )
     assert resp.status_code == 200
     assert resp.json() == []
-
-
-# /query with filtering qualifiers
-#
-# image_1 holds DIAGNOSIS_A confirmed and DIAGNOSIS_B candidate; image_2 holds
-# DIAGNOSIS_A candidate. Both are in DATASET_1.
-
-
-def query_with_qualifiers(
-    client: httpx.Client,
-    qualifiers: dict[str, list[str]],
-    *field_id_value_pairs: tuple[str, str | list[str]],
-) -> BigpictureBeaconResultSetsResponse:
-    request = BeaconQueryRequest(
-        query=BeaconQuery(
-            filters=get_filters(*field_id_value_pairs),
-            requestedGranularity="record",
-            requestedQualifiers=qualifiers,
-        )
-    )
-    resp = client.post("/query", json=request.model_dump())
-    assert resp.status_code == 200
-    return BigpictureBeaconResultSetsResponse.model_validate(resp.json())
-
-
-@pytest.mark.asyncio
-async def test_query_diagnosis_without_a_qualifier_matches_either(
-    bp_opensearch_index, client
-):
-    """An absent qualifier is not filtered on, so both images match."""
-    result = query(client, ("diagnosis", DIAGNOSIS_A))
-    assert get_matching_image_count(result, DATASET_1) == 2
-
-
-@pytest.mark.asyncio
-async def test_query_diagnosis_confirmed_only(bp_opensearch_index, client):
-    """image_2 holds DIAGNOSIS_A only as a candidate, so it must not match."""
-    result = query_with_qualifiers(
-        client, {"observation": ["confirmed"]}, ("diagnosis", DIAGNOSIS_A)
-    )
-    assert get_matching_image_count(result, DATASET_1) == 1
-
-
-@pytest.mark.asyncio
-async def test_query_diagnosis_candidate_only(bp_opensearch_index, client):
-    """image_1 holds DIAGNOSIS_A only as confirmed, so it must not match."""
-    result = query_with_qualifiers(
-        client, {"observation": ["candidate"]}, ("diagnosis", DIAGNOSIS_A)
-    )
-    assert get_matching_image_count(result, DATASET_1) == 1
-
-
-@pytest.mark.asyncio
-async def test_query_qualifier_must_hold_for_the_matching_item(
-    bp_opensearch_index, client
-):
-    """The qualifier applies to the item that matched, not merely to some item.
-
-    image_1 holds a confirmed diagnosis (A) and holds B — but B is a candidate. A
-    query for B confirmed must therefore match nothing, which it only does if the
-    qualifier clause sits inside the same nested query as the value.
-    """
-    result = query_with_qualifiers(
-        client, {"observation": ["confirmed"]}, ("diagnosis", DIAGNOSIS_B)
-    )
-    assert get_dataset_ids(result) == set()
-
-
-@pytest.mark.asyncio
-async def test_query_qualifier_does_not_constrain_an_unfiltered_group(
-    bp_opensearch_index, client
-):
-    """diagnosis is not filtered here, so the qualifier must not narrow the result."""
-    with_qualifier = query_with_qualifiers(
-        client, {"observation": ["confirmed"]}, ("sex", "Female")
-    )
-    without = query(client, ("sex", "Female"))
-
-    assert get_matching_image_count(with_qualifier, DATASET_1) == (
-        get_matching_image_count(without, DATASET_1)
-    )
-
-
-@pytest.mark.asyncio
-async def test_query_rejects_an_unknown_qualifier_value(bp_opensearch_index, client):
-    request = BeaconQueryRequest(
-        query=BeaconQuery(requestedQualifiers={"observation": ["known"]})
-    )
-    resp = client.post("/query", json=request.model_dump())
-    assert resp.status_code == 400

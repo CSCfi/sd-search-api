@@ -1,14 +1,4 @@
 {
-  "settings": {
-    "analysis": {
-      "analyzer": {
-        "english_text": {
-          "type": "standard",
-          "stopwords": "_english_"
-        }
-      }
-    }
-  },
   "mappings": {
     "properties": {
       "scope": {
@@ -25,15 +15,15 @@
       },
       "dataset_short_name": {
         "type": "text",
-        "analyzer": "english_text"
+        "analyzer": "english"
       },
       "dataset_title": {
         "type": "text",
-        "analyzer": "english_text"
+        "analyzer": "english"
       },
       "dataset_description": {
         "type": "text",
-        "analyzer": "english_text"
+        "analyzer": "english"
       },
       "specimen": {
         "type": "nested",

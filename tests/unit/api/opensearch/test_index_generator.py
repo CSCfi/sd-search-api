@@ -38,7 +38,7 @@ def _generate(*fields: OpenSearchField) -> dict:
 
 def test_generate_top_level_field_mapped_at_root():
     props = _generate(_filtering_term("dataset_title", "text"))
-    assert props["dataset_title"] == {"type": "text", "analyzer": "english_text"}
+    assert props["dataset_title"] == {"type": "text", "analyzer": "english"}
 
 
 def test_generate_nested_field_wrapped_in_nested_container():
@@ -124,6 +124,6 @@ def test_generate_non_filtering_field_nested():
     }
 
 
-def test_generate_settings_define_the_text_analyzer():
+def test_generate_no_settings():
     body = OpenSearchIndexGeneratorService([]).generate()
-    assert "english_text" in body["settings"]["analysis"]["analyzer"]
+    assert "settings" not in body

@@ -20,6 +20,7 @@ from search_api.services.ontology.service import get_ontology_service
 
 from search_api.api.beacon.models import (
     BeaconFilteringQualifier,
+    BeaconFilteringScope,
     BeaconFilteringTerm,
     BeaconQueryFilter,
     BeaconQueryGranularity,
@@ -37,9 +38,19 @@ T = TypeVar("T", bound=BeaconFilteringTerm)
 S = TypeVar("S", bound=BeaconResultSetResult)
 
 
-def build_opensearch_query(
+def build_filtering_term_query(
     term: OpenSearchBeaconFilteringTerm, value: str | list[str]
 ) -> dict[str, Any]:
+    """Return the clause matching one filtering term's requested value.
+
+    The term's type selects the query: ``terms`` for the exact-match types, ``match``
+    for ``text``, a day range for ``iso8601Range``. An ``ontologyOrValue`` term spans
+    two fields, so concept ids and free text are each sent to their own. Several
+    requested values are OR'd, so any one of them matches.
+
+    The field is named by its full dotted path, which is what a nested query expects.
+    The clause is a fragment: ``_nest_group_filters`` decides where it goes.
+    """
     field = term.opensearch_field
     values = value if isinstance(value, list) else [value]
 
@@ -80,7 +91,7 @@ class BeaconService(ABC, Generic[T, S]):
         for term in self.filtering_terms:
             if term.id == field_id:
                 return term
-        raise UserException(f"Unsupported field: {field_id}")
+        raise UserException(f"Unknown field: '{field_id}'.")
 
     @abstractmethod
     async def query(
@@ -127,11 +138,13 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm, S]):
         client: AsyncOpenSearch,
         index_name: str,
         filtering_terms: Sequence[OpenSearchBeaconFilteringTerm],
+        filtering_scopes: Sequence[BeaconFilteringScope] = (),
         filtering_qualifiers: Sequence[BeaconFilteringQualifier] = (),
     ) -> None:
         super().__init__(filtering_terms)
         self.client = client
         self.index_name = index_name
+        self.filtering_scopes = filtering_scopes
         self.filtering_qualifiers = filtering_qualifiers
 
     def _qualifier_clauses(
@@ -225,40 +238,51 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm, S]):
         )
 
     @staticmethod
-    def _get_query(
-        filters: list[BeaconQueryFilter],
-        filtering_terms: Sequence[OpenSearchBeaconFilteringTerm],
-        scope: str | None = None,
-        qualifier_clauses: Mapping[str, list[dict[str, Any]]] | None = None,
-    ) -> dict[str, Any]:
-        """Build an OpenSearch bool/must query from Beacon filters.
+    def _nest_group_filters(
+        term_queries: Sequence[tuple[OpenSearchBeaconFilteringTerm, dict[str, Any]]],
+        qualifier_clauses: Mapping[str, list[dict[str, Any]]],
+    ) -> list[dict[str, Any]]:
+        """Return the bool clauses matching the given filters.
 
-        Filters on fields in a group are collected per group and wrapped in one
-        nested query each. Top-level filters are added as direct must clauses.
-        Scope restricts to documents of that scope. A group's qualifier clauses
-        join its filters inside the same nested query, so both must hold for the
-        very item that matched.
+        A filter on a top-level field is a clause on its own. Filters on fields
+        in a group are collected into one nested query per group, so that a single
+        group item has to satisfy all of them. That group's qualifier clauses
+        join them inside the same nested query, so the qualifier holds for the
+        item that matched.
+
+        Does not know about scopes.
+
+        Each query comes from ``term_queries`` unchanged; only its placement is
+        decided here. For example, filtering ``dataset_title`` plus ``finding`` and
+        ``finding_severity`` (both in ``finding``) for Bigpicture, with the
+        ``observation`` qualifier requested, returns::
+
+            [<dataset_title term query>,
+             {"nested": {"path": "finding",
+                         "query": {"bool": {"filter": [
+                             <finding term query>,
+                             <finding_severity term query>,
+                             {"terms": {"finding.qualifiers":
+                                        ["observation:confirmed"]}}]}}}}]
+
+        Args:
+            term_queries: Each filtering term with the query built for its value.
+            qualifier_clauses: The qualifier clauses to apply, keyed by group.
+
+        Returns:
+            The clauses, in no particular order.
         """
-        terms_by_id = {t.id: t for t in filtering_terms}
-        must_clauses: list[dict[str, Any]] = []
+        clauses: list[dict[str, Any]] = []
         filters_by_group: dict[str, list[dict[str, Any]]] = {}
-
-        if scope is not None:
-            must_clauses.append(build_term_query(SCOPE_FIELD, scope))
-
-        for f in filters:
-            if f.id not in terms_by_id:
-                raise UserException(f"Unsupported field: {f.id}")
-            term = terms_by_id[f.id]
+        for term, query in term_queries:
             group = OpenSearchBeaconService._nested_path(term.opensearch_field)
-            q = build_opensearch_query(term, f.value)
             if group is None:
-                must_clauses.append(q)
+                clauses.append(query)
             else:
-                filters_by_group.setdefault(group, []).append(q)
+                filters_by_group.setdefault(group, []).append(query)
 
         for group, group_filters in filters_by_group.items():
-            must_clauses.append(
+            clauses.append(
                 {
                     "nested": {
                         "path": group,
@@ -266,15 +290,87 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm, S]):
                             "bool": {
                                 "filter": [
                                     *group_filters,
-                                    *(qualifier_clauses or {}).get(group, []),
+                                    *qualifier_clauses.get(group, []),
                                 ]
                             }
                         },
                     }
                 }
             )
+        return clauses
 
-        return {"bool": {"must": must_clauses or [{"match_all": {}}]}}
+    def _get_query(
+        self,
+        filters: list[BeaconQueryFilter],
+        scope: str | None = None,
+        qualifiers: Mapping[str, Sequence[str]] | None = None,
+    ) -> dict[str, Any]:
+        """Build an OpenSearch query from Beacon filters.
+
+        A field only constrains the scopes it is indexed for, because a filter on the
+        wrong scope would exclude every document in it.
+
+        The query is therefore one ``should`` branch per scope, each with the
+        filters on fields indexed for it. For example, Bigpicture's ``diagnosis``
+        filter is restricted to the ``clinical`` scope.
+
+        When every filter applies to every scope, ``should`` branches collapse
+        into one query instead.
+
+        Every clause is a ``filter`` because the query is not ranked. ``_score`` is
+        never read. This makes the filter context cheaper and cacheable.
+        """
+        terms_by_id = {t.id: t for t in self.filtering_terms}
+        term_queries: list[tuple[OpenSearchBeaconFilteringTerm, dict[str, Any]]] = []
+        for f in filters:
+            if f.id not in terms_by_id:
+                raise UserException(f"Unknown field: '{f.id}'.")
+            term = terms_by_id[f.id]
+            term_queries.append((term, build_filtering_term_query(term, f.value)))
+
+        qualifier_clauses = self._qualifier_clauses(qualifiers)
+        scopes = [scope] if scope is not None else [s.id for s in self.filtering_scopes]
+
+        # No scopes or every filter applies to all of them.
+        if not scopes or all(
+            set(scopes) <= set(term.scopes) for term, _ in term_queries
+        ):
+            return {
+                "bool": {
+                    "filter": [
+                        # The requested scope, if one was asked for.
+                        *([build_term_query(SCOPE_FIELD, scope)] if scope else []),
+                        # The field value filters.
+                        *self._nest_group_filters(term_queries, qualifier_clauses),
+                    ]
+                    # With neither, match every document.
+                    or [{"match_all": {}}]
+                }
+            }
+
+        return {
+            "bool": {
+                # One alternative per scope.
+                "should": [
+                    {
+                        "bool": {
+                            "filter": [
+                                # The requested scope.
+                                build_term_query(SCOPE_FIELD, s),
+                                # The field value filters for the scope.
+                                *self._nest_group_filters(
+                                    [(t, q) for t, q in term_queries if s in t.scopes],
+                                    qualifier_clauses,
+                                ),
+                            ]
+                        }
+                    }
+                    for s in scopes
+                ],
+                # Matching one alternative is enough.
+                "minimum_should_match": 1,
+            }
+        }
 
     @abstractmethod
     async def _get_result(
@@ -302,12 +398,7 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm, S]):
         """Build a query for boolean granularity."""
         return {
             "size": 0,
-            "query": self._get_query(
-                filters,
-                self.filtering_terms,
-                scope,
-                self._qualifier_clauses(qualifiers),
-            ),
+            "query": self._get_query(filters, scope, qualifiers),
         }
 
     @override
@@ -328,7 +419,5 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm, S]):
             )
             return OpenSearchBeaconService._get_boolean_result(resp)
 
-        query_clause = self._get_query(
-            filters, self.filtering_terms, scope, self._qualifier_clauses(qualifiers)
-        )
+        query_clause = self._get_query(filters, scope, qualifiers)
         return await self._get_result(query_clause, granularity)

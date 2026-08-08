@@ -284,6 +284,15 @@ builder (`api/opensearch/services.py`):
 | `ontology` / `ontologyOrValue` | `build_term_query` | exact concept-ID match |
 | `iso8601Range` | `build_iso8601_range_query` | ISO-8601 duration range, converted to days |
 
+**A filter only constrains the scopes its field is indexed for.** A field absent from a scope cannot
+match any document of it, so including the filter as a plain condition would exclude every such
+document rather than leave it alone. When some filter is scope-specific, `_get_query` therefore emits
+one `should` branch per scope — each pairing that scope with only the filters that apply to it — and a
+document matches through its own scope's branch. With every filter applying to every scope in play the
+branches reduce to one flat query, which is what is emitted instead. The corollary: filtering on
+`diagnosis` (clinical-only) returns non-clinical documents untouched, and filtering on a field with
+`requestedScope` set to a scope it does not cover leaves that scope unconstrained.
+
 Filters mapping to multiple OpenSearch fields are combined with `or_queries`; filters on a nested
 group (`specimen`, `staining`, `diagnosis`, `finding`) are wrapped in nested queries. A requested
 qualifier adds a `terms` clause **inside** the nested query of each group it qualifies, so it must
@@ -415,7 +424,16 @@ constrains the LLM to emit JSON matching the model; `result.output` is the concr
 - All code/keyword fields are `keyword` (support array values natively)
 - `age_at_extraction` is `integer_range` — stored as `{gte: <days>, lte: <days>}` (1 year = 365
   days, 1 month = 30 days; invalid input logged and dropped)
-- `dataset_title/description/short_name` use the `english_text` analyzer
+- `dataset_title/description/short_name` use OpenSearch's built-in `english` analyzer, so the
+  generated index needs no `settings` at all: it stems both the indexed text and the query, so
+  `staining` finds "stained" and `cancer` finds "Cancers". Changing it requires a recreate and
+  reload, since a field's analyzer is fixed at index creation. Tuning it (stem_exclusion, custom
+  stopwords, synonyms) would mean declaring a named analyzer in the settings again.
+- `build_match_query` sets `minimum_should_match` to `2<75%`: up to two terms all must match, so the
+  common two-word query behaves like `and`; beyond that three quarters must, tolerating one stray
+  word. The `or` default would need only one term, which is far too broad given that results are
+  never ranked (see *Query path*) — a document matching one word would be indistinguishable from one
+  matching all of them.
 
 ### Configuration (`conf.py`)
 

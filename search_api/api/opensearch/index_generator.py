@@ -8,17 +8,11 @@ from search_api.api.opensearch.models import (
     OpenSearchOntologyOrValue,
 )
 
-# The text analyzer referenced by ``text`` fields and defined in the index settings.
-_TEXT_ANALYZER = "english_text"
-
-# Index settings shared by every generated index.
-_SETTINGS: dict[str, Any] = {
-    "analysis": {
-        "analyzer": {
-            _TEXT_ANALYZER: {"type": "standard", "stopwords": "_english_"},
-        }
-    }
-}
+# The analyzer of every ``text`` field. OpenSearch's built-in English language
+# analyzer, so no declaration in the index settings is needed. It stems both the
+# indexed text and the query, so "staining" finds "stained" and "cancer" finds
+# "Cancers".
+_TEXT_ANALYZER = "english"
 
 # Maps a semantic field type to its OpenSearch field mapping. ``ontologyOrValue``
 # is handled separately because it spans two fields.
@@ -39,12 +33,12 @@ class OpenSearchIndexGeneratorService:
         self._fields = fields
 
     def generate(self) -> dict[str, Any]:
-        """Return the full OpenSearch index body with settings and mappings."""
+        """Return the OpenSearch index body."""
         properties: dict[str, Any] = {}
         for field in self._fields:
             for path, mapping in self._field_mappings(field):
                 self._insert(properties, path, mapping)
-        return {"settings": _SETTINGS, "mappings": {"properties": properties}}
+        return {"mappings": {"properties": properties}}
 
     @staticmethod
     def _field_mappings(field: OpenSearchField) -> list[tuple[str, dict[str, Any]]]:

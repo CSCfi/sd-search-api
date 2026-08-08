@@ -244,9 +244,21 @@ async def fetch_indexed_keywords(
     }
 
 
+# How much of a text query has to match. Up to two terms all of them
+# must match, beyond that three quarters must.
+_MATCH_MINIMUM_SHOULD_MATCH = "2<75%"
+
+
 def build_match_query(field_id: str, value: str) -> dict[str, Any]:
-    """Build an OpenSearch match query."""
-    return {"match": {field_id: value}}
+    """Build an OpenSearch match query over an analysed text field."""
+    return {
+        "match": {
+            field_id: {
+                "query": value,
+                "minimum_should_match": _MATCH_MINIMUM_SHOULD_MATCH,
+            }
+        }
+    }
 
 
 def build_term_query(field_id: str, value: str) -> dict[str, Any]:

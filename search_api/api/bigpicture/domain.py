@@ -97,7 +97,11 @@ BP_DOMAIN = Domain(
     non_filtering_fields=BP_NON_FILTERING_FIELDS,
     loader=BP_LOADER,
     beacon_service_factory=lambda search: BigpictureOpenSearchBeaconService(
-        search, BP_OPENSEARCH_INDEX, BP_FILTERING_TERMS, BP_FILTERING_QUALIFIERS
+        search,
+        BP_OPENSEARCH_INDEX,
+        BP_FILTERING_TERMS,
+        BP_FILTERING_SCOPES,
+        BP_FILTERING_QUALIFIERS,
     ),
     beacon_id=BP_BEACON_ID,
     beacon_name=BP_BEACON_NAME,

@@ -39,6 +39,31 @@ def _index_path(domain: Domain) -> Path:
     )
 
 
+def _schema_path(name: str) -> Path:
+    return Path(search_api.__file__).parent / "database" / "schema" / f"{name}.sql"
+
+
+def _require_non_production() -> None:
+    """Refuse a destructive command outside a development environment.
+
+    :raises SystemException: if DEPLOYMENT_ENV is production.
+    """
+    if os.getenv("DEPLOYMENT_ENV", "dev") == "prod":
+        raise SystemException("This command is not available in production.")
+
+
+def _confirm(what_will_happen: str, expected: str) -> bool:
+    """Ask the operator to type ``expected`` before something destructive happens."""
+    try:
+        answer = input(
+            f"{what_will_happen}\n"
+            f"Type '{expected}' to confirm, or anything else to abort: "
+        )
+    except EOFError:
+        return False
+    return answer == expected
+
+
 def _setup(env_file: str | None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     warnings.filterwarnings("ignore", category=UserWarning, module="opensearchpy")
@@ -78,25 +103,20 @@ async def _load(domain: Domain, args: argparse.Namespace) -> None:
 
 
 async def _clear(domain: Domain, args: argparse.Namespace) -> None:
-    if os.getenv("DEPLOYMENT_ENV", "dev") == "prod":
-        raise SystemException("This command is not available in production.")
+    """Remove all documents from the OpenSearch index and the database schema."""
 
-    def _confirm_clear(_doc_count: int) -> bool:
-        try:
-            answer = input(
-                f"All documents ({_doc_count}) will be deleted from database and OpenSearch Index '{domain.opensearch_index}'.\n"
-                f"Type '{args.group}' to confirm, or anything else to abort: "
-            )
-        except EOFError:
-            return False
-        return answer == args.group
+    _require_non_production()
 
     sync_service = SyncService(domain.opensearch_index)
     try:
         async with get_cursor() as cur:
             doc_count = await count_documents(cur)
 
-        if not _confirm_clear(doc_count):
+        if not _confirm(
+            f"All documents ({doc_count}) will be deleted from database and "
+            f"OpenSearch Index '{domain.opensearch_index}'.",
+            args.group,
+        ):
             logging.info("Aborted, nothing was deleted.")
             return
 
@@ -104,6 +124,36 @@ async def _clear(domain: Domain, args: argparse.Namespace) -> None:
             await sync_service.delete_all_documents(cur)
     finally:
         await sync_service.search.close()
+
+
+async def _recreate(domain: Domain, args: argparse.Namespace) -> None:
+    """Drop and recreate the OpenSearch index and the database schema."""
+    _require_non_production()
+
+    if not _confirm(
+        f"The OpenSearch index '{domain.opensearch_index}' and the database "
+        f"schema will be dropped and recreated. All documents and "
+        f"cached ontology terms will be lost.",
+        args.group,
+    ):
+        logging.info("Aborted, nothing was dropped.")
+        return
+
+    async with get_cursor() as cur:
+        for _name in ("drop", "create"):
+            await cur.execute(_schema_path(_name).read_text())  # type: ignore[arg-type]
+    logging.info("Recreated the database schema.")
+
+    body = OpenSearchIndexGeneratorService(domain.opensearch_fields).generate()
+    search = create_search()
+    try:
+        if await search.indices.exists(index=domain.opensearch_index):
+            await search.indices.delete(index=domain.opensearch_index)
+            logging.info("Deleted OpenSearch index %s.", domain.opensearch_index)
+        await create_index(search, domain.opensearch_index, body)
+        logging.info("Created OpenSearch index %s.", domain.opensearch_index)
+    finally:
+        await search.close()
 
 
 async def _update_snomed_ontology(release_file: Path) -> None:
@@ -245,6 +295,15 @@ if __name__ == "__main__":
             "clear", help="Delete all data from the database and the OpenSearch index."
         )
 
+        # recreate
+        commands.add_parser(
+            "recreate",
+            help=(
+                "Drop and recreate the OpenSearch index and the database schema, "
+                "discarding all data. Not available in production."
+            ),
+        )
+
     # snomed (deployment-independent)
     snomed_commands = groups.add_parser(
         "snomed", help="Manage the shared SNOMED CT preferred terms cache."
@@ -297,3 +356,5 @@ if __name__ == "__main__":
             asyncio.run(_create_index(domain))
         elif args.command == "clear":
             asyncio.run(_clear(domain, args))
+        elif args.command == "recreate":
+            asyncio.run(_recreate(domain, args))

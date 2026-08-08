@@ -22,6 +22,8 @@ DEPLOYMENT_TYPE=Bigpicture uvicorn search_api.main:app --reload
 DEPLOYMENT_TYPE=Bigpicture sd_search_api
 
 # Start Postgres + OpenSearch (required for data loading/sync)
+# --build is required: without it, `up` reuses the existing cscfi/sd-search-api
+# image and the server runs stale code.
 docker compose --env-file tests/integration/.env --profile dev up --build
 
 # Admin CLI (load data, generate index, refresh an ontology)
@@ -30,6 +32,9 @@ docker compose --env-file tests/integration/.env --profile dev up --build
 uv run python scripts/admin.py Bigpicture load <dir> --load --sync
 uv run python scripts/admin.py Bigpicture generate-index
 uv run python scripts/admin.py Bigpicture create-index   # once per environment
+# `recreate` drops and rebuilds both stores — needed after a mapping change, since
+# OpenSearch cannot alter an existing field's type. Refused when DEPLOYMENT_ENV=prod.
+uv run python scripts/admin.py Bigpicture recreate
 uv run python scripts/admin.py snomed refresh --release-file <path/to/SnomedCT_*.zip>
 uv run python scripts/admin.py send refresh
 ```

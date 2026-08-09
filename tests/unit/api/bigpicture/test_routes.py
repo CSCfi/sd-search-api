@@ -38,7 +38,7 @@ from search_api.api.beacon.routes import (
     make_beacon_router,
 )
 from search_api.api.exception_handlers import register_exception_handlers
-from search_api.api.models import FieldValue, IndexedFieldValueCounts
+from search_api.api.models import FieldValue, ValueCounts
 from search_api.services.ontology.term_cache import OntologyTermCacheService
 
 app = FastAPI()
@@ -81,19 +81,19 @@ class MockBeaconService(
         return True
 
     @override
-    async def get_indexed_field_value_counts(
+    async def get_value_counts(
         self, field_id: str, scope=None, qualifiers=None
-    ) -> IndexedFieldValueCounts:
+    ) -> ValueCounts:
         term = self.get_term(field_id)
         if isinstance(term.opensearch_field, OpenSearchOntologyOrValue):
-            return IndexedFieldValueCounts(counts={}, other_counts={})
-        return IndexedFieldValueCounts(counts={})
+            return ValueCounts(counts={}, other_counts={})
+        return ValueCounts(counts={})
 
 
-SUGGESTIONS_AND_VALUES_INDEXED_COUNTS: dict[str, IndexedFieldValueCounts] = {
-    "sex": IndexedFieldValueCounts(counts={"Male": 10, "Female": 8}),
-    "animal_species": IndexedFieldValueCounts(counts={"410607006": 5, "388480002": 3}),
-    "fixation_type": IndexedFieldValueCounts(
+SUGGESTIONS_AND_VALUES_INDEXED_COUNTS: dict[str, ValueCounts] = {
+    "sex": ValueCounts(counts={"Male": 10, "Female": 8}),
+    "animal_species": ValueCounts(counts={"410607006": 5, "388480002": 3}),
+    "fixation_type": ValueCounts(
         counts={"1388477003": 4}, other_counts={"Formalin": 2, "Custom fix": 1}
     ),
 }
@@ -133,9 +133,9 @@ class MockOntologyTermCacheService(OntologyTermCacheService):
 
 class MockSuggestionsAndValuesBeaconService(MockBeaconService):
     @override
-    async def get_indexed_field_value_counts(
+    async def get_value_counts(
         self, field_id: str, scope=None, qualifiers=None
-    ) -> IndexedFieldValueCounts:
+    ) -> ValueCounts:
         if field_id in SUGGESTIONS_AND_VALUES_INDEXED_COUNTS:
             return SUGGESTIONS_AND_VALUES_INDEXED_COUNTS[field_id]
         raise ValueError(f"Unsupported field: '{field_id}'")

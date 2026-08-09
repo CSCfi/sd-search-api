@@ -1,4 +1,7 @@
+from unittest.mock import AsyncMock
+
 import pytest
+from opensearchpy import AsyncOpenSearch
 
 from search_api.api.beacon.models import BeaconQueryFilter
 from search_api.exceptions import SystemException, UserException
@@ -12,6 +15,7 @@ from search_api.api.bigpicture.models import (
     BP_FILTERING_TERMS,
 )
 from search_api.api.bigpicture.opensearch import BigpictureOpenSearchBeaconService
+from search_api.api.models import ValueCountsKey
 from search_api.api.opensearch.models import ONTOLOGY_OTHER_VALUE_FIELD_SUFFIX
 from search_api.api.opensearch.services import fetch_indexed_keywords
 
@@ -559,14 +563,14 @@ def _service() -> OpenSearchBeaconService:
 def test_qualifier_clauses_absent_qualifier_is_not_filtered():
     """An absent or empty qualifier contributes no clause, so it filters nothing."""
     service = _service()
-    assert service._qualifier_clauses(None) == {}
-    assert service._qualifier_clauses({}) == {}
-    assert service._qualifier_clauses({"observation": []}) == {}
+    assert service._qualifier_clauses_by_group(None) == {}
+    assert service._qualifier_clauses_by_group({}) == {}
+    assert service._qualifier_clauses_by_group({"observation": []}) == {}
 
 
 def test_qualifier_clauses_cover_every_group_the_qualifier_names():
     """One requested qualifier yields one clause per group it qualifies."""
-    clauses = _service()._qualifier_clauses({"observation": ["confirmed"]})
+    clauses = _service()._qualifier_clauses_by_group({"observation": ["confirmed"]})
     assert clauses == {
         "diagnosis": [{"terms": {"diagnosis.qualifiers": ["observation:confirmed"]}}],
         "finding": [{"terms": {"finding.qualifiers": ["observation:confirmed"]}}],
@@ -609,34 +613,42 @@ def test_get_query_qualifier_alone_does_not_constrain_an_unfiltered_group():
 # These check the request that gets built.
 
 
-class _BodyCaptured(Exception):
-    """Raised once the request body has been captured, to end the call."""
+def _service_over_mock_search() -> tuple[BigpictureOpenSearchBeaconService, AsyncMock]:
+    """A real service over a mocked OpenSearch client."""
 
-    def __init__(self, body: dict) -> None:
-        self.body = body
+    def no_values(index: str, body: dict) -> dict:
+        """Answer with the aggregations the request asked for, each finding none.
 
+        A terms aggregation answers with one bucket per distinct value, so an empty
+        bucket list is a field with no values. The response has to mirror the
+        request's aggregation names, because that is how the counts are read out.
+        """
+        aggregations: dict = {"field_values": {"buckets": []}}
+        group_items = body["aggs"].get("group_items")
+        if group_items is None:
+            # A top-level field: the buckets sit directly under the aggregations.
+            return {"aggregations": aggregations}
+        if "qualified_items" in group_items["aggs"]:
+            aggregations = {"qualified_items": aggregations}
+        return {"aggregations": {"group_items": aggregations}}
 
-class _CapturingSearchClient:
-    """Captures the request body instead of answering it."""
-
-    async def search(self, index: str, body: dict) -> dict:
-        raise _BodyCaptured(body)
-
-
-async def _counts_body(field_id: str, **restrictions) -> dict:
-    """Return the request body that get_indexed_field_value_counts would send."""
+    client = AsyncMock(spec=AsyncOpenSearch)
+    client.search.side_effect = no_values
     service = BigpictureOpenSearchBeaconService(
-        client=_CapturingSearchClient(),  # type: ignore[arg-type]
+        client=client,
         index_name="idx",
         filtering_terms=BP_FILTERING_TERMS,
         filtering_scopes=BP_FILTERING_SCOPES,
         filtering_qualifiers=BP_FILTERING_QUALIFIERS,
     )
-    try:
-        await service.get_indexed_field_value_counts(field_id, **restrictions)
-    except _BodyCaptured as captured:
-        return captured.body
-    raise AssertionError("no search request was made")
+    return service, client
+
+
+async def _counts_body(field_id: str, scope=None, qualifiers=None) -> dict:
+    """Return the request body that get_value_counts sends."""
+    service, client = _service_over_mock_search()
+    await service.get_value_counts(field_id, scope, qualifiers)
+    return client.search.await_args.kwargs["body"]
 
 
 @pytest.mark.asyncio
@@ -657,7 +669,7 @@ async def test_field_value_counts_restrict_by_scope_and_qualifier():
 
 
 @pytest.mark.asyncio
-async def test_field_value_counts_without_restrictions_count_everything():
+async def test_field_value_counts_without_scope_or_qualifier_count_everything():
     """Neither axis has a default, so omitting both counts every value."""
     body = await _counts_body("diagnosis")
 
@@ -690,13 +702,39 @@ async def test_field_value_counts_of_a_grouped_field_ask_for_document_counts():
 
 
 @pytest.mark.asyncio
+async def test_get_value_counts():
+    service, client = _service_over_mock_search()
+
+    await service.get_value_counts("sex")
+    await service.get_value_counts("sex")
+    assert client.search.await_count == 1
+
+    # A different key of the same field counts something else.
+    await service.get_value_counts("sex", scope="clinical")
+    assert client.search.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_refresh_value_counts():
+    service, client = _service_over_mock_search()
+
+    await service.get_value_counts("sex")
+    await service.refresh_value_counts(ValueCountsKey.of("sex"))
+    assert client.search.await_count == 2
+
+    service.clear_value_counts()
+    await service.get_value_counts("sex")
+    assert client.search.await_count == 3
+
+
+@pytest.mark.asyncio
 async def test_group_item_filter_is_rejected_for_a_field_without_a_group():
     """Dropping it silently would return counts wider than the caller asked for."""
     with pytest.raises(
         SystemException, match="Cannot filter the group items of 'dataset_title'"
     ):
         await fetch_indexed_keywords(
-            _CapturingSearchClient(),  # type: ignore[arg-type]
+            AsyncMock(spec=AsyncOpenSearch),
             "idx",
             "dataset_title",
             group_item_filter={"bool": {"filter": []}},

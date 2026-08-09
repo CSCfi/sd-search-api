@@ -60,6 +60,12 @@ class CacheConfiguration(BaseSettings):
             "preferred terms changed."
         ),
     )
+    VALUE_COUNT_CACHE_REFRESH: int = Field(
+        default=300,
+        description=(
+            "Frequency (in seconds) to check whether the OpenSearch index changed."
+        ),
+    )
 
 
 class AdminConfiguration(BaseSettings):

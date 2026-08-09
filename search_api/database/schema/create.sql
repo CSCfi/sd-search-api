@@ -8,7 +8,6 @@ CREATE TABLE terms_cache (
     PRIMARY KEY (ontology_id, concept_id, field_id)
 );
 
--- Used for update polling.
 CREATE INDEX idx_terms_cache_ontology_id_updated_at
     ON terms_cache (ontology_id, updated_at);
 
@@ -21,11 +20,12 @@ CREATE TABLE ontology_cache (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Documents to be synced to OpenSearch.
 CREATE TABLE document (
     id          TEXT        NOT NULL PRIMARY KEY,
     payload     JSONB       NOT NULL,
     modified_at TIMESTAMPTZ,
-        synced_at   TIMESTAMPTZ
+    synced_at   TIMESTAMPTZ
 );
 
 CREATE INDEX idx_document_synced_at ON document (synced_at);

@@ -318,7 +318,7 @@ def make_beacon_router(domain: Domain) -> APIRouter:
             return any(word.startswith(term_lower) for word in value_lower.split())
 
         if filtering_term.type in ("controlledValue", "keyword"):
-            field_counts = await beacon_service.get_indexed_field_value_counts(
+            field_counts = await beacon_service.get_value_counts(
                 field_id,
                 validate_field_scope(filtering_term, scope),
                 parse_qualifiers(qualifier),
@@ -336,7 +336,7 @@ def make_beacon_router(domain: Domain) -> APIRouter:
                 for v in sorted(v for v in candidates if _matches(v))
             ]
 
-        field_counts = await beacon_service.get_indexed_field_value_counts(
+        field_counts = await beacon_service.get_value_counts(
             field_id,
             validate_field_scope(filtering_term, scope),
             parse_qualifiers(qualifier),
@@ -419,7 +419,7 @@ def make_beacon_router(domain: Domain) -> APIRouter:
                 f"Values are not supported for field '{field_id}' (type '{filtering_term.type}')."
             )
 
-        field_counts = await beacon_service.get_indexed_field_value_counts(
+        field_counts = await beacon_service.get_value_counts(
             field_id,
             validate_field_scope(filtering_term, scope),
             parse_qualifiers(qualifier),

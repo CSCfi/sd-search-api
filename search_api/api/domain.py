@@ -20,12 +20,14 @@ from search_api.api.opensearch.models import (
     OpenSearchField,
 )
 from search_api.api.opensearch.services import create_search
+from search_api.conf import cache_config
 from search_api.api.qualifiers import qualifier_fields
 from search_api.api.scopes import scope_field
 from search_api.services.ontology.service import (
     get_ontology_id_by_field,
     get_ontology_service,
 )
+from search_api.services.value_counts import ValueCountsUpdater
 from search_api.services.ontology.term_cache import (
     OntologyTermCacheService,
     create_term_caches,
@@ -127,8 +129,16 @@ def make_lifespan(domain: Domain) -> Callable[[FastAPI], Any]:
             await ontology_service.init()
             ontology_service.start()
 
+        # Fill the value count cache and keep it updated.
+        value_counts = ValueCountsUpdater(
+            app.state.beacon_service,
+            refresh_interval=cache_config().VALUE_COUNT_CACHE_REFRESH,
+        )
+        await value_counts.start()
+
         yield
 
+        value_counts.stop()
         for ontology_service in ontology_services:
             ontology_service.stop()
         for term_service in ontology_term_services.values():

@@ -47,9 +47,7 @@ def _get_ontology_filtering_term(
 
 async def _get_ontology_field_counts(field_id: str, request: Request) -> dict[str, int]:
     _get_ontology_filtering_term(field_id, request)
-    field_counts = (
-        await request.app.state.beacon_service.get_indexed_field_value_counts(field_id)
-    )
+    field_counts = await request.app.state.beacon_service.get_value_counts(field_id)
     return field_counts.counts
 
 

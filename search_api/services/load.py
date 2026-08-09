@@ -88,7 +88,10 @@ class LoadService:
             raise UserException(f"Document '{doc.id}': {e}") from e
 
     async def store_document(self, cur: AsyncCursor, doc: ExtractedDocument) -> None:
-        """Store one extracted document to the database."""
+        """Store one extracted document to the database.
+
+        :raises UserException: if the document does not match the deployment.
+        """
         self.validate_document(doc)
         await upsert_document(cur, doc.id, build_document(doc), doc.modified_at)
 

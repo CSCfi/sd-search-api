@@ -6,15 +6,12 @@ from typing import Any
 
 import isodate  # type: ignore[import-untyped]
 
-from aiocache import cached  # type: ignore[import-untyped]
 from opensearchpy import AsyncOpenSearch, helpers
 
 from search_api.conf import opensearch_config as _opensearch_config
 from search_api.exceptions import SystemException
 
 logging.basicConfig(level=logging.INFO)
-
-_FETCH_INDEXED_KEYWORDS_TTL = 60 * 60 * 4  # 4 hours
 
 
 def create_search() -> AsyncOpenSearch:
@@ -126,7 +123,6 @@ _DOCUMENTS_AGG_NAME = "documents"
 _MAX_KEYWORD_VALUES = 10000  # Upper bound on distinct values for one field.
 
 
-@cached(ttl=_FETCH_INDEXED_KEYWORDS_TTL)
 async def fetch_indexed_keywords(
     search: AsyncOpenSearch,
     index_name: str,

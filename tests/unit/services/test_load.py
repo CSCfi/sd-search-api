@@ -41,8 +41,16 @@ def _document(scope="clinical", qualifiers=None) -> ExtractedDocument:
 
 def test_validate_document_accepts_declared_scope_and_qualifiers():
     _load_service().validate_document(
-        _document(qualifiers={"observation": ["confirmed", "candidate"]})
+        _document(qualifiers={"observation": ["confirmed"]})
     )
+
+
+def test_validate_document_rejects_one_qualifier_stated_with_several_values():
+    """A qualifier labels an item with one of its values."""
+    with pytest.raises(UserException, match="Several values"):
+        _load_service().validate_document(
+            _document(qualifiers={"observation": ["confirmed", "candidate"]})
+        )
 
 
 def test_validate_document_accepts_no_qualifiers():

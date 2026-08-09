@@ -297,7 +297,24 @@ Filters mapping to multiple OpenSearch fields are combined with `or_queries`; fi
 group (`specimen`, `staining`, `diagnosis`, `finding`) are wrapped in nested queries. A requested
 qualifier adds a `terms` clause **inside** the nested query of each group it qualifies, so it must
 hold for the very nested item that matched rather than for any item in the group. A group that no
-filter targets gets no nested query, so a qualifier alone never constrains it. `get_indexed_field_value_counts(field_id, scope, qualifiers)` applies both restrictions to the facet
+filter targets gets no nested query, so a qualifier alone never constrains it. `get_value_counts` serves `ValueCounts` from a plain dict on the service, keyed by
+`ValueCountsKey` (`api/models.py`) — the field, the scope and the qualifier, frozen so it can key a
+dict. Its
+`qualifiers` is a `frozenset` of `<id>:<value>` strings, the same encoding the index and the
+`qualifier=` parameter use, so the order a request names them in is not part of the key.
+`ValueCountsKey.of(field_id, scope, qualifiers)` builds one from the `{id: [values]}` a request
+carries, and `qualifier_values_by_id` converts back. Nothing expires;
+`ValueCountsUpdater` (`services/value_counts.py`) owns what is in there, clearing it and refilling
+when `max(document.synced_at)` moves, polled every `VALUE_COUNT_CACHE_REFRESH` seconds. The requests
+are enumerable — every valued field, against its own scopes, against each value of a qualifier over
+its group, which is 62 for Bigpicture — so `_value_count_keys()` yields them as keys, derived from
+the deployment's config rather than guessing what a client will ask for. One qualifier value at a
+time, since a nested item carries one value of a qualifier and a request names one. A request it did not
+anticipate is counted on the way through and kept, so only the first one pays for it. Nothing is
+filled until a document has been synced: counting an index no load has reached would cache one empty
+answer per request.
+
+`get_value_counts(field_id, scope, qualifiers)` applies the scope and the qualifier to the facet
 aggregation so counts match what the equivalent query returns: `scope` becomes the aggregation's
 document `query`, and the qualifier clause becomes `fetch_indexed_keywords`'s `group_item_filter`. Counts
 therefore never overlap — with neither given everything is counted, and a qualifier is only applied
@@ -441,7 +458,8 @@ constrains the LLM to emit JSON matching the model; `result.output` is the concr
 
 Settings come from the environment (pydantic-settings); most fields are **required** (no hardcoded
 host/db/password defaults). Defaults that exist: `POSTGRES_PORT=5432`, `OPENSEARCH_PORT=9200`,
-`DEPLOYMENT_ENV=dev`, `TERM_CACHE_REFRESH=300`, `ONTOLOGY_CACHE_REFRESH=300`, `FEATURE_AI=false`, `ADMIN_KEY=None` (admin
+`DEPLOYMENT_ENV=dev`, `TERM_CACHE_REFRESH=300`, `ONTOLOGY_CACHE_REFRESH=300`,
+`VALUE_COUNT_CACHE_REFRESH=300`, `FEATURE_AI=false`, `ADMIN_KEY=None` (admin
 endpoints unmounted when unset), plus `OIDC_SCOPE`, `OIDC_SECURE_COOKIE=true`, `JWT_ISSUER` and
 `JWT_ALGORITHM=HS256`. `DEPLOYMENT_TYPE`, `SNOWSTORM_URL`, `LLM_BASE_URL`/`LLM_API_KEY`, the
 `OIDC_*` client settings and `JWT_KEY` (base64, must decode to ≥32 bytes) have no defaults.

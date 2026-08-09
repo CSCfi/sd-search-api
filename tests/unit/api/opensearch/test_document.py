@@ -103,7 +103,7 @@ def test_build_document_merges_qualifiers_of_one_nested_item():
                 "ontology",
                 "diagnosis",
                 "73211009",
-                qualifiers={"observation": ["confirmed", "candidate"]},
+                qualifiers={"observation": ["confirmed"], "certainty": ["high"]},
             ),
         ]
     )
@@ -111,7 +111,7 @@ def test_build_document_merges_qualifiers_of_one_nested_item():
         "diagnosis": [
             {
                 "diagnosis": "73211009",
-                "qualifiers": ["observation:candidate", "observation:confirmed"],
+                "qualifiers": ["certainty:high", "observation:confirmed"],
             }
         ]
     }

@@ -67,6 +67,12 @@ def encode_qualifier_value(qualifier_id: str, value: str) -> str:
     return f"{qualifier_id}{QUALIFIER_VALUE_SEPARATOR}{value}"
 
 
+def decode_qualifier_value(encoded: str) -> tuple[str, str]:
+    """Split an encoded qualifier value back into its id and value."""
+    qualifier_id, _, value = encoded.partition(QUALIFIER_VALUE_SEPARATOR)
+    return qualifier_id, value
+
+
 def qualifier_fields(groups: Iterable[str]) -> list[OpenSearchField]:
     """Returns the qualifiers field of each nested group.
 
@@ -151,17 +157,18 @@ def validate_requested_qualifiers(
     qualifiers: Mapping[str, Sequence[str]],
     filtering_qualifiers: Sequence[BeaconFilteringQualifier],
 ) -> None:
-    """Reject qualifier ids and values that the deployment does not declare.
-
-    :raises UserException: if a qualifier id is unknown or one of its values is not
-        declared for it.
-    """
+    """Reject qualifier ids and values that the deployment does not declare."""
     values_by_id = {q.id: set(q.values) for q in filtering_qualifiers}
     for qualifier_id, values in qualifiers.items():
         if qualifier_id not in values_by_id:
             raise UserException(
                 f"Unsupported qualifier: {qualifier_id!r}. "
                 f"Valid qualifiers: {sorted(values_by_id)}."
+            )
+        if len(values) > 1:
+            raise UserException(
+                f"Several values {sorted(values)} for qualifier {qualifier_id!r}. "
+                "Only one value can be provided for a qualifier."
             )
         unknown = sorted(set(values) - values_by_id[qualifier_id])
         if unknown:

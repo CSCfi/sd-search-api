@@ -83,13 +83,9 @@ def service(bp_opensearch_index_name: str) -> BigpictureOpenSearchBeaconService:
     )
 
 
-async def _counts(service, field_id: str, **restrictions) -> dict[str, int]:
-    """Return the value counts for a field under the given restrictions.
-
-    fetch_indexed_keywords underneath is cached on its arguments, which include the
-    index name and both filters, so tests expecting different counts never collide.
-    """
-    result = await service.get_indexed_field_value_counts(field_id, **restrictions)
+async def _counts(service, field_id, scope=None, qualifiers=None) -> dict[str, int]:
+    """Return the value counts for a field, narrowed by scope and qualifier."""
+    result = await service.get_value_counts(field_id, scope, qualifiers)
     return result.counts
 
 

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from search_api.api.beacon.models import BeaconFilteringTerm
 
@@ -52,6 +52,22 @@ class OpenSearchField(BaseModel):
         """The full indexed path: ``<group>.<id>``, or ``id`` at the top level."""
         return f"{self.group}.{self.id}" if self.group else self.id
 
+    # Indexed path is <group>.<id>, with no dots allowed in <group> or <id>.
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, value: str) -> str:
+        if "." in value:
+            raise ValueError(f"Field id '{value}' contains a dot.")
+        return value
+
+    @field_validator("group")
+    @classmethod
+    def validate_group(cls, value: str | None) -> str | None:
+        if value is not None and "." in value:
+            raise ValueError(f"Field group '{value}' contains a dot.")
+        return value
+
 
 class OpenSearchBeaconFilteringTerm(BeaconFilteringTerm, OpenSearchField):
     """Beacon filtering term."""
@@ -93,18 +109,10 @@ _VALUE_TYPES: dict[str, type | tuple[type, ...]] = {
 
 
 class OpenSearchFieldValue(BaseModel):
-    """An extracted value for an OpenSearch field.
-
-    The index defines to which element for a multi-valued field the
-    value belongs to.
-    """
+    """An OpenSearch field value."""
 
     field: OpenSearchField
     value: str | int | tuple[str, str]
-    index: int = 0
-
-    # Qualifier id -> its values for nested fields.
-    qualifiers: dict[str, list[str]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_value(self) -> "OpenSearchFieldValue":
@@ -117,13 +125,38 @@ class OpenSearchFieldValue(BaseModel):
         return self
 
 
+class OpenSearchGroup(BaseModel):
+    """An OpenSearch nested group."""
+
+    group: str
+    values: list[OpenSearchFieldValue]
+    qualifiers: dict[str, str] = Field(default_factory=dict)  # qualifier id -> value
+
+    @model_validator(mode="after")
+    def validate_group(self) -> "OpenSearchGroup":
+        misplaced = sorted(
+            value.field.id for value in self.values if value.field.group != self.group
+        )
+        if misplaced:
+            raise ValueError(
+                f"Field(s) {', '.join(misplaced)} are not in group '{self.group}'."
+            )
+        return self
+
+
 class ExtractedDocument(BaseModel):
     """One extracted OpenSearch document.
 
-    The loader builds a JSONB payload from the values.
+    The ``values`` are top-level fields, while the ``groups`` are nested groups.
     """
 
     id: str
     scope: str | None = None
-    values: list[OpenSearchFieldValue]
+    values: list[OpenSearchFieldValue] = Field(default_factory=list)
+    groups: list[OpenSearchGroup] = Field(default_factory=list)
     modified_at: datetime | None = None
+
+    @property
+    def all_values(self) -> list[OpenSearchFieldValue]:
+        """Every value in the document, top-level and in a group."""
+        return [*self.values, *(v for group in self.groups for v in group.values)]

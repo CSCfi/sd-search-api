@@ -16,7 +16,7 @@ from search_api.api.bigpicture.extract import (
     BigpictureCodeAttributeValue,
     BigpictureStainingFields,
     BigpictureSpecimenFields,
-    to_opensearch_field_values,
+    to_opensearch_values,
 )
 from search_api.services.sync import SyncService
 from search_api.database.document import DOCUMENT_TABLE
@@ -263,11 +263,13 @@ async def generate_and_load_data(image_cnt: int, dataset_cnt: int) -> None:
                 # Load fields to the database for each image.
 
                 logging.info(f"Loading image '{image_id}' to the database")
+                values, groups = to_opensearch_values(fields)
                 doc = ExtractedDocument(
                     id=image_id,
                     scope=fields.scope,
                     modified_at=fields.dataset_modified_at,
-                    values=to_opensearch_field_values(fields),
+                    values=values,
+                    groups=groups,
                 )
                 await load_service.store_document(cur, doc)
 

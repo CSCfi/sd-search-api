@@ -175,7 +175,10 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm, S]):
 
     @staticmethod
     def _nested_path(field: str | OpenSearchOntologyOrValue) -> str | None:
-        """Return the OpenSearch nested path for a field, or None for top-level fields."""
+        """Return the OpenSearch nested path for a field, or None for top-level fields.
+
+        The path is ``<group>.<id>``, neither part holding a dot.
+        """
         field_name = (
             field.concept_value_field
             if isinstance(field, OpenSearchOntologyOrValue)

@@ -80,9 +80,13 @@ class LoadService:
         """
         try:
             validate_document_scope(doc.scope, self._filtering_scopes)
-            for value in doc.values:
+            for group in doc.groups:
                 validate_requested_qualifiers(
-                    value.qualifiers, self._filtering_qualifiers
+                    {
+                        qualifier_id: [value]
+                        for qualifier_id, value in group.qualifiers.items()
+                    },
+                    self._filtering_qualifiers,
                 )
         except UserException as e:
             raise UserException(f"Document '{doc.id}': {e}") from e
@@ -128,7 +132,7 @@ class LoadService:
                 logger.debug("Loaded document %s.", doc.id)
 
                 for field_id, concept_ids in concept_ids_from_values(
-                    doc.values, self._ontology_by_field
+                    doc.all_values, self._ontology_by_field
                 ).items():
                     ontology_id = self._ontology_id_by_field[field_id]
                     await self._term_caches[ontology_id].cache_preferred_terms(

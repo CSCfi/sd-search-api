@@ -9,7 +9,7 @@ from search_api.api.bigpicture.extract import (
     BigpictureFields,
     BigpictureStainingFields,
     BigpictureSpecimenFields,
-    to_opensearch_field_values,
+    to_opensearch_values,
 )
 from search_api.api.bigpicture.domain import BP_DOMAIN
 from search_api.api.bigpicture.models import BP_OPENSEARCH_INDEX
@@ -77,10 +77,12 @@ async def test_load_and_sync_fields():
 
     async with get_connection() as conn:
         async with conn.cursor() as cur:
+            values, groups = to_opensearch_values(fields)
             doc = ExtractedDocument(
                 id=image_id,
                 scope=fields.scope,
-                values=to_opensearch_field_values(fields),
+                values=values,
+                groups=groups,
             )
             await load_service.store_document(cur, doc)
 

@@ -57,33 +57,6 @@ def test_generate_multiple_nested_fields_share_container():
     assert set(props["blocks"]["properties"]) == {"animal_species", "sex"}
 
 
-def test_generate_deeply_nested_field_creates_a_container_per_level():
-    props = _generate(_filtering_term("anatomical_site", "keyword", "blocks.specimen"))
-    assert props["blocks"] == {
-        "type": "nested",
-        "properties": {
-            "specimen": {
-                "type": "nested",
-                "properties": {"anatomical_site": {"type": "keyword"}},
-            }
-        },
-    }
-
-
-def test_generate_nested_fields_at_different_depths_share_containers():
-    props = _generate(
-        _filtering_term("anatomical_site", "keyword", "blocks.specimen"),
-        _filtering_term("fixation_type", "keyword", "blocks.specimen"),
-        _filtering_term("animal_species", "ontology", "blocks"),
-    )
-    blocks = props["blocks"]["properties"]
-    assert set(blocks) == {"specimen", "animal_species"}
-    assert set(blocks["specimen"]["properties"]) == {
-        "anatomical_site",
-        "fixation_type",
-    }
-
-
 def test_generate_type_to_opensearch_mapping():
     props = _generate(
         _filtering_term("kw", "keyword", "stains"),

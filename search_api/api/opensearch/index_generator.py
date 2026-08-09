@@ -59,15 +59,16 @@ class OpenSearchIndexGeneratorService:
 
     @staticmethod
     def _insert(properties: dict[str, Any], path: str, mapping: dict[str, Any]) -> None:
-        """Insert a field mapping at a dotted path, creating nested containers as needed.
+        """Insert a field mapping at its indexed path.
 
-        Every segment before the leaf becomes a ``nested`` container, so ``blocks.foo``
-        nests one level and ``blocks.foo.bar`` nests two. A path with no dot is a
-        top-level field.
+        The path is ``<group>.<id>``, or ``<id>`` at the top level. Neither part may
+        contain a dot.
         """
-        *containers, field = path.split(".")
-        cursor = properties
-        for container in containers:
-            nested = cursor.setdefault(container, {"type": "nested", "properties": {}})
-            cursor = nested["properties"]
-        cursor[field] = mapping
+        group, _, field = path.partition(".")
+        if not field:
+            # A top-level field.
+            properties[group] = mapping
+            return
+        # A field in a nested group.
+        nested = properties.setdefault(group, {"type": "nested", "properties": {}})
+        nested["properties"][field] = mapping

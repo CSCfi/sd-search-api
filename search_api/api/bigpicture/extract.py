@@ -17,13 +17,17 @@ from search_api.api.bigpicture.models import BP_DOCUMENT_FIELDS
 from search_api.api.qualifiers import QUALIFIERS_FIELD
 from search_api.exceptions import SystemException, UserException
 from search_api.services.ontology.send import SEND_ONTOLOGY_ID
-from search_api.api.opensearch.models import ExtractedDocument, OpenSearchFieldValue
+from search_api.api.opensearch.models import (
+    ExtractedDocument,
+    OpenSearchFieldValue,
+    OpenSearchGroup,
+)
 from search_api.utils.crypt import load_c4gh_keys, read_file, resolve_path
 from search_api.utils.dir import list_directories
 from search_api.utils.xml import parse_xml, validate_xml, get_xml_value
 
 
-# Parsing models for Bigpicture XML, converted to OpenSearchFieldValues by to_opensearch_field_values.
+# Parsing models for Bigpicture XML, converted by to_opensearch_values.
 
 
 class BigpictureCodeAttributeValue(BaseModel):
@@ -167,74 +171,57 @@ def _has_value(value: Any) -> bool:
     return True
 
 
-def to_opensearch_field_values(fields: BigpictureFields) -> list[OpenSearchFieldValue]:
-    """Convert extracted field models to OpenSearch field values."""
-    values: list[OpenSearchFieldValue] = []
+def to_opensearch_values(
+    fields: BigpictureFields,
+) -> tuple[list[OpenSearchFieldValue], list[OpenSearchGroup]]:
+    """Convert extracted field models to a document's top level values and nested groups."""
 
-    def add_value(
-        index: int,
-        field_name: str,
-        value: Any,
-        qualifiers: dict[str, list[str]] | None = None,
-    ) -> None:
+    def field_value(field_name: str, value: Any) -> list[OpenSearchFieldValue]:
         if not _has_value(value):
-            return
+            return []
         field = BP_DOCUMENT_FIELDS.get(field_name)
         if field is None:
             raise SystemException(
                 f"Field {field_name!r} is not registered in BP_DOCUMENT_FIELDS"
             )
-        qualifiers = qualifiers or {}
         if isinstance(value, BigpictureCodeAttributeValue):
-            values.append(
-                OpenSearchFieldValue(
-                    field=field, value=value.code, index=index, qualifiers=qualifiers
-                )
-            )
-        elif isinstance(value, Set):
+            return [OpenSearchFieldValue(field=field, value=value.code)]
+        if isinstance(value, Set):
             # A multivalued field.
-            for code in value:
-                values.append(
-                    OpenSearchFieldValue(
-                        field=field,
-                        value=code.code,
-                        index=index,
-                        qualifiers=qualifiers,
-                    )
-                )
-        elif isinstance(value, (tuple, int, str)):
-            values.append(
-                OpenSearchFieldValue(
-                    field=field, value=value, index=index, qualifiers=qualifiers
-                )
-            )
-        else:
-            raise SystemException(
-                f"Field {field_name!r} has an unexpected value type: {type(value).__name__!r}"
-            )
+            return [
+                OpenSearchFieldValue(field=field, value=code.code) for code in value
+            ]
+        if isinstance(value, (tuple, int, str)):
+            return [OpenSearchFieldValue(field=field, value=value)]
+        raise SystemException(
+            f"Field {field_name!r} has an unexpected value type: {type(value).__name__!r}"
+        )
 
-    # Add root level fields.
+    values: list[OpenSearchFieldValue] = []
     for field_name in type(fields).model_fields:
         if field_name in BP_DOCUMENT_FIELDS and field_name not in _NESTED_GROUPS:
-            add_value(0, field_name, getattr(fields, field_name))
+            values += field_value(field_name, getattr(fields, field_name))
 
-    # Add nested fields.
+    groups: list[OpenSearchGroup] = []
     for group in _NESTED_GROUPS:
-        index = 0
         for item in getattr(fields, group):
-            qualifiers: dict[str, list[str]] = {}
-            for qualifier_id, qualifier_value in getattr(item, QUALIFIERS_FIELD, ()):
-                qualifiers.setdefault(qualifier_id, []).append(qualifier_value)
-            before = len(values)
+            item_values: list[OpenSearchFieldValue] = []
             for field_name in type(item).model_fields:
                 if field_name == QUALIFIERS_FIELD:
                     continue
-                add_value(index, field_name, getattr(item, field_name), qualifiers)
-            if len(values) > before:
-                # Index advances if a new value was added.
-                index += 1
+                item_values += field_value(field_name, getattr(item, field_name))
+            if not item_values:
+                # A group carrying no indexable field values is not indexed.
+                continue
+            groups.append(
+                OpenSearchGroup(
+                    group=group,
+                    values=item_values,
+                    qualifiers=dict(getattr(item, QUALIFIERS_FIELD, ())),
+                )
+            )
 
-    return values
+    return values, groups
 
 
 DATASET_XML_FILE = "METADATA/dataset.xml"
@@ -843,10 +830,12 @@ def extract_dataset_documents(
     for image_ids in images:
         image_id = image_ids.id
         bp_fields = fields[image_id]
+        values, groups = to_opensearch_values(bp_fields)
         yield ExtractedDocument(
             id=map_image_id_to_document_id[image_id],
             modified_at=bp_fields.dataset_modified_at,
-            values=to_opensearch_field_values(bp_fields),
+            values=values,
+            groups=groups,
             scope=bp_fields.scope,
         )
 

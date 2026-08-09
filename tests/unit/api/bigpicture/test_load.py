@@ -5,7 +5,7 @@ from search_api.api.bigpicture.extract import (
     BigpictureCodeAttributeValue,
     BigpictureFields,
     BigpictureStainingFields,
-    to_opensearch_field_values,
+    to_opensearch_values,
 )
 from search_api.api.bigpicture.domain import BP_DOMAIN
 from search_api.services.load import concept_ids_from_values, ontology_services_by_field
@@ -26,7 +26,7 @@ def _fields(*, scope: str = "clinical", **kwargs) -> BigpictureFields:
     )
 
 
-def test_to_opensearch_field_values():
+def test_to_opensearch_values():
     fields = _fields(
         dataset_title="A title",
         specimen={
@@ -39,9 +39,8 @@ def test_to_opensearch_field_values():
         },
         staining={BigpictureStainingFields(staining_target="Nucleus")},
     )
-    payload = build_document(
-        ExtractedDocument(id="img", values=to_opensearch_field_values(fields))
-    )
+    values, groups = to_opensearch_values(fields)
+    payload = build_document(ExtractedDocument(id="img", values=values, groups=groups))
 
     assert payload["image_id"] == "img"
     assert payload["dataset_id"] == "ds"
@@ -60,8 +59,10 @@ def _code(code: str) -> BigpictureCodeAttributeValue:
 
 
 def _concept_ids(fields: BigpictureFields) -> dict[str, set[str]]:
+    values, groups = to_opensearch_values(fields)
     return concept_ids_from_values(
-        to_opensearch_field_values(fields), _ONTOLOGY_BY_FIELD
+        ExtractedDocument(id="img", values=values, groups=groups).all_values,
+        _ONTOLOGY_BY_FIELD,
     )
 
 

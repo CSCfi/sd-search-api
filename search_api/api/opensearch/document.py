@@ -4,6 +4,7 @@ from search_api.api.opensearch.models import (
     ExtractedDocument,
     OpenSearchFieldType,
     OpenSearchFieldValue,
+    OpenSearchGroup,
 )
 from search_api.api.opensearch.services import iso8601_duration_to_days
 from search_api.api.qualifiers import QUALIFIERS_FIELD, encode_qualifier_value
@@ -19,89 +20,67 @@ def _encode_value(field_type: OpenSearchFieldType, value: Any) -> Any:
     return value
 
 
-def _qualifier_values(field_values: list[OpenSearchFieldValue]) -> list[str]:
-    """Return the encoded qualifier values of one nested item.
+def _add_field_value(target: dict[str, Any], value: OpenSearchFieldValue) -> None:
+    """Add field value into the target object.
 
-    Given the field values of one finding item::
+    target is the document root for a top-level field, and a group item for a
+    field in a group. E.g.:
 
-        [
-         finding=C3137,            qualifiers={"observation": ["confirmed"]},
-         finding_severity=C147501, qualifiers={"observation": ["confirmed"]}
-        ]
+        sex=Female  ->  {"sex": "Female"}
 
-    returns ``["observation:confirmed"]``.
+    A multivalued field appends instead of overwriting, so its values accumulate
+    into a list::
 
-    A nested item's qualifiers are repeated on each of its field values.
-    These are collapsed and sorted so a document's payload is deterministic.
+        anatomical_site=80248007,368209003  ->  {"anatomical_site": ["80248007", "368209003"]}
     """
-    qualifiers: set[str] = set()
-    for field_value in field_values:
-        for qualifier_id, qualifier_values in field_value.qualifiers.items():
-            for qualifier_value in qualifier_values:
-                qualifiers.add(encode_qualifier_value(qualifier_id, qualifier_value))
-    return sorted(qualifiers)
+    encoded = _encode_value(value.field.type, value.value)
+    if value.field.multivalued:
+        target.setdefault(value.field.id, []).append(encoded)
+    else:
+        target[value.field.id] = encoded
+
+
+def _build_group_item(group: OpenSearchGroup) -> dict[str, Any]:
+    """Build one item of a nested group.
+
+    The item's qualifiers go into one multivalued field, each value carrying its
+    qualifier id, sorted so a document's payload is deterministic.
+    """
+    item: dict[str, Any] = {}
+    for value in group.values:
+        _add_field_value(item, value)
+    qualifiers = sorted(
+        encode_qualifier_value(qualifier_id, qualifier_value)
+        for qualifier_id, qualifier_value in group.qualifiers.items()
+    )
+    if qualifiers:
+        item[QUALIFIERS_FIELD] = qualifiers
+    return item
 
 
 def build_document(document: ExtractedDocument) -> dict[str, Any]:
     """Build an OpenSearch document from an extracted document.
 
-    The ``scope`` is written at the document root.
+    The scope is written at the document root, followed by
+     top level values and nested groups, e.g.:
 
-    The ``opensearch_field`` path determines where each value is written:
-    - No dot: placed directly in the root dict. The ``index`` is ignored.
-    - Dotted path (``root.field``): the first segment names a nested array and the
-      ``index`` selects the element within the array.  The remaining segments are plain
-      nested objects within that element.
-
-    For ``multivalued`` fields, successive values for the same ``opensearch_field`` path
-    and ``index`` are appended to a list rather than overwriting.
-
-    For nested fields with qualifiers, the qualifier ids and values are
-    written to the ''qualifiers'' field in the nested group.
+        {"scope": "clinical",
+         "image_id": "img-1",
+         "diagnosis": [{"diagnosis": "73211009",
+                        "qualifiers": ["observation:confirmed"]}]}
     """
-
-    def _assign(
-        target: dict[str, Any], key: str, value: Any, multivalued: bool
-    ) -> None:
-        if multivalued:
-            target.setdefault(key, []).append(value)
-        else:
-            target[key] = value
-
     result: dict[str, Any] = {}
 
-    # Add document scope.
+    # Scope.
     if document.scope is not None:
         result[SCOPE_FIELD] = document.scope
 
-    # A nested item is identified by its (group, index). Nested item's values are
-    # collected here to merge qualifiers later.
-    values_by_item: dict[tuple[str, int], list[OpenSearchFieldValue]] = {}
+    # Top level fields.
+    for value in document.values:
+        _add_field_value(result, value)
 
-    # Add field values.
-    for field_value in document.values:
-        path = field_value.field.opensearch_field
-        encoded = _encode_value(field_value.field.type, field_value.value)
-        if "." not in path:
-            # A top-level field: the whole path is the field id.
-            _assign(result, path, encoded, field_value.field.multivalued)
-            continue
-        # A field in a group: the first segment names the group's array.
-        group, _, sub_path = path.partition(".")
-        array = result.setdefault(group, [])
-        while len(array) <= field_value.index:
-            array.append({})
-        node = array[field_value.index]
-        *segments, leaf = sub_path.split(".")
-        for segment in segments:
-            node = node.setdefault(segment, {})
-        _assign(node, leaf, encoded, field_value.field.multivalued)
-        values_by_item.setdefault((group, field_value.index), []).append(field_value)
-
-    # Add qualifier values.
-    for (group, index), field_values in values_by_item.items():
-        qualifiers = _qualifier_values(field_values)
-        if qualifiers:
-            result[group][index][QUALIFIERS_FIELD] = qualifiers
+    # Nested groups.
+    for group in document.groups:
+        result.setdefault(group.group, []).append(_build_group_item(group))
 
     return result

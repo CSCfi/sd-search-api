@@ -6,11 +6,13 @@ from search_api.api.beacon.models import BeaconFilteringQualifier
 from search_api.api.opensearch.models import OpenSearchField
 from search_api.api.qualifiers import (
     QUALIFIERS_FIELD,
+    decode_qualifier_value,
     encode_qualifier_value,
     qualifier_fields,
     validate_filtering_qualifiers,
+    validate_requested_qualifiers,
 )
-from search_api.exceptions import ConfigurationException
+from search_api.exceptions import ConfigurationException, UserException
 
 
 def _qualifier(**overrides) -> BeaconFilteringQualifier:
@@ -33,6 +35,13 @@ _DIAGNOSIS_TERM = _field("diagnosis", "diagnosis")
 
 def test_encode_qualifier_value():
     assert encode_qualifier_value("observation", "confirmed") == "observation:confirmed"
+
+
+def test_decode_qualifier_value():
+    assert decode_qualifier_value("observation:confirmed") == (
+        "observation",
+        "confirmed",
+    )
 
 
 def test_qualifier_fields_one_per_group():
@@ -96,4 +105,30 @@ def test_validate_rejects_separator_in_an_id_or_value():
     with pytest.raises(ConfigurationException, match="reserved separator"):
         validate_filtering_qualifiers(
             [_DIAGNOSIS_TERM], [], [_qualifier(values=["a:b"])], "x"
+        )
+
+
+def test_validate_requested_accepts_declared_value():
+    validate_requested_qualifiers({"observation": ["confirmed"]}, [_qualifier()])
+
+
+def test_validate_requested_accepts_no_qualifier():
+    """An absent qualifier is not filtered on, so all of its values match."""
+    validate_requested_qualifiers({}, [_qualifier()])
+
+
+def test_validate_requested_rejects_unknown_qualifier():
+    with pytest.raises(UserException, match="Unsupported qualifier: 'certainty'"):
+        validate_requested_qualifiers({"certainty": ["known"]}, [_qualifier()])
+
+
+def test_validate_requested_rejects_undeclared_value():
+    with pytest.raises(UserException, match="Unsupported value"):
+        validate_requested_qualifiers({"observation": ["known"]}, [_qualifier()])
+
+
+def test_validate_requested_rejects_several_values_for_one_qualifier():
+    with pytest.raises(UserException, match="Several values"):
+        validate_requested_qualifiers(
+            {"observation": ["confirmed", "candidate"]}, [_qualifier()]
         )

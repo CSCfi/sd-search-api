@@ -114,16 +114,26 @@ The OpenSearch-shaped payload is produced at **load** time by `build_document(do
 (`api/opensearch/document.py`), which converts each `OpenSearchFieldValue`; `age_at_extraction`
 ISO-8601 duration tuples become `{gte, lte}` day ranges via `iso8601_duration_to_days`.
 
-`ExtractedDocument` carries three things beyond its values: `id`, `modified_at` and **`scope`**.
-Scope is not a filtering term — it partitions documents rather than being searched — so it lives on
-the document, is indexed at the root under `SCOPE_FIELD` (`api/scopes.py`), and `Domain`
-contributes that field to `opensearch_fields` whenever the deployment declares any scope.
-An `OpenSearchFieldValue` additionally carries **`qualifiers`** (`{qualifier id: [values]}`); the
-qualifiers of every value sharing a nested `(group, index)` are merged into that one nested item, so
-stating them on a single value of the item is enough.
+`ExtractedDocument` separates the two kinds of value it carries: **`values`** are the top-level
+fields, and **`groups`** holds one `OpenSearchGroup` per item of a nested group — the group's name,
+its own values, and the **`qualifiers`** (`{qualifier id: value}`) labelling that item — one value
+per qualifier, so the rule is the model's shape rather than a check. Membership
+is what ties an item's values together, so nothing correlates them positionally and a qualifier
+belongs to the item rather than to any one value. `OpenSearchGroup` rejects a value whose
+`field.group` is not its own, so a misfiled value is an error rather than a misplaced document.
+`all_values` walks both for the callers that want every value regardless of where it sits.
+
+A field's indexed path is exactly `<group>.<id>`, and `OpenSearchField` rejects a dot in either part:
+a group nests one level and holds no group of its own, so a second level would be a mapping the
+document builder cannot write and a nested query cannot reach.
+
+Beyond those, `ExtractedDocument` carries `id`, `modified_at` and **`scope`**. Scope is not a
+filtering term — it partitions documents rather than being searched — so it lives on the document, is
+indexed at the root under `SCOPE_FIELD` (`api/scopes.py`), and `Domain` contributes that field to
+`opensearch_fields` whenever the deployment declares any scope.
 
 `LoadService.validate_document` is the boundary where a deployment's extraction meets the generic
-store: it checks `scope` against `filtering_scopes` and every qualifier id/value against
+store: it checks `scope` against `filtering_scopes` and each group's qualifier ids/values against
 `filtering_qualifiers`, so each extractor does not restate the declared configuration.
 
 ### XML ingestion (`search_api/api/bigpicture/extract.py`)
@@ -149,8 +159,9 @@ the tag itself is not (it is the spec's machine name, read via `_extract_string_
 `Clinical`/`Non-Clinical`.
 
 It builds ID-chain mappings (image→slide→block→specimen→case→biological being), parses into the
-Bigpicture models below, then `to_opensearch_field_values(fields)` flattens them to
-`OpenSearchFieldValue`s keyed by the fields declared in `BP_DOCUMENT_FIELDS`. `age_at_extraction`
+Bigpicture models below, then `to_opensearch_values(fields)` converts them to the document's
+top-level `OpenSearchFieldValue`s and one `OpenSearchGroup` per nested item, keyed by the fields
+declared in `BP_DOCUMENT_FIELDS`. An item contributing no indexable value is not indexed at all. `age_at_extraction`
 is an ISO-8601 duration tuple `(start, end)` — e.g. `("P40Y", "P41Y")` — computed by
 `_add_iso8601_durations` (uses `isodate`, normalises month overflow); invalid durations are logged
 and dropped. `.c4gh`-encrypted XML is decrypted on the fly (`utils/crypt.py`).

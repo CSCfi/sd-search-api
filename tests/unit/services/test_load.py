@@ -7,6 +7,7 @@ from search_api.api.opensearch.models import (
     ExtractedDocument,
     OpenSearchField,
     OpenSearchFieldValue,
+    OpenSearchGroup,
 )
 from search_api.exceptions import UserException
 from search_api.services.load import LoadService
@@ -27,12 +28,17 @@ def _document(scope="clinical", qualifiers=None) -> ExtractedDocument:
     return ExtractedDocument(
         id="img-1",
         scope=scope,
-        values=[
-            OpenSearchFieldValue(
-                field=OpenSearchField(
-                    id="diagnosis", type="ontology", group="diagnosis"
-                ),
-                value="73211009",
+        groups=[
+            OpenSearchGroup(
+                group="diagnosis",
+                values=[
+                    OpenSearchFieldValue(
+                        field=OpenSearchField(
+                            id="diagnosis", type="ontology", group="diagnosis"
+                        ),
+                        value="73211009",
+                    )
+                ],
                 qualifiers=qualifiers or {},
             )
         ],
@@ -41,16 +47,8 @@ def _document(scope="clinical", qualifiers=None) -> ExtractedDocument:
 
 def test_validate_document_accepts_declared_scope_and_qualifiers():
     _load_service().validate_document(
-        _document(qualifiers={"observation": ["confirmed"]})
+        _document(qualifiers={"observation": "confirmed"})
     )
-
-
-def test_validate_document_rejects_one_qualifier_stated_with_several_values():
-    """A qualifier labels an item with one of its values."""
-    with pytest.raises(UserException, match="Several values"):
-        _load_service().validate_document(
-            _document(qualifiers={"observation": ["confirmed", "candidate"]})
-        )
 
 
 def test_validate_document_accepts_no_qualifiers():
@@ -75,15 +73,13 @@ def test_validate_document_allows_missing_scope_without_declared_scopes():
 
 def test_validate_document_rejects_unknown_qualifier():
     with pytest.raises(UserException, match="Unsupported qualifier: 'certainty'"):
-        _load_service().validate_document(
-            _document(qualifiers={"certainty": ["known"]})
-        )
+        _load_service().validate_document(_document(qualifiers={"certainty": "known"}))
 
 
 def test_validate_document_rejects_undeclared_qualifier_value():
     with pytest.raises(UserException, match=r"Unsupported value\(s\) \['known'\]"):
         _load_service().validate_document(
-            _document(qualifiers={"observation": ["known"]})
+            _document(qualifiers={"observation": "known"})
         )
 
 

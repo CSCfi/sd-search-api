@@ -12,7 +12,7 @@ from search_api.database.repository import get_connection
 from search_api.services.ontology.snomed import SnomedService
 from search_api.database.terms_cache import TERMS_CACHE_TABLE, read_updated_at
 from search_api.services.ontology.term_cache import (
-    OntologyTermCacheService,
+    OntologyTermCache,
 )
 
 os.environ.setdefault("POSTGRES_DB", os.environ["BP_POSTGRES_DB"])
@@ -21,8 +21,8 @@ os.environ.setdefault("POSTGRES_PORT", os.environ["BP_POSTGRES_PORT"])
 _FIELD_ID = "animal_species"
 
 
-def _service() -> OntologyTermCacheService:
-    return OntologyTermCacheService(ontology_id=SNOMED_ONTOLOGY_ID)
+def _service() -> OntologyTermCache:
+    return OntologyTermCache(ontology_id=SNOMED_ONTOLOGY_ID)
 
 
 class _StoredTerm(NamedTuple):
@@ -72,7 +72,7 @@ async def _clear_cache():
 
 
 @pytest_asyncio.fixture
-async def fill_cache() -> OntologyTermCacheService:
+async def fill_cache() -> OntologyTermCache:
     async with get_connection() as conn:
         async with conn.cursor() as cur:
             await cur.executemany(

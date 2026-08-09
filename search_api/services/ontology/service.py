@@ -1,9 +1,3 @@
-"""Ontology provider abstraction and registry.
-
-Providers are registered via :func:`register_ontology_service` in
-``services/ontologies.py``.
-"""
-
 import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import Sequence

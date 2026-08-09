@@ -29,7 +29,7 @@ from search_api.services.ontology.service import (
 )
 from search_api.services.value_counts import ValueCountsUpdater
 from search_api.services.ontology.term_cache import (
-    OntologyTermCacheService,
+    OntologyTermCache,
     create_term_caches,
 )
 
@@ -113,8 +113,8 @@ def make_lifespan(domain: Domain) -> Callable[[FastAPI], Any]:
 
         # One term cache per ontology created automatically from the
         # registered providers.
-        ontology_term_services: dict[str, OntologyTermCacheService] = (
-            create_term_caches(domain.ontology_ids)
+        ontology_term_services: dict[str, OntologyTermCache] = create_term_caches(
+            domain.ontology_ids
         )
         for term_service in ontology_term_services.values():
             await term_service.load()

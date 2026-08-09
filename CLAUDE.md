@@ -61,8 +61,9 @@ search_api/
 │       ├── index/      # GENERATED OpenSearch mapping (generate-index writes it)
 │       └── schemas/    # XSDs used to validate the ingested XML
 ├── services/           # generic services
-│   ├── ontology/       # service.py registrations.py term_cache.py ontology_cache.py
-│   │                   # snomed.py send.py
+│   ├── ontology/       # service.py registrations.py snomed.py send.py term_cache.py
+│   │   └── cache/      # one whole small ontology in memory:
+│   │                   # models.py source.py store.py service.py
 │   ├── auth.py session.py
 │   └── load.py sync.py
 ├── database/           # every line of SQL, one module per table:
@@ -101,7 +102,7 @@ ai_assistant_description, ai_result_model, ai_result_instructions   # AI search 
 
 - `Domain.ontology_ids` → distinct `ontology.id`s referenced by the filtering terms.
 - `make_lifespan` builds **one term cache per ontology** via `create_term_caches(domain.ontology_ids)`
-  and stores them as `app.state.ontology_term_services: dict[ontology_id, OntologyTermCacheService]`.
+  and stores them as `app.state.ontology_term_services: dict[ontology_id, OntologyTermCache]`.
 - `Loader[LoadOptionsT]` (generic) bundles a deployment's `add_load_options` / `parse_load_options`
   / `extract` callables for the admin CLI.
 
@@ -409,7 +410,7 @@ what `/values` and `/suggestions` report and what a requested term resolves agai
 enough to cache whole still needs it, since the whole ontology does not say which concepts a field
 carries.
 
-`OntologyTermCacheService(ontology_id)` is one concrete class, not an interface: it owns the index,
+`OntologyTermCache(ontology_id)` is one concrete class, not an interface: it owns the index,
 the poll loop (`changed_since` every `TERM_CACHE_REFRESH` seconds), and the resolve-against-the-
 ontology orchestration of `cache_preferred_terms` / `refresh`. Its store is `database/terms_cache.py`
 — `read_terms`, `read_concept_ids_by_field`, `changed_since`, `insert_terms`, `update_terms`, over a
@@ -420,7 +421,7 @@ database. All ontologies share the one `terms_cache` table
 `create_term_caches(ontology_ids)` builds one cache per ontology id. There is no factory registry:
 every ontology's cache is constructed the same way, so `make_lifespan` and the admin CLI just call it.
 
-### Cached ontology sources (`search_api/services/ontology/ontology_cache.py`)
+### Cached ontology sources (`search_api/services/ontology/`)
 
 For small, flat ontologies (e.g. SEND) where caching the whole thing is cheap, so resolution needs no
 terminology server. Orthogonal to the term cache above, which every ontology has:
@@ -430,28 +431,29 @@ terminology server. Orthogonal to the term cache above, which every ontology has
   concepts`, where `version` is that source's own freshness signal (whatever ordering it naturally
   has — for SEND, a release/modified date) and `sha256` hashes the raw content fetched (an
   exact-equality signal, independent of what `version` means).
-- `CachedOntologySource` (ABC) — one method, `fetch() -> CachedOntology`.
-  `CachedOntologyStore` (Protocol) — `read() -> CachedOntology | None` / `write(CachedOntology)` /
-  `updated_at()`.
-- `CachedOntologyService` — `OntologyService` fed by a `BootstrapCachedOntologySource`; fetches once
-  at startup (`init`) and serves lookups from that in-memory table. `start()` then polls
-  `CachedOntologyStore.updated_at` every `ONTOLOGY_CACHE_REFRESH` seconds and reloads when it moves,
+- `OntologySource` (ABC, `source.py`) — `fetch() -> CachedOntology` plus `is_newer`.
+  `OntologyCacheStore` (`store.py`) — `read() -> CachedOntology | None` / `write(CachedOntology)` /
+  `updated_at()`. The models are in `models.py`; there is no store interface, since one store is all
+  there is and mypy checks the calls against it.
+- `CachedOntologyService` (`cache/service.py`) — an `OntologyService` built from a store and a source.
+  `init` serves what the store holds, fetching from the source and storing it only when nothing is
+  stored yet, then serves lookups from that in-memory table. `start()` polls
+  `OntologyCacheStore.updated_at` every `ONTOLOGY_CACHE_REFRESH` seconds and reloads when it moves,
   so a `send refresh` by the admin CLI reaches a running server without a restart. The watermark is
   read rather than the ontology itself, so an unchanged store costs one row. Its `_find_concept_ids` hook
   matches a concept id, preferred term or synonym via `normalise_term`, resolving to every concept
   carrying that value and then keeping only those permitted by the field's `ontologyRestriction`
   (in SEND ~260 terms are shared between code lists, so the restriction is what disambiguates
   them); `_find_descendant_ids` walks `parent_ids` to any depth.
-- `DatabaseOntologyStore` — persists one ontology's full concept table as a single JSON snapshot in
+- `OntologyCacheStore` — persists one ontology's full concept table as a single JSON snapshot in
   the shared `ontology_cache` table (`ontology_id, version, sha256, data, updated_at`), one row per
   `ontology_id`; `write` always replaces the entire stored snapshot (never per-concept updates). It
   maps rows to and from the models; the SQL is `database/ontology_cache.py`.
-- `BootstrapCachedOntologySource` — prefers whatever `DatabaseOntologyStore` already has; fetches live
-  and persists only the first time, when nothing is stored yet. Deliberate updates after that are
-  expected to come from `scripts/admin.py`'s `send refresh` command, not from automatic re-fetching:
-  it fetches live, skips entirely if the new version isn't newer than what's stored, and otherwise
-  writes — bumping `version` even if `sha256` is unchanged (a republish with no real content
-  change), or replacing the data too when `sha256` differs.
+- Nothing re-fetches on its own after that first store. Deliberate updates come from
+  `scripts/admin.py`'s `send refresh`, which fetches live, skips entirely if the new version isn't
+  newer than what's stored, and otherwise writes — bumping `version` even if `sha256` is unchanged
+  (a republish with no real content change), or replacing the data too when `sha256` differs. A
+  running server notices that write through the `updated_at` poll above.
 
 ### AI search (`search_api/ai/`)
 

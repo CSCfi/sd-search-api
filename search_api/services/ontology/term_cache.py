@@ -20,7 +20,7 @@ type PreferredTermByFieldAndConceptIdMap = dict[str, dict[str, str]]
 type ConceptIdsByFieldAndPreferredTermMap = dict[str, dict[str, set[str]]]
 
 
-class OntologyTermCacheService:
+class OntologyTermCache:
     """Persistent cache mapping indexed concept IDs to preferred terms.
 
     The cache is used by ``/values`` and ``/suggestions`` endpoints.
@@ -172,7 +172,7 @@ class OntologyTermCacheService:
 
 def create_term_caches(
     ontology_ids: Iterable[str],
-) -> dict[str, OntologyTermCacheService]:
+) -> dict[str, OntologyTermCache]:
     """Create one preferred term cache per ontology id, keyed by that id.
 
     The cache is per ontology. Callers map a field to its
@@ -181,6 +181,6 @@ def create_term_caches(
     """
     refresh_interval = cache_config().TERM_CACHE_REFRESH
     return {
-        ontology_id: OntologyTermCacheService(ontology_id, refresh_interval)
+        ontology_id: OntologyTermCache(ontology_id, refresh_interval)
         for ontology_id in ontology_ids
     }

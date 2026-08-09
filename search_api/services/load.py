@@ -22,7 +22,7 @@ from search_api.services.ontology.service import (
     get_ontology_service,
 )
 from search_api.exceptions import UserException
-from search_api.services.ontology.term_cache import OntologyTermCacheService
+from search_api.services.ontology.term_cache import OntologyTermCache
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +59,7 @@ class LoadService:
 
     def __init__(
         self,
-        term_caches: dict[str, OntologyTermCacheService],
+        term_caches: dict[str, OntologyTermCache],
         filtering_terms: Sequence[BeaconFilteringTerm],
         filtering_scopes: Sequence[BeaconFilteringScope] = (),
         filtering_qualifiers: Sequence[BeaconFilteringQualifier] = (),

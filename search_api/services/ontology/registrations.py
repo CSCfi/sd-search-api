@@ -9,9 +9,10 @@ initialises an ontology.
 
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
 from search_api.conf import cache_config
-from search_api.services.ontology.ontology_cache import CachedOntologyService
+from search_api.services.ontology.cache.service import CachedOntologyService
 from search_api.services.ontology.service import register_ontology_service
-from search_api.services.ontology.send import SEND_ONTOLOGY_ID, send_ontology_source
+from search_api.services.ontology.cache.store import OntologyCacheStore
+from search_api.services.ontology.send import SEND_ONTOLOGY_ID, SendOntologySource
 from search_api.services.ontology.snomed import SnomedService
 
 register_ontology_service(SNOMED_ONTOLOGY_ID, SnomedService())
@@ -19,7 +20,8 @@ register_ontology_service(SNOMED_ONTOLOGY_ID, SnomedService())
 register_ontology_service(
     SEND_ONTOLOGY_ID,
     CachedOntologyService(
-        send_ontology_source(),
+        OntologyCacheStore(SEND_ONTOLOGY_ID),
+        SendOntologySource(),
         refresh_interval=cache_config().ONTOLOGY_CACHE_REFRESH,
     ),
 )

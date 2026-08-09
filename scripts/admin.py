@@ -22,7 +22,7 @@ from search_api.services.sync import SyncService
 from search_api.database.document import count_documents
 from search_api.database.repository import get_cursor
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
-from search_api.services.ontology.ontology_cache import DatabaseOntologyStore
+from search_api.services.ontology.cache.store import OntologyCacheStore
 from search_api.services.ontology.service import get_ontology_service
 from search_api.services.ontology.send import SEND_ONTOLOGY_ID, SendOntologySource
 from search_api.services.ontology.term_cache import create_term_caches
@@ -163,7 +163,7 @@ async def _update_snomed_ontology(release_file: Path) -> None:
 
 async def _update_send_ontology() -> None:
     """Update the SEND ontology cached in the database, if a newer one exists."""
-    store = DatabaseOntologyStore(SEND_ONTOLOGY_ID)
+    store = OntologyCacheStore(SEND_ONTOLOGY_ID)
     source = SendOntologySource()
     stored = await store.read()
     fetched = await source.fetch()

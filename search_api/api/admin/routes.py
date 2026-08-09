@@ -4,13 +4,13 @@ from search_api.api.admin.auth import require_admin
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID, BeaconFilteringTerm
 from search_api.api.models import FieldValue
 from search_api.exceptions import UserException
-from search_api.services.ontology.term_cache import OntologyTermCacheService
+from search_api.services.ontology.term_cache import OntologyTermCache
 from search_api.services.ontology.snomed import SnomedService, is_concept_id
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)])
 
 
-def _snomed_term_service(request: Request) -> OntologyTermCacheService:
+def _snomed_term_service(request: Request) -> OntologyTermCache:
     """Return the SNOMED CT term cache from app state."""
     return request.app.state.ontology_term_services[SNOMED_ONTOLOGY_ID]
 

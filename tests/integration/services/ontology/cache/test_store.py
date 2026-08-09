@@ -5,11 +5,11 @@ import pytest
 
 from search_api.database.repository import get_connection
 from search_api.database.ontology_cache import ONTOLOGY_CACHE_TABLE
-from search_api.services.ontology.ontology_cache import (
-    DatabaseOntologyStore,
-    CachedOntologyConcept,
+from search_api.services.ontology.cache.models import (
     CachedOntology,
+    CachedOntologyConcept,
 )
+from search_api.services.ontology.cache.store import OntologyCacheStore
 
 os.environ.setdefault("POSTGRES_DB", os.environ["BP_POSTGRES_DB"])
 os.environ.setdefault("POSTGRES_PORT", os.environ["BP_POSTGRES_PORT"])
@@ -29,8 +29,8 @@ async def test_read_write_replace_and_ontology_isolation():
     other_concepts = [CachedOntologyConcept(concept_id="C3", preferred_term="P3")]
     ontology_id = str(uuid4())
     other_ontology_id = str(uuid4())
-    store = DatabaseOntologyStore(ontology_id)
-    other_store = DatabaseOntologyStore(other_ontology_id)
+    store = OntologyCacheStore(ontology_id)
+    other_store = OntologyCacheStore(other_ontology_id)
 
     try:
         assert await store.read() is None

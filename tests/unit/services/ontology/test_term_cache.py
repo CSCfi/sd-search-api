@@ -1,14 +1,14 @@
 import pytest
 
-from search_api.services.ontology.term_cache import OntologyTermCacheService
+from search_api.services.ontology.term_cache import OntologyTermCache
 
 FIELD_ID = "species"
 ONTOLOGY_ID = "TEST"
 
 
 @pytest.fixture
-def cache() -> OntologyTermCacheService:
-    return OntologyTermCacheService("TEST")
+def cache() -> OntologyTermCache:
+    return OntologyTermCache("TEST")
 
 
 @pytest.mark.asyncio

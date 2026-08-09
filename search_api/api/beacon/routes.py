@@ -36,7 +36,7 @@ from search_api.api.qualifiers import (
 from search_api.conf import feature_config
 from search_api.exceptions import SystemException, UserException
 from search_api.services.ontology.service import get_ontology_service
-from search_api.services.ontology.term_cache import OntologyTermCacheService
+from search_api.services.ontology.term_cache import OntologyTermCache
 
 
 # Dependency providers are module-level so tests can override them by identity
@@ -59,7 +59,7 @@ def get_ai_service(request: Request) -> AIService:
 
 def get_ontology_term_services(
     request: Request,
-) -> dict[str, OntologyTermCacheService]:
+) -> dict[str, OntologyTermCache]:
     return request.app.state.ontology_term_services
 
 
@@ -167,7 +167,7 @@ def make_beacon_router(domain: Domain) -> APIRouter:
     async def query(
         request: BeaconQueryRequest,
         beacon_service: BeaconService = Depends(get_beacon_service),
-        ontology_term_services: dict[str, OntologyTermCacheService] = Depends(
+        ontology_term_services: dict[str, OntologyTermCache] = Depends(
             get_ontology_term_services
         ),
     ):
@@ -289,7 +289,7 @@ def make_beacon_router(domain: Domain) -> APIRouter:
             ),
         ),
         beacon_service: BeaconService = Depends(get_beacon_service),
-        ontology_term_services: dict[str, OntologyTermCacheService] = Depends(
+        ontology_term_services: dict[str, OntologyTermCache] = Depends(
             get_ontology_term_services
         ),
     ) -> list[FieldValue]:
@@ -398,7 +398,7 @@ def make_beacon_router(domain: Domain) -> APIRouter:
             ),
         ),
         beacon_service: BeaconService = Depends(get_beacon_service),
-        ontology_term_services: dict[str, OntologyTermCacheService] = Depends(
+        ontology_term_services: dict[str, OntologyTermCache] = Depends(
             get_ontology_term_services
         ),
     ) -> list[FieldValue]:

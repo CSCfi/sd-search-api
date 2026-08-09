@@ -104,7 +104,7 @@ PREFERRED_TERMS: dict[str, str] = {
 }
 
 
-class MockOntologyTermCacheService:
+class MockOntologyTermCache:
     async def load(self) -> None:
         pass
 
@@ -142,7 +142,7 @@ def client():
         BP_FILTERING_TERMS
     )
     app.dependency_overrides[get_ontology_term_services] = lambda: {
-        SNOMED_ONTOLOGY_ID: MockOntologyTermCacheService()
+        SNOMED_ONTOLOGY_ID: MockOntologyTermCache()
     }
     yield TestClient(app)
     app.dependency_overrides.clear()
@@ -223,7 +223,7 @@ def suggestions_values_client():
         MockSuggestionsAndValuesBeaconService(BP_FILTERING_TERMS)
     )
     app.dependency_overrides[get_ontology_term_services] = lambda: {
-        SNOMED_ONTOLOGY_ID: MockOntologyTermCacheService()
+        SNOMED_ONTOLOGY_ID: MockOntologyTermCache()
     }
     yield TestClient(app)
     app.dependency_overrides.clear()
@@ -417,7 +417,7 @@ def test_filtering_term_values_sorted_by_count(suggestions_values_client):
     assert counts == sorted(counts, reverse=True)
 
 
-class OnlyHomoSapiensCacheService(MockOntologyTermCacheService):
+class OnlyHomoSapiensCacheService(MockOntologyTermCache):
     """Returns only Homo sapiens as valid for animal_species."""
 
     async def get_terms_by_concept_id(

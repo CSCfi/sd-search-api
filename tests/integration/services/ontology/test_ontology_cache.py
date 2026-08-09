@@ -4,9 +4,9 @@ from uuid import uuid4
 import pytest
 
 from search_api.database.repository import get_connection
-from search_api.services.ontology.cached import (
-    ONTOLOGY_CACHE_TABLE,
-    PostgresOntologyStore,
+from search_api.database.ontology_cache import ONTOLOGY_CACHE_TABLE
+from search_api.services.ontology.ontology_cache import (
+    DatabaseOntologyStore,
     CachedOntologyConcept,
     CachedOntology,
 )
@@ -29,8 +29,8 @@ async def test_read_write_replace_and_ontology_isolation():
     other_concepts = [CachedOntologyConcept(concept_id="C3", preferred_term="P3")]
     ontology_id = str(uuid4())
     other_ontology_id = str(uuid4())
-    store = PostgresOntologyStore(ontology_id)
-    other_store = PostgresOntologyStore(other_ontology_id)
+    store = DatabaseOntologyStore(ontology_id)
+    other_store = DatabaseOntologyStore(other_ontology_id)
 
     try:
         assert await store.read() is None

@@ -4,18 +4,20 @@ import asyncio
 import logging
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import override
+from typing import Protocol, override
 
-from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict
 
 from search_api.api.beacon.models import BeaconFilteringTerm
-from search_api.database.repository import get_cursor
+from search_api.database.models import StoredOntology
+from search_api.database.ontology_cache import (
+    read_ontology,
+    read_updated_at,
+    write_ontology,
+)
 from search_api.services.ontology.service import OntologyService, normalise_term
 
 logger = logging.getLogger(__name__)
-
-ONTOLOGY_CACHE_TABLE = "ontology_cache"
 
 
 class CachedOntologyConcept(BaseModel):
@@ -57,68 +59,53 @@ class CachedOntologySource(ABC):
         """
 
 
-class CachedOntologyStore(ABC):
+class CachedOntologyStore(Protocol):
     """Reads and writes the cached ontology.
 
     ``updated_at`` lets a reader poll for another process's write without reading
     the ontology itself, which is a whole concept table.
     """
 
-    @abstractmethod
     async def read(self) -> CachedOntology | None: ...
 
-    @abstractmethod
     async def write(self, fetched: CachedOntology) -> None: ...
 
-    @abstractmethod
     async def updated_at(self) -> datetime | None: ...
 
 
-class PostgresOntologyStore(CachedOntologyStore):
-    """Reads and writes the cached ontology in the ontology_cache table."""
+class DatabaseOntologyStore:
+    """Stores one ontology's concepts in the ontology_cache table."""
 
     def __init__(self, ontology_id: str) -> None:
         self._ontology_id = ontology_id
 
     async def read(self) -> CachedOntology | None:
-        async with get_cursor() as cur:
-            await cur.execute(
-                f"SELECT version, sha256, data FROM {ONTOLOGY_CACHE_TABLE} "
-                f"WHERE ontology_id = %s",
-                (self._ontology_id,),
-            )
-            row = await cur.fetchone()
-        if row is None:
+        stored = await read_ontology(self._ontology_id)
+        if stored is None:
             return None
-        version, sha256, data = row
-        concepts = [CachedOntologyConcept.model_validate(c) for c in data]
-        return CachedOntology(version=version, sha256=sha256, concepts=concepts)
+        return CachedOntology(
+            version=stored.version,
+            sha256=stored.sha256,
+            concepts=[
+                CachedOntologyConcept.model_validate(concept)
+                for concept in stored.concepts
+            ],
+        )
 
     async def updated_at(self) -> datetime | None:
-        async with get_cursor() as cur:
-            await cur.execute(
-                f"SELECT updated_at FROM {ONTOLOGY_CACHE_TABLE} WHERE ontology_id = %s",
-                (self._ontology_id,),
-            )
-            row = await cur.fetchone()
-        return row[0] if row else None
+        return await read_updated_at(self._ontology_id)
 
     async def write(self, fetched: CachedOntology) -> None:
-        data = [c.model_dump(mode="json") for c in fetched.concepts]
-        async with get_cursor() as cur:
-            await cur.execute(
-                f"""
-                INSERT INTO {ONTOLOGY_CACHE_TABLE}
-                    (ontology_id, version, sha256, data, updated_at)
-                VALUES (%s, %s, %s, %s, now())
-                ON CONFLICT (ontology_id) DO UPDATE
-                SET version = EXCLUDED.version,
-                    sha256 = EXCLUDED.sha256,
-                    data = EXCLUDED.data,
-                    updated_at = EXCLUDED.updated_at
-                """,
-                (self._ontology_id, fetched.version, fetched.sha256, Jsonb(data)),
-            )
+        await write_ontology(
+            self._ontology_id,
+            StoredOntology(
+                version=fetched.version,
+                sha256=fetched.sha256,
+                concepts=[
+                    concept.model_dump(mode="json") for concept in fetched.concepts
+                ],
+            ),
+        )
         logger.info(
             "Stored %d concept(s) for ontology '%s' version '%s' sha256 '%s'.",
             len(fetched.concepts),

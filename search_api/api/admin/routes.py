@@ -79,7 +79,7 @@ async def unexpected_concepts(field_id: str, request: Request) -> list[FieldValu
     if not valid_format:
         return []
 
-    in_cache = await _snomed_term_service(request).get_preferred_terms(
+    in_cache = await _snomed_term_service(request).get_terms_by_concept_id(
         field_id, set(valid_format.keys())
     )
     results = [

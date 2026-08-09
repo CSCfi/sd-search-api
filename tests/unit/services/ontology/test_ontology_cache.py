@@ -12,12 +12,11 @@ from search_api.api.beacon.models import (
     BeaconFilteringTerm,
     OntologyRestriction,
 )
-from search_api.services.ontology.cached import (
+from search_api.services.ontology.ontology_cache import (
     BootstrapCachedOntologySource,
     CachedOntologySource,
     CachedOntologyConcept,
     CachedOntologyService,
-    CachedOntologyStore,
     CachedOntology,
 )
 
@@ -69,7 +68,7 @@ class FailingMockSource(CachedOntologySource):
         return version > other
 
 
-class MockStore(CachedOntologyStore):
+class MockStore:
     def __init__(self) -> None:
         self.stored: CachedOntology | None = None
         self.write_count = 0

@@ -28,10 +28,10 @@ from datetime import date
 import httpx
 
 from search_api.exceptions import SystemException
-from search_api.services.ontology.cached import (
+from search_api.services.ontology.ontology_cache import (
     BootstrapCachedOntologySource,
     CachedOntologySource,
-    PostgresOntologyStore,
+    DatabaseOntologyStore,
     CachedOntologyConcept,
     CachedOntology,
 )
@@ -144,5 +144,5 @@ class SendOntologySource(CachedOntologySource):
 
 def send_ontology_source() -> BootstrapCachedOntologySource:
     return BootstrapCachedOntologySource(
-        PostgresOntologyStore(SEND_ONTOLOGY_ID), SendOntologySource()
+        DatabaseOntologyStore(SEND_ONTOLOGY_ID), SendOntologySource()
     )

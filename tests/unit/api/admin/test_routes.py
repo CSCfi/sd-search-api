@@ -28,7 +28,7 @@ def snomed_term_service():
     service = MagicMock()
     service.load = AsyncMock()
     service.refresh = AsyncMock()
-    service.get_preferred_terms = AsyncMock(return_value={})
+    service.get_terms_by_concept_id = AsyncMock(return_value={})
     app.state.ontology_term_services = {SNOMED_ONTOLOGY_ID: service}
     return service
 
@@ -139,7 +139,7 @@ def test_unexpected_concepts(beacon_service, snomed_term_service, client):
             counts={"410607006": 10, "999999999": 3, "invalid1": 6}
         )
     )
-    snomed_term_service.get_preferred_terms = AsyncMock(
+    snomed_term_service.get_terms_by_concept_id = AsyncMock(
         return_value={"410607006": "Homo sapiens"}
     )
     resp = client.get(

@@ -343,7 +343,7 @@ def make_beacon_router(domain: Domain) -> APIRouter:
         )
         counts = field_counts.counts
         term_service = ontology_term_services[ontology_id_by_field[field_id]]
-        preferred_terms = await term_service.get_preferred_terms(
+        preferred_terms = await term_service.get_terms_by_concept_id(
             field_id, set(counts.keys())
         )
         results = [
@@ -442,7 +442,7 @@ def make_beacon_router(domain: Domain) -> APIRouter:
             return [FieldValue(value=v, count=c) for v, c in sorted_values]
 
         term_service = ontology_term_services[ontology_id_by_field[field_id]]
-        preferred_terms = await term_service.get_preferred_terms(
+        preferred_terms = await term_service.get_terms_by_concept_id(
             field_id, set(counts.keys())
         )
         results: list[tuple[str, int, str | None]] = [

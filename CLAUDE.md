@@ -61,12 +61,22 @@ search_api/
 │       ├── index/      # GENERATED OpenSearch mapping (generate-index writes it)
 │       └── schemas/    # XSDs used to validate the ingested XML
 ├── services/           # generic services
-│   ├── ontology/       # service.py registrations.py term_cache.py cached.py snomed.py send.py
+│   ├── ontology/       # service.py registrations.py term_cache.py ontology_cache.py
+│   │                   # snomed.py send.py
 │   ├── auth.py session.py
 │   └── load.py sync.py
+├── database/           # every line of SQL, one module per table:
+│   │                   # repository.py (connection) models.py (rows)
+│   │                   # document.py terms_cache.py ontology_cache.py
+│   └── schema/         # create.sql drop.sql
 ├── utils/              # stateless helpers: crypt.py dir.py xml.py
-├── ai/  database/  conf.py  exceptions.py  main.py
+├── ai/  conf.py  exceptions.py  main.py
 ```
+
+**All Postgres lives in `database/`**, and nothing else does. A module there holds one table's SQL as
+plain functions and knows nothing of ontologies or documents. Where a service needs to be stubbed in
+tests, the service layer declares a `Protocol` and the concrete class satisfies it structurally — so
+`database/` never imports from `services/`, and there is no ABC pretending a second backend exists.
 
 All deployment files sit under one directory, so every data path resolves with a plain
 `Path(__file__).parent / …` — no traversal back out of the package. `config/` vs `index/` marks
@@ -393,22 +403,27 @@ Snowstorm's own behaviour of dropping completed jobs). Invoked by `scripts/admin
 ### Ontology term cache (`search_api/services/ontology/term_cache.py`)
 
 A persistent cache mapping `(ontology_id, field_id, concept_id)` → preferred term, served from an
-in-memory dict reloaded from Postgres on a background interval. Appropriate for large ontologies
-(e.g. SNOMED CT) where storing every concept is infeasible — only concepts actually observed while
-indexing a field are cached. All ontologies share the one `terms_cache` table
+in-memory index reloaded on a background interval. **Every ontology has one, whatever its size** — it
+holds not the ontology but the part of it a field uses: the concepts observed while indexing, which is
+what `/values` and `/suggestions` report and what a requested term resolves against. An ontology small
+enough to cache whole still needs it, since the whole ontology does not say which concepts a field
+carries.
+
+`OntologyTermCacheService(ontology_id)` is one concrete class, not an interface: it owns the index,
+the poll loop (`changed_since` every `TERM_CACHE_REFRESH` seconds), and the resolve-against-the-
+ontology orchestration of `cache_preferred_terms` / `refresh`. Its store is `database/terms_cache.py`
+— `read_terms`, `read_concept_ids_by_field`, `changed_since`, `insert_terms`, `update_terms`, over a
+`StoredTerm` model (`database/models.py`) rather than row tuples — so everything but the SQL is unit-testable without a
+database. All ontologies share the one `terms_cache` table
 (`ontology_id, concept_id, field_id, preferred_term, updated_at`).
 
-- `OntologyTermCacheService` (ABC) — `load`, `get_preferred_terms`, `cache_preferred_terms`,
-  `refresh`, plus no-op `start`/`stop` lifecycle hooks.
-- `PostgresOntologyTermCacheService(ontology_id)` — concrete, parameterised by ontology id; queries
-  the shared `terms_cache` table filtered by that id; overrides `start`/`stop` to run the refresh loop.
-- A factory registry (`register_term_cache` / `create_term_caches`) mirrors the ontology-service
-  registry; `make_lifespan` builds one cache per ontology in play.
+`create_term_caches(ontology_ids)` builds one cache per ontology id. There is no factory registry:
+every ontology's cache is constructed the same way, so `make_lifespan` and the admin CLI just call it.
 
-### Cached ontology sources (`search_api/services/ontology/cached.py`)
+### Cached ontology sources (`search_api/services/ontology/ontology_cache.py`)
 
-For small, flat ontologies (e.g. SEND) where caching the whole thing is cheap, unlike the
-per-field incremental cache above:
+For small, flat ontologies (e.g. SEND) where caching the whole thing is cheap, so resolution needs no
+terminology server. Orthogonal to the term cache above, which every ontology has:
 
 - `CachedOntologyConcept` — `concept_id, preferred_term, synonyms, parent_ids` (a concept can have
   more than one parent). `CachedOntology` — one release of a concept table: `version, sha256,
@@ -416,7 +431,8 @@ per-field incremental cache above:
   has — for SEND, a release/modified date) and `sha256` hashes the raw content fetched (an
   exact-equality signal, independent of what `version` means).
 - `CachedOntologySource` (ABC) — one method, `fetch() -> CachedOntology`.
-  `CachedOntologyStore` (ABC) — `read() -> CachedOntology | None` / `write(CachedOntology)`.
+  `CachedOntologyStore` (Protocol) — `read() -> CachedOntology | None` / `write(CachedOntology)` /
+  `updated_at()`.
 - `CachedOntologyService` — `OntologyService` fed by a `BootstrapCachedOntologySource`; fetches once
   at startup (`init`) and serves lookups from that in-memory table. `start()` then polls
   `CachedOntologyStore.updated_at` every `ONTOLOGY_CACHE_REFRESH` seconds and reloads when it moves,
@@ -426,10 +442,11 @@ per-field incremental cache above:
   carrying that value and then keeping only those permitted by the field's `ontologyRestriction`
   (in SEND ~260 terms are shared between code lists, so the restriction is what disambiguates
   them); `_find_descendant_ids` walks `parent_ids` to any depth.
-- `PostgresOntologyStore` — persists one ontology's full concept table as a single JSON snapshot in
+- `DatabaseOntologyStore` — persists one ontology's full concept table as a single JSON snapshot in
   the shared `ontology_cache` table (`ontology_id, version, sha256, data, updated_at`), one row per
-  `ontology_id`; `write` always replaces the entire stored snapshot (never per-concept updates).
-- `BootstrapCachedOntologySource` — prefers whatever `PostgresOntologyStore` already has; fetches live
+  `ontology_id`; `write` always replaces the entire stored snapshot (never per-concept updates). It
+  maps rows to and from the models; the SQL is `database/ontology_cache.py`.
+- `BootstrapCachedOntologySource` — prefers whatever `DatabaseOntologyStore` already has; fetches live
   and persists only the first time, when nothing is stored yet. Deliberate updates after that are
   expected to come from `scripts/admin.py`'s `send refresh` command, not from automatic re-fetching:
   it fetches live, skips entirely if the new version isn't newer than what's stored, and otherwise

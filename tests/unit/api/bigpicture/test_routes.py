@@ -39,7 +39,6 @@ from search_api.api.beacon.routes import (
 )
 from search_api.api.exception_handlers import register_exception_handlers
 from search_api.api.models import FieldValue, ValueCounts
-from search_api.services.ontology.term_cache import OntologyTermCacheService
 
 app = FastAPI()
 app.include_router(make_beacon_router(BP_DOMAIN))
@@ -105,28 +104,23 @@ PREFERRED_TERMS: dict[str, str] = {
 }
 
 
-class MockOntologyTermCacheService(OntologyTermCacheService):
-    @override
+class MockOntologyTermCacheService:
     async def load(self) -> None:
         pass
 
-    @override
-    async def get_preferred_terms(
+    async def get_terms_by_concept_id(
         self, field_id: str, concept_ids: set[str]
     ) -> dict[str, str]:
         return {
             cid: PREFERRED_TERMS[cid] for cid in concept_ids if cid in PREFERRED_TERMS
         }
 
-    @override
     async def cache_preferred_terms(self, field_id, concept_ids, snomed) -> None:
         pass
 
-    @override
     async def get_concept_ids_by_term(self, field_id: str, term: str) -> set[str]:
         return {cid for cid, t in PREFERRED_TERMS.items() if t == term}
 
-    @override
     async def refresh(self, snomed) -> None:
         pass
 
@@ -426,13 +420,12 @@ def test_filtering_term_values_sorted_by_count(suggestions_values_client):
 class OnlyHomoSapiensCacheService(MockOntologyTermCacheService):
     """Returns only Homo sapiens as valid for animal_species."""
 
-    @override
-    async def get_preferred_terms(
+    async def get_terms_by_concept_id(
         self, field_id: str, concept_ids: set[str]
     ) -> dict[str, str]:
         if field_id == "animal_species":
             return {"410607006": "Homo sapiens"} if "410607006" in concept_ids else {}
-        return await super().get_preferred_terms(field_id, concept_ids)
+        return await super().get_terms_by_concept_id(field_id, concept_ids)
 
 
 def test_filtering_term_values_excludes_unexpected():

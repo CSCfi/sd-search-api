@@ -1,9 +1,3 @@
-"""Ontology provider abstraction and registry.
-
-Providers are registered via :func:`register_ontology_service` in
-``services/ontologies.py``.
-"""
-
 import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
@@ -114,6 +108,12 @@ class OntologyService(ABC):
 
     async def init(self) -> None:
         """Perform any startup initialisation"""
+
+    async def start(self) -> None:
+        """Start a background task."""
+
+    def stop(self) -> None:
+        """Stop a background task."""
 
 
 def get_ontology_id_by_field(

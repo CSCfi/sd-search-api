@@ -20,7 +20,7 @@ from search_api.api.bigpicture.models import (
 )
 from search_api.api.models import FieldValue
 from search_api.database.repository import get_connection
-from search_api.services.ontology.term_cache import TERMS_CACHE_TABLE
+from search_api.database.terms_cache import TERMS_CACHE_TABLE
 from tests.integration.mockauth import PORT as OIDC_MOCK_PORT
 
 os.environ.setdefault("POSTGRES_DB", os.environ["BP_POSTGRES_DB"])
@@ -57,6 +57,7 @@ SPECIMEN_TYPE_CONCEPT_ID = "119376003"
 OPENSEARCH_DOCS: list[dict[str, Any]] = [
     {
         "image_id": "image_1",
+        "scope": "non_clinical",
         "dataset_id": DATASET_1,
         "dataset_image_cnt": 3,
         "dataset_short_name": "Breast-HE",
@@ -83,6 +84,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
     },
     {
         "image_id": "image_2",
+        "scope": "non_clinical",
         "dataset_id": DATASET_1,
         "dataset_image_cnt": 3,
         "dataset_short_name": "Breast-HE",
@@ -112,6 +114,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
     },
     {
         "image_id": "image_3",
+        "scope": "non_clinical",
         "dataset_id": DATASET_1,
         "dataset_image_cnt": 3,
         "dataset_short_name": "Breast-HE",
@@ -138,6 +141,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
     },
     {
         "image_id": "image_4",
+        "scope": "non_clinical",
         "dataset_id": DATASET_2,
         "dataset_image_cnt": 2,
         "dataset_short_name": "Mouse-Kidney",
@@ -164,6 +168,7 @@ OPENSEARCH_DOCS: list[dict[str, Any]] = [
     },
     {
         "image_id": "image_5",
+        "scope": "non_clinical",
         "dataset_id": DATASET_2,
         "dataset_image_cnt": 2,
         "dataset_short_name": "Mouse-Kidney",

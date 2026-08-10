@@ -11,7 +11,7 @@ from search_api.api.admin.routes import router
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
 from search_api.api.bigpicture.models import BP_FILTERING_TERMS
 from search_api.api.exception_handlers import register_exception_handlers
-from search_api.api.models import FieldValue, IndexedFieldValueCounts
+from search_api.api.models import FieldValue, ValueCounts
 from search_api.services.ontology.snomed import SnomedService
 
 _ADMIN_KEY = "test-admin-key"
@@ -28,7 +28,7 @@ def snomed_term_service():
     service = MagicMock()
     service.load = AsyncMock()
     service.refresh = AsyncMock()
-    service.get_preferred_terms = AsyncMock(return_value={})
+    service.get_terms_by_concept_id = AsyncMock(return_value={})
     app.state.ontology_term_services = {SNOMED_ONTOLOGY_ID: service}
     return service
 
@@ -36,9 +36,7 @@ def snomed_term_service():
 @pytest.fixture
 def beacon_service():
     service = MagicMock()
-    service.get_indexed_field_value_counts = AsyncMock(
-        return_value=IndexedFieldValueCounts(counts={})
-    )
+    service.get_value_counts = AsyncMock(return_value=ValueCounts(counts={}))
     app.state.beacon_service = service
     return service
 
@@ -104,10 +102,8 @@ def test_invalid_concepts_non_ontology_field(beacon_service, client):
 
 
 def test_invalid_concepts(beacon_service, client):
-    beacon_service.get_indexed_field_value_counts = AsyncMock(
-        return_value=IndexedFieldValueCounts(
-            counts={"410607006": 10, "invalid1": 6, "invalid2": 2}
-        )
+    beacon_service.get_value_counts = AsyncMock(
+        return_value=ValueCounts(counts={"410607006": 10, "invalid1": 6, "invalid2": 2})
     )
     resp = client.get(
         "/admin/snomed/fields/animal_species/invalid_concepts", headers=_auth()
@@ -138,12 +134,12 @@ def test_unexpected_concepts_non_ontology_field(client):
 
 
 def test_unexpected_concepts(beacon_service, snomed_term_service, client):
-    beacon_service.get_indexed_field_value_counts = AsyncMock(
-        return_value=IndexedFieldValueCounts(
+    beacon_service.get_value_counts = AsyncMock(
+        return_value=ValueCounts(
             counts={"410607006": 10, "999999999": 3, "invalid1": 6}
         )
     )
-    snomed_term_service.get_preferred_terms = AsyncMock(
+    snomed_term_service.get_terms_by_concept_id = AsyncMock(
         return_value={"410607006": "Homo sapiens"}
     )
     resp = client.get(

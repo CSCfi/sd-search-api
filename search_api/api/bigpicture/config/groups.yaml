@@ -14,3 +14,6 @@ filtering_groups:
   - id: clinical
     label: "Clinical"
     description: ""
+  - id: finding
+    label: "Finding"
+    description: ""

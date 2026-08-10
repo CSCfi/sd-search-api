@@ -11,11 +11,13 @@ from crypt4gh.keys.c4gh import generate as c4gh_generate
 from crypt4gh.lib import encrypt as c4gh_encrypt
 from nacl.public import PrivateKey
 
-from scripts.admin import _load
+from scripts.admin import _clear, _load, _recreate
 from search_api.api.bigpicture.domain import BP_DOMAIN
 from search_api.services.load import LoadService
 from search_api.database.document import DOCUMENT_TABLE, get_document
+from search_api.api.opensearch.services import create_search
 from search_api.database.repository import get_connection
+from search_api.exceptions import SystemException
 
 os.environ.setdefault("POSTGRES_DB", os.environ["BP_POSTGRES_DB"])
 os.environ.setdefault("POSTGRES_PORT", os.environ["BP_POSTGRES_PORT"])
@@ -151,3 +153,139 @@ async def test_load_c4gh_files(tmp_path):
                 assert payload is not None, f"{image_id!r} was not loaded"
                 assert payload["image_id"] == image_id
                 assert payload["dataset_id"] == _CLINICAL_DATASET_ID
+
+
+# Test recreate.
+#
+
+
+def _recreate_args() -> argparse.Namespace:
+    return argparse.Namespace(group="Bigpicture")
+
+
+@pytest.mark.asyncio
+async def test_recreate_refused_in_production(monkeypatch):
+    """The command destroys everything, so production must be unreachable."""
+    monkeypatch.setenv("DEPLOYMENT_ENV", "prod")
+
+    with pytest.raises(SystemException, match="not available in production"):
+        await _recreate(BP_DOMAIN, _recreate_args())
+
+
+@pytest.mark.asyncio
+async def test_recreate_aborts_unless_confirmed(monkeypatch):
+    """A wrong answer must leave the schema and its data untouched."""
+    monkeypatch.setattr("builtins.input", lambda _prompt: "not the group name")
+
+    async with get_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                f"INSERT INTO {DOCUMENT_TABLE} (id, payload) VALUES ('sentinel', '{{}}')"
+                " ON CONFLICT (id) DO NOTHING"
+            )
+
+    await _recreate(BP_DOMAIN, _recreate_args())
+
+    async with get_connection() as conn:
+        async with conn.cursor() as cur:
+            assert await get_document(cur, "sentinel") is not None
+
+
+@pytest.mark.asyncio
+async def test_recreate_rebuilds_the_schema_and_the_index(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _prompt: "Bigpicture")
+
+    search = create_search()
+    try:
+        # A stale field, as an index created before a mapping change could have.
+        if await search.indices.exists(index=BP_DOMAIN.opensearch_index):
+            await search.indices.delete(index=BP_DOMAIN.opensearch_index)
+        await search.indices.create(
+            index=BP_DOMAIN.opensearch_index,
+            body={"mappings": {"properties": {"stale_field": {"type": "text"}}}},
+        )
+        async with get_connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    f"INSERT INTO {DOCUMENT_TABLE} (id, payload) VALUES ('sentinel', '{{}}')"
+                    " ON CONFLICT (id) DO NOTHING"
+                )
+
+        await _recreate(BP_DOMAIN, _recreate_args())
+
+        # The schema is back and empty.
+        async with get_connection() as conn:
+            async with conn.cursor() as cur:
+                assert await get_document(cur, "sentinel") is None
+                await cur.execute(
+                    "SELECT table_name FROM information_schema.tables"
+                    " WHERE table_schema = 'public'"
+                )
+                tables = {row[0] for row in await cur.fetchall()}
+        assert {"document", "terms_cache", "ontology_cache"} <= tables
+
+        # The index carries the generated mapping, not the stale one.
+        mapping = await search.indices.get_mapping(index=BP_DOMAIN.opensearch_index)
+        properties = mapping[BP_DOMAIN.opensearch_index]["mappings"]["properties"]
+        assert "stale_field" not in properties
+        assert properties["scope"]["type"] == "keyword"
+        assert properties["diagnosis"]["type"] == "nested"
+        assert properties["diagnosis"]["properties"]["qualifiers"]["type"] == "keyword"
+    finally:
+        await search.close()
+
+
+# clear
+#
+
+
+def _clear_args() -> argparse.Namespace:
+    return argparse.Namespace(group="Bigpicture")
+
+
+async def _store_sentinel_document() -> None:
+    """Store a sentinel document to check later if it exists."""
+    async with get_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                f"INSERT INTO {DOCUMENT_TABLE} (id, payload) VALUES ('sentinel', '{{}}')"
+                " ON CONFLICT (id) DO NOTHING"
+            )
+
+
+async def _sentinel_document_exists() -> bool:
+    """Return True if the sentinel document exists."""
+    async with get_connection() as conn:
+        async with conn.cursor() as cur:
+            return await get_document(cur, "sentinel") is not None
+
+
+@pytest.mark.asyncio
+async def test_clear_refused_in_production(monkeypatch):
+    monkeypatch.setenv("DEPLOYMENT_ENV", "prod")
+    await _store_sentinel_document()
+
+    with pytest.raises(SystemException, match="not available in production"):
+        await _clear(BP_DOMAIN, _clear_args())
+
+    assert await _sentinel_document_exists()
+
+
+@pytest.mark.asyncio
+async def test_clear_aborts_unless_confirmed(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _prompt: "not the group name")
+    await _store_sentinel_document()
+
+    await _clear(BP_DOMAIN, _clear_args())
+
+    assert await _sentinel_document_exists()
+
+
+@pytest.mark.asyncio
+async def test_clear_deletes_every_document(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _prompt: "Bigpicture")
+    await _store_sentinel_document()
+
+    await _clear(BP_DOMAIN, _clear_args())
+
+    assert not await _sentinel_document_exists()

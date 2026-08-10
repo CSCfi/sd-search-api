@@ -11,7 +11,12 @@ from lxml import etree
 from search_api.api.opensearch.document import build_document
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
 from search_api.exceptions import UserException
+from search_api.api.bigpicture.models import BP_FILTERING_QUALIFIERS
 from search_api.api.bigpicture.extract import (
+    OBSERVATION_CANDIDATE,
+    OBSERVATION_CONFIRMED,
+    OBSERVATION_QUALIFIER,
+    _NESTED_GROUPS,
     BigpictureCodeAttributeValue,
     ObjectKey,
     ObjectIds,
@@ -57,7 +62,7 @@ def test_extract_fields_clinical():
     docs = {doc.id: doc for doc in extract_dataset_documents(str(CLINICAL_DATASET_DIR))}
     assert set(docs) == {CLINICAL_IMAGE_1, CLINICAL_IMAGE_2}
 
-    payload = build_document(docs[CLINICAL_IMAGE_1].values)
+    payload = build_document(docs[CLINICAL_IMAGE_1])
     assert payload["image_id"] == CLINICAL_IMAGE_1
     assert payload["dataset_id"] == CLINICAL_DATASET
     assert payload["dataset_description"] == "test_description"
@@ -69,15 +74,17 @@ def test_extract_fields_clinical():
     assert specimen["fixation_type"] == "3"
     assert specimen["specimen_type"] == "4"
     assert specimen["age_at_extraction"] == {"gte": 14600, "lte": 14965}
-    assert specimen["animal_species"] == "1"
     assert specimen["sex"] == "Male"
+    # Animal species is indexed for non-clinical datasets only, even though the
+    # clinical fixture's sample.xml carries it.
+    assert "animal_species" not in specimen
 
     stain = payload["staining"][0]
     assert stain["staining_procedure"] == "6"
     assert stain["staining_procedure_other"] == "test6"
     assert "staining_target" not in stain
 
-    payload2 = build_document(docs[CLINICAL_IMAGE_2].values)
+    payload2 = build_document(docs[CLINICAL_IMAGE_2])
     stain2 = payload2["staining"][0]
     assert stain2["staining_procedure"] == "7"
     assert stain2["staining_procedure_other"] == "test7"
@@ -90,17 +97,27 @@ def test_extract_fields_non_clinical():
     }
     assert set(docs) == {NON_CLINICAL_IMAGE_1, NON_CLINICAL_IMAGE_2}
 
-    payload = build_document(docs[NON_CLINICAL_IMAGE_1].values)
+    payload = build_document(docs[NON_CLINICAL_IMAGE_1])
     assert payload["scope"] == "non_clinical"
     # The short name is excluded for non-clinical datasets.
     assert "dataset_short_name" not in payload
     assert "diagnosis" not in payload
-    assert "diagnosis_candidate" not in payload
 
     assert payload["image_id"] == NON_CLINICAL_IMAGE_1
     assert payload["dataset_id"] == NON_CLINICAL_DATASET
     assert payload["dataset_description"] == "test_description"
 
+    # One finding group per Finding statement, holding all five of its fields.
+    assert payload["finding"] == [
+        {
+            "finding": "C3137",
+            "finding_severity": "C147501",
+            "finding_chronicity": "C14141",
+            "finding_distribution": "C25253",
+            "finding_result_category": "C53529",
+            "qualifiers": ["observation:confirmed"],
+        }
+    ]
     specimen = payload["specimen"][0]
     assert specimen["block_preparation"] == "5"
     assert specimen["anatomical_site"] == ["2"]
@@ -115,40 +132,73 @@ def test_extract_fields_non_clinical():
     assert stain["staining_procedure_other"] == "test6"
     assert "staining_target" not in stain
 
-    payload2 = build_document(docs[NON_CLINICAL_IMAGE_2].values)
+    payload2 = build_document(docs[NON_CLINICAL_IMAGE_2])
     stain2 = payload2["staining"][0]
     assert stain2["staining_procedure"] == "7"
     assert stain2["staining_procedure_other"] == "test7"
     assert stain2["staining_target"] == "pan Cytokeratin"
 
+    # Each image gets only the finding of the observation referencing it.
+    assert payload2["finding"] == [
+        {
+            "finding": "C41428",
+            "finding_severity": "C147501",
+            "finding_result_category": "C53529",
+            "qualifiers": ["observation:confirmed"],
+        }
+    ]
+    # This statement declares no MICHRON or MIDISTR, so neither is indexed.
+    assert "finding_chronicity" not in payload2["finding"][0]
+    assert "finding_distribution" not in payload2["finding"][0]
+
 
 def test_extract_diagnoses():
     docs = {doc.id: doc for doc in extract_dataset_documents(str(CLINICAL_DATASET_DIR))}
 
-    payload1 = build_document(docs[CLINICAL_IMAGE_1].values)
-    payload2 = build_document(docs[CLINICAL_IMAGE_2].values)
+    def qualifiers_by_diagnosis(payload) -> dict[str, list[str]]:
+        return {
+            item["diagnosis"]: sorted(item["qualifiers"])
+            for item in payload["diagnosis"]
+        }
 
-    # CASE_REF (Distinct, both images)
-    # SPECIMEN_REF (Distinct, both images)
-    # IMAGE_REF (Distinct, image 1)
-    assert sorted(payload1["diagnosis"]) == ["109355002", "254837009", "73211009"]
-    # CASE_REF (Distinct, reaches both)
-    # SPECIMEN_REF (Distinct, reaches both)
-    # SLIDE_REF (Distinct, image 2 only).
-    assert sorted(payload2["diagnosis"]) == ["195967001", "254837009", "73211009"]
+    image1 = qualifiers_by_diagnosis(build_document(docs[CLINICAL_IMAGE_1]))
+    image2 = qualifiers_by_diagnosis(build_document(docs[CLINICAL_IMAGE_2]))
 
-    # BIOLOGICAL_BEING_REF (Summary, both images)
-    # BLOCK_REF (Summary, both images)
-    assert sorted(payload1["diagnosis_candidate"]) == ["363346000", "38341003"]
-    assert sorted(payload2["diagnosis_candidate"]) == ["363346000", "38341003"]
+    # A diagnosis stated for the image itself, or stated as Distinct, is confirmed
+    # for that image; one reaching several images via another ref is a candidate.
+    # Image 1: CASE_REF and SPECIMEN_REF (Distinct, both images), IMAGE_REF
+    # (image 1), BIOLOGICAL_BEING_REF and BLOCK_REF (Summary, both images).
+    assert image1 == {
+        "109355002": ["observation:confirmed"],
+        "254837009": ["observation:confirmed"],
+        "73211009": ["observation:confirmed"],
+        "363346000": ["observation:candidate"],
+        "38341003": ["observation:candidate"],
+    }
+    # Image 2 differs only in SLIDE_REF (Distinct, image 2) replacing IMAGE_REF.
+    assert image2 == {
+        "195967001": ["observation:confirmed"],
+        "254837009": ["observation:confirmed"],
+        "73211009": ["observation:confirmed"],
+        "363346000": ["observation:candidate"],
+        "38341003": ["observation:candidate"],
+    }
 
-    for payload in (payload1, payload2):
-        # non-SNOMED code is ignored.
-        assert "8500/3" not in payload["diagnosis"]
-        assert "8500/3" not in payload["diagnosis_candidate"]
-        # Finding statement is ignored.
-        assert "404684003" not in payload["diagnosis"]
-        assert "404684003" not in payload["diagnosis_candidate"]
+    # The equality assertions above already exclude the non-SNOMED code 8500/3 and
+    # the Finding statement's 404684003, but name them so a regression is obvious.
+    for image in (image1, image2):
+        assert "8500/3" not in image
+        assert "404684003" not in image
+
+
+def test_observation_qualifier_matches_config():
+    """The parsed qualifier id and values must be the ones declared in qualifiers.yaml."""
+    qualifier = next(
+        q for q in BP_FILTERING_QUALIFIERS if q.id == OBSERVATION_QUALIFIER
+    )
+    assert set(qualifier.values) == {OBSERVATION_CONFIRMED, OBSERVATION_CANDIDATE}
+    # Every group the qualifier names must be a nested group that is parsed.
+    assert set(qualifier.groups) <= set(_NESTED_GROUPS)
 
 
 def test_object_ids_id():
@@ -225,7 +275,7 @@ def test_extract_image_id_with_accession_and_alias(tmp_path):
     # Only the first image has an accession. The second document id becomes
     # dataset accession followed by image alias.
     assert set(docs) == {CLINICAL_IMAGE_1, f"{CLINICAL_DATASET}-2"}
-    opensearch_doc = build_document(docs[f"{CLINICAL_DATASET}-2"].values)
+    opensearch_doc = build_document(docs[f"{CLINICAL_DATASET}-2"])
     assert opensearch_doc["image_id"] == "2"
     assert opensearch_doc["dataset_id"] == CLINICAL_DATASET
 
@@ -808,7 +858,7 @@ def test_extract_scope_supported_dataset_types(tmp_path, value, expected):
 
     docs = {doc.id: doc for doc in extract_dataset_documents(str(root))}
 
-    assert build_document(docs[CLINICAL_IMAGE_1].values)["scope"] == expected
+    assert build_document(docs[CLINICAL_IMAGE_1])["scope"] == expected
 
 
 @pytest.mark.parametrize(

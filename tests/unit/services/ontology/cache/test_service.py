@@ -1,6 +1,6 @@
-"""Unit tests for CachedOntologyService hooks called by ``prepare_ontology_filter`` template method."""
-
+import asyncio
 from collections.abc import Sequence
+from datetime import datetime, timezone
 
 import pytest
 
@@ -9,14 +9,12 @@ from search_api.api.beacon.models import (
     BeaconFilteringTerm,
     OntologyRestriction,
 )
-from search_api.services.ontology.cached import (
-    BootstrapCachedOntologySource,
-    CachedOntologySource,
-    CachedOntologyConcept,
-    CachedOntologyService,
-    CachedOntologyStore,
+from search_api.services.ontology.cache.models import (
     CachedOntology,
+    CachedOntologyConcept,
 )
+from search_api.services.ontology.cache.service import CachedOntologyService
+from search_api.services.ontology.cache.source import OntologySource
 
 V1_CONCEPTS = [
     CachedOntologyConcept(concept_id="C1", preferred_term="P1"),
@@ -45,38 +43,61 @@ V2_CONCEPTS = [
 ]
 
 
-class MockSource(CachedOntologySource):
-    def __init__(self, fetched: CachedOntology) -> None:
-        self._fetched = fetched
+def cached_ontology(
+    concepts: list[CachedOntologyConcept], version: str = "v1", sha256: str = "hash1"
+) -> CachedOntology:
+    return CachedOntology(version=version, sha256=sha256, concepts=concepts)
+
+
+class MockSource(OntologySource):
+    """Serves one ontology, and reports whatever change a test gives it."""
+
+    def __init__(
+        self, fetched: CachedOntology, updated_at: datetime | None = None
+    ) -> None:
+        self.fetched = fetched
+        self.changed_at = updated_at
         self.fetch_count = 0
 
     async def fetch(self) -> CachedOntology:
         self.fetch_count += 1
-        return self._fetched
+        return self.fetched
 
     def is_newer(self, version: str, other: str) -> bool:
         return version > other
 
-
-class FailingMockSource(CachedOntologySource):
-    async def fetch(self) -> CachedOntology:
-        raise ConnectionError("unreachable")
-
-    def is_newer(self, version: str, other: str) -> bool:
-        return version > other
+    async def updated_at(self) -> datetime | None:
+        return self.changed_at
 
 
-class MockStore(CachedOntologyStore):
+class MockStore:
+    """Stands in for the ontology_cache table."""
+
     def __init__(self) -> None:
         self.stored: CachedOntology | None = None
         self.write_count = 0
+        self.read_count = 0
+        self.stored_at: datetime | None = None
 
     async def read(self) -> CachedOntology | None:
+        self.read_count += 1
         return self.stored
 
     async def write(self, fetched: CachedOntology) -> None:
         self.write_count += 1
         self.stored = fetched
+        self.stored_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    async def updated_at(self) -> datetime | None:
+        return self.stored_at
+
+
+class FailingMockSource(OntologySource):
+    async def fetch(self) -> CachedOntology:
+        raise ConnectionError("unreachable")
+
+    def is_newer(self, version: str, other: str) -> bool:
+        return version > other
 
 
 def term(
@@ -102,12 +123,8 @@ def term(
 
 
 def make_service(concepts: list[CachedOntologyConcept]) -> CachedOntologyService:
-    return CachedOntologyService(
-        BootstrapCachedOntologySource(
-            MockStore(),
-            MockSource(CachedOntology(version="v1", sha256="hash1", concepts=concepts)),
-        )
-    )
+    """A service over an empty store, so init fills it from the source."""
+    return CachedOntologyService(MockStore(), MockSource(cached_ontology(concepts)))
 
 
 @pytest.fixture
@@ -144,10 +161,7 @@ async def test_find_concept_ids(service):
 
 
 @pytest.mark.asyncio
-async def test_find_concept_ids_for_a_term_shared_by_several_concepts():
-    """A preferred term or synonym isn't guaranteed unique across concepts
-    (real SEND has some), so it resolves to all of them rather than dropping
-    the association."""
+async def test_find_concept_ids_for_term_shared_by_several_concepts():
     service = make_service(
         [
             CachedOntologyConcept(concept_id="C1", preferred_term="P1"),
@@ -205,55 +219,97 @@ async def test_set_concepts_swaps_table_to_new_version(service):
     await service.init()
     assert service.is_concept_id("C4")
 
-    service._set_concepts(
-        CachedOntology(version="v2", sha256="hash2", concepts=V2_CONCEPTS)
-    )
+    service._set_concepts(cached_ontology(V2_CONCEPTS, version="v2"))
 
     assert not service.is_concept_id("C4")
     assert service.is_concept_id("C7")
 
 
 @pytest.mark.asyncio
-async def test_bootstrap_source_fetches_live_persists_and_does_not_rewrite_on_repeat():
+async def test_init_serves_what_is_stored_without_fetching():
     store = MockStore()
-    live_fetched = CachedOntology(version="v1", sha256="hash1", concepts=V1_CONCEPTS)
-    source = BootstrapCachedOntologySource(store, MockSource(live_fetched))
+    await store.write(cached_ontology(V1_CONCEPTS))
+    source = MockSource(cached_ontology(V2_CONCEPTS, version="v2"))
+    service = CachedOntologyService(store, source)
 
-    fetched = await source.fetch()
+    await service.init()
 
-    assert fetched.version == "v1"
-    assert fetched.sha256 == "hash1"
-    assert {c.concept_id for c in fetched.concepts} == {"C1", "C2", "C3", "C4", "C5"}
-    assert store.write_count == 1
-    assert store.stored == live_fetched
-
-    # A second fetch reads what was stored rather than rewriting it.
-    fetched = await source.fetch()
-    assert fetched == live_fetched
-    assert store.write_count == 1
+    assert service.is_concept_id("C1")
+    assert source.fetch_count == 0
+    assert store.write_count == 1  # only the test's own write
 
 
 @pytest.mark.asyncio
-async def test_bootstrap_source_prefers_stored_data_without_touching_live_source():
+async def test_init_fetches_and_stores_when_nothing_is_stored():
     store = MockStore()
-    store.stored = CachedOntology(version="v1", sha256="hash1", concepts=V2_CONCEPTS)
-    live = MockSource(
-        CachedOntology(version="v2", sha256="hash2", concepts=V1_CONCEPTS)
-    )
+    source = MockSource(cached_ontology(V1_CONCEPTS))
+    service = CachedOntologyService(store, source)
 
-    fetched = await BootstrapCachedOntologySource(store, live).fetch()
+    await service.init()
 
-    assert fetched.version == "v1"
-    assert fetched.sha256 == "hash1"
-    assert {c.concept_id for c in fetched.concepts} == {"C6", "C7"}
-    assert live.fetch_count == 0
-    assert store.write_count == 0
+    assert service.is_concept_id("C1")
+    assert source.fetch_count == 1
+    assert store.stored == source.fetched
 
 
 @pytest.mark.asyncio
-async def test_bootstrap_source_propagates_live_failure_when_store_is_empty():
-    store = MockStore()
-    source = BootstrapCachedOntologySource(store, FailingMockSource())
+async def test_init_propagates_a_fetch_failure_when_nothing_is_stored():
+    service = CachedOntologyService(MockStore(), FailingMockSource())
 
     with pytest.raises(ConnectionError):
-        await source.fetch()
+        await service.init()
+
+
+@pytest.mark.asyncio
+async def test_reloads_when_another_process_writes_the_store():
+    store = MockStore()
+    await store.write(cached_ontology(V1_CONCEPTS))
+    service = CachedOntologyService(
+        store, MockSource(cached_ontology(V1_CONCEPTS)), refresh_interval=0.01
+    )
+    await service.init()
+    assert service.is_concept_id("C1")
+
+    # Another process replaced the stored ontology.
+    store.stored = cached_ontology(V2_CONCEPTS, version="v2", sha256="hash2")
+    store.stored_at = datetime(2026, 2, 1, tzinfo=timezone.utc)
+
+    await service.start()
+    try:
+        await asyncio.sleep(0.05)
+    finally:
+        service.stop()
+
+    assert service.is_concept_id("C6")
+    assert not service.is_concept_id("C1")
+
+
+@pytest.mark.asyncio
+async def test_does_not_reload_while_the_store_is_unchanged():
+    store = MockStore()
+    await store.write(cached_ontology(V1_CONCEPTS))
+    service = CachedOntologyService(
+        store, MockSource(cached_ontology(V1_CONCEPTS)), refresh_interval=0.01
+    )
+
+    await service.start()
+    reads = store.read_count
+
+    try:
+        await asyncio.sleep(0.05)
+    finally:
+        service.stop()
+
+    assert store.read_count == reads
+
+
+@pytest.mark.asyncio
+async def test_stop_refresh():
+    service = make_service(V1_CONCEPTS)
+    await service.start()
+    task = service._poller._task
+    service.stop()
+    await asyncio.sleep(0)
+
+    assert task is not None and task.done()
+    assert service._poller._task is None

@@ -15,6 +15,7 @@ from search_api.api.beacon.models import (
     BeaconResultSets,
 )
 from search_api.api.bigpicture.models import (
+    BP_FILTERING_QUALIFIERS,
     BigpictureBeaconResultSetResult,
     BigpictureBeaconResultSetsResponse,
 )
@@ -37,8 +38,7 @@ from search_api.api.beacon.routes import (
     make_beacon_router,
 )
 from search_api.api.exception_handlers import register_exception_handlers
-from search_api.api.models import FieldValue, IndexedFieldValueCounts
-from search_api.services.ontology.term_cache import OntologyTermCacheService
+from search_api.api.models import FieldValue, ValueCounts
 
 app = FastAPI()
 app.include_router(make_beacon_router(BP_DOMAIN))
@@ -71,7 +71,7 @@ class MockBeaconService(
 ):
     @override
     async def query(
-        self, filters, granularity="record", scope=None
+        self, filters, granularity="record", scope=None, qualifiers=None
     ) -> BeaconResultSets[BigpictureBeaconResultSetResult]:
         return get_mock_query_result()
 
@@ -80,19 +80,19 @@ class MockBeaconService(
         return True
 
     @override
-    async def get_indexed_field_value_counts(
-        self, field_id: str
-    ) -> IndexedFieldValueCounts:
+    async def get_value_counts(
+        self, field_id: str, scope=None, qualifiers=None
+    ) -> ValueCounts:
         term = self.get_term(field_id)
         if isinstance(term.opensearch_field, OpenSearchOntologyOrValue):
-            return IndexedFieldValueCounts(counts={}, other_counts={})
-        return IndexedFieldValueCounts(counts={})
+            return ValueCounts(counts={}, other_counts={})
+        return ValueCounts(counts={})
 
 
-SUGGESTIONS_AND_VALUES_INDEXED_COUNTS: dict[str, IndexedFieldValueCounts] = {
-    "sex": IndexedFieldValueCounts(counts={"Male": 10, "Female": 8}),
-    "animal_species": IndexedFieldValueCounts(counts={"410607006": 5, "388480002": 3}),
-    "fixation_type": IndexedFieldValueCounts(
+SUGGESTIONS_AND_VALUES_INDEXED_COUNTS: dict[str, ValueCounts] = {
+    "sex": ValueCounts(counts={"Male": 10, "Female": 8}),
+    "animal_species": ValueCounts(counts={"410607006": 5, "388480002": 3}),
+    "fixation_type": ValueCounts(
         counts={"1388477003": 4}, other_counts={"Formalin": 2, "Custom fix": 1}
     ),
 }
@@ -104,37 +104,32 @@ PREFERRED_TERMS: dict[str, str] = {
 }
 
 
-class MockOntologyTermCacheService(OntologyTermCacheService):
-    @override
+class MockOntologyTermCache:
     async def load(self) -> None:
         pass
 
-    @override
-    async def get_preferred_terms(
+    async def get_terms_by_concept_id(
         self, field_id: str, concept_ids: set[str]
     ) -> dict[str, str]:
         return {
             cid: PREFERRED_TERMS[cid] for cid in concept_ids if cid in PREFERRED_TERMS
         }
 
-    @override
     async def cache_preferred_terms(self, field_id, concept_ids, snomed) -> None:
         pass
 
-    @override
     async def get_concept_ids_by_term(self, field_id: str, term: str) -> set[str]:
         return {cid for cid, t in PREFERRED_TERMS.items() if t == term}
 
-    @override
     async def refresh(self, snomed) -> None:
         pass
 
 
 class MockSuggestionsAndValuesBeaconService(MockBeaconService):
     @override
-    async def get_indexed_field_value_counts(
-        self, field_id: str
-    ) -> IndexedFieldValueCounts:
+    async def get_value_counts(
+        self, field_id: str, scope=None, qualifiers=None
+    ) -> ValueCounts:
         if field_id in SUGGESTIONS_AND_VALUES_INDEXED_COUNTS:
             return SUGGESTIONS_AND_VALUES_INDEXED_COUNTS[field_id]
         raise ValueError(f"Unsupported field: '{field_id}'")
@@ -147,7 +142,7 @@ def client():
         BP_FILTERING_TERMS
     )
     app.dependency_overrides[get_ontology_term_services] = lambda: {
-        SNOMED_ONTOLOGY_ID: MockOntologyTermCacheService()
+        SNOMED_ONTOLOGY_ID: MockOntologyTermCache()
     }
     yield TestClient(app)
     app.dependency_overrides.clear()
@@ -228,7 +223,7 @@ def suggestions_values_client():
         MockSuggestionsAndValuesBeaconService(BP_FILTERING_TERMS)
     )
     app.dependency_overrides[get_ontology_term_services] = lambda: {
-        SNOMED_ONTOLOGY_ID: MockOntologyTermCacheService()
+        SNOMED_ONTOLOGY_ID: MockOntologyTermCache()
     }
     yield TestClient(app)
     app.dependency_overrides.clear()
@@ -422,16 +417,15 @@ def test_filtering_term_values_sorted_by_count(suggestions_values_client):
     assert counts == sorted(counts, reverse=True)
 
 
-class OnlyHomoSapiensCacheService(MockOntologyTermCacheService):
+class OnlyHomoSapiensCacheService(MockOntologyTermCache):
     """Returns only Homo sapiens as valid for animal_species."""
 
-    @override
-    async def get_preferred_terms(
+    async def get_terms_by_concept_id(
         self, field_id: str, concept_ids: set[str]
     ) -> dict[str, str]:
         if field_id == "animal_species":
             return {"410607006": "Homo sapiens"} if "410607006" in concept_ids else {}
-        return await super().get_preferred_terms(field_id, concept_ids)
+        return await super().get_terms_by_concept_id(field_id, concept_ids)
 
 
 def test_filtering_term_values_excludes_unexpected():
@@ -472,3 +466,115 @@ def test_filtering_term_suggestions_excludes_unexpected():
 
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+def test_filtering_qualifiers(client: TestClient):
+    response = client.get("/filtering_qualifiers")
+    assert response.status_code == 200
+    assert response.json() == [q.model_dump() for q in BP_FILTERING_QUALIFIERS]
+
+
+def test_query_rejects_unknown_qualifier(client: TestClient):
+    request = BeaconQueryRequest(
+        query=BeaconQuery(requestedQualifiers={"certainty": ["confirmed"]})
+    )
+    response = client.post("/query", json=request.model_dump())
+    assert response.status_code == 400
+    assert "Unsupported qualifier" in response.text
+
+
+def test_query_rejects_unknown_qualifier_value(client: TestClient):
+    request = BeaconQueryRequest(
+        query=BeaconQuery(requestedQualifiers={"observation": ["known"]})
+    )
+    response = client.post("/query", json=request.model_dump())
+    assert response.status_code == 400
+    assert "Unsupported value(s) ['known']" in response.text
+
+
+def test_query_accepts_absent_qualifiers(client: TestClient):
+    """An absent qualifier is not filtered on, so the query is valid without one."""
+    request = BeaconQueryRequest(query=BeaconQuery(requestedGranularity="boolean"))
+    assert request.query.requestedQualifiers == {}
+    assert client.post("/query", json=request.model_dump()).status_code == 200
+
+
+@pytest.mark.parametrize("path", ["values", "suggestions"])
+def test_filtering_term_qualifier_param_is_validated(client: TestClient, path: str):
+    params = {"qualifier": "observation:confirmed"}
+    if path == "suggestions":
+        params["term"] = "a"
+    assert client.get(f"/filtering_terms/sex/{path}", params=params).status_code == 200
+
+    # A malformed param names no value.
+    bad = dict(params, qualifier="observation")
+    response = client.get(f"/filtering_terms/sex/{path}", params=bad)
+    assert response.status_code == 400
+    assert "expected '<qualifier id>:<value>'" in response.text
+
+
+@pytest.mark.parametrize("path", ["values", "suggestions"])
+def test_filtering_term_scope_param_is_validated(client: TestClient, path: str):
+    params = {"scope": "clinical"}
+    if path == "suggestions":
+        params["term"] = "a"
+    assert client.get(f"/filtering_terms/sex/{path}", params=params).status_code == 200
+
+    bad = dict(params, scope="preclinical")
+    response = client.get(f"/filtering_terms/sex/{path}", params=bad)
+    assert response.status_code == 400
+    assert "Unsupported scope: 'preclinical'" in response.text
+
+
+@pytest.mark.parametrize("path", ["values", "suggestions"])
+def test_filtering_term_without_scope_or_qualifier_counts_everything(
+    client: TestClient, path: str
+):
+    """Neither axis has a default, so omitting both restricts nothing."""
+    params = {"term": "a"} if path == "suggestions" else {}
+    assert client.get(f"/filtering_terms/sex/{path}", params=params).status_code == 200
+
+
+@pytest.mark.parametrize("path", ["values", "suggestions"])
+def test_filtering_term_rejects_a_scope_the_field_is_not_in(
+    client: TestClient, path: str
+):
+    """diagnosis is clinical-only, so counting it as non-clinical is a client error."""
+    params = {"scope": "non_clinical"}
+    if path == "suggestions":
+        params["term"] = "a"
+    response = client.get(f"/filtering_terms/diagnosis/{path}", params=params)
+    assert response.status_code == 400
+    assert "Field 'diagnosis' is not in scope 'non_clinical'" in response.text
+
+    # Its own scope is accepted.
+    ok = dict(params, scope="clinical")
+    assert (
+        client.get(f"/filtering_terms/diagnosis/{path}", params=ok).status_code == 200
+    )
+
+
+def _database_health(monkeypatch, healthy: bool) -> None:
+    async def is_healthy() -> bool:
+        return healthy
+
+    monkeypatch.setattr("search_api.api.beacon.routes.is_database_healthy", is_healthy)
+
+
+def test_database_health_ok(client: TestClient, monkeypatch):
+    _database_health(monkeypatch, True)
+
+    resp = client.get("/health")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok"}
+
+
+def test_database_health_unhealthy(client: TestClient, monkeypatch):
+    _database_health(monkeypatch, False)
+
+    resp = client.get("/health")
+
+    assert resp.status_code == 503
+    assert resp.json()["detail"]["database"] == "unhealthy"
+    assert resp.json()["detail"]["search"] == "ok"

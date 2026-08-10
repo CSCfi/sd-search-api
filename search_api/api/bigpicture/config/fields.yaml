@@ -6,21 +6,25 @@
 #
 # Conventions:
 #   - The field name is the "id".
-#   - "group" is the OpenSearch nested container a field lives in; omit it for a
+#   - "group" is the OpenSearch nested group a field lives in; omit it for a
 #     top-level field. The full index path is "<group>.<id>".
 #
-#     Grouping follows the source XML hierarchy but nested containers are created only
-#     when needed. A nested container is required when an object can repeat within
-#     an image and has several correlated fields.
-#     Only two objects meet this requirement:
+#     Grouping follows the source XML hierarchy but nested groups are created only
+#     when needed. A nested group is required when an object can repeat within
+#     an image and has several correlated fields or uses qualifiers.
+#     Objects meeting this requirement:
 #       - specimen: a block can be sampled from many specimens, and a specimen has
 #         several correlated fields. A specimen is extracted from exactly one
 #         biological being, so the biological being's fields can be flattened in
 #         the specimen. The block has a single field (block_preparation)
 #         with nothing to correlate and can also be flattened in the specimen.
 #       - staining: a slide carries several stains, each with correlated fields.
+#       - finding: an image can have several non-clinical findings, each with
+#         several correlated fields.
+#       - diagnosis: an image can have several clinical diagnoses. Nested group
+#         is required so each diagnosis can have qualifiers.
 #     The slide and case have no searchable fields and do not need to be
-#     represented as nested containers.
+#     represented as nested groups.
 #   - "ui_group" is the UI group id this term belongs to.
 #   - "ui_display" controls whether the term is shown in the UI.
 #   - Quote ontology concept codes (e.g. "410607006"). Unquoted, they are parsed
@@ -47,7 +51,7 @@ filtering_terms:
   - id: animal_species
     type: ontology
     group: specimen
-    scopes: [ clinical, non_clinical ]
+    scopes: [ non_clinical ]
     label: "Biological species"
     description: "Species of the biological being"
     ontology:
@@ -174,6 +178,7 @@ filtering_terms:
 
   - id: diagnosis
     type: ontology
+    group: diagnosis
     scopes: [ clinical ]
     label: "Diagnosis"
     description: "Diagnosis known to apply to one more image linked to an observation."
@@ -182,22 +187,69 @@ filtering_terms:
     ontologyRestriction:
       concept_ids: [ "138875005" ]  # SNOMED CT Concept (root)
       include_descendants: true
-    multivalued: true
     ui_group: "clinical"
 
-  - id: diagnosis_candidate
+  - id: finding
     type: ontology
-    scopes: [ clinical ]
-    label: "Diagnosis (candidate)"
-    description: "Diagnosis known to apply to at least one, but not necessarily all, images linked to an observation."
+    group: finding
+    scopes: [ non_clinical ]
+    label: "Finding"
+    description: "Microscopic finding (MISTRESC)."
     ontology:
-      id: SCTID
-    ontologyRestriction:
-      concept_ids: [ "138875005" ]  # SNOMED CT Concept (root)
-      include_descendants: true
-    multivalued: true
-    ui_group: "clinical"
+      id: SEND
+    ui_group: "finding"
 
+  - id: finding_severity
+    type: ontology
+    group: finding
+    scopes: [ non_clinical ]
+    label: "Severity"
+    description: "Severity of the microscopic finding (MISEV)."
+    ontology:
+      id: SEND
+    ontologyRestriction:
+      concept_ids: [ "C90000" ]  # SEND Severity (SEV)
+      include_descendants: true
+    ui_group: "finding"
+
+  - id: finding_chronicity
+    type: ontology
+    group: finding
+    scopes: [ non_clinical ]
+    label: "Chronicity"
+    description: "Chronicity of the microscopic finding (MICHRON)."
+    ontology:
+      id: SEND
+    ontologyRestriction:
+      concept_ids: [ "C120529" ]  # Chronicity (CHRNCTY)
+      include_descendants: true
+    ui_group: "finding"
+
+  - id: finding_distribution
+    type: ontology
+    group: finding
+    scopes: [ non_clinical ]
+    label: "Distribution"
+    description: "Distribution of the microscopic finding (MIDISTR)."
+    ontology:
+      id: SEND
+    ontologyRestriction:
+      concept_ids: [ "C120530" ]  # Distribution (DSTRBN)
+      include_descendants: true
+    ui_group: "finding"
+
+  - id: finding_result_category
+    type: ontology
+    group: finding
+    scopes: [ non_clinical ]
+    label: "Result category"
+    description: "Result category (MIRESCAT)."
+    ontology:
+      id: SEND
+    ontologyRestriction:
+      concept_ids: [ "C90017" ]  # Microscopic Histopathology Result Category (MIRESCAT)
+      include_descendants: true
+    ui_group: "finding"
 
 # Fields that are indexed in OpenSearch but are not filterable.
 # All are top-level (no group).
@@ -213,6 +265,3 @@ non_filtering_fields:
 
   - id: dataset_short_name
     type: text
-
-  - id: scope
-    type: keyword

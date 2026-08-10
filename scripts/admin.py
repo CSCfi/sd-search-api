@@ -22,7 +22,8 @@ from search_api.services.sync import SyncService
 from search_api.database.document import count_documents
 from search_api.database.repository import get_cursor
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
-from search_api.services.ontology.cached import PostgresOntologyStore
+from search_api.services.ontology.cache.source import OntologySource
+from search_api.services.ontology.cache.store import OntologyCacheStore
 from search_api.services.ontology.service import get_ontology_service
 from search_api.services.ontology.send import SEND_ONTOLOGY_ID, SendOntologySource
 from search_api.services.ontology.term_cache import create_term_caches
@@ -37,6 +38,31 @@ def _index_path(domain: Domain) -> Path:
         / "index"
         / f"{domain.opensearch_index}.json"
     )
+
+
+def _schema_path(name: str) -> Path:
+    return Path(search_api.__file__).parent / "database" / "schema" / f"{name}.sql"
+
+
+def _require_non_production() -> None:
+    """Refuse a destructive command outside a development environment.
+
+    :raises SystemException: if DEPLOYMENT_ENV is production.
+    """
+    if os.getenv("DEPLOYMENT_ENV", "dev") == "prod":
+        raise SystemException("This command is not available in production.")
+
+
+def _confirm(what_will_happen: str, expected: str) -> bool:
+    """Ask the operator to type ``expected`` before something destructive happens."""
+    try:
+        answer = input(
+            f"{what_will_happen}\n"
+            f"Type '{expected}' to confirm, or anything else to abort: "
+        )
+    except EOFError:
+        return False
+    return answer == expected
 
 
 def _setup(env_file: str | None) -> None:
@@ -61,7 +87,10 @@ async def _load(domain: Domain, args: argparse.Namespace) -> None:
 
     logging.info("Loading documents into the database.")
     load_service = LoadService(
-        create_term_caches(domain.ontology_ids), domain.filtering_terms
+        create_term_caches(domain.ontology_ids),
+        domain.filtering_terms,
+        domain.filtering_scopes,
+        domain.filtering_qualifiers,
     )
     await load_service.store_documents(docs_iter)
 
@@ -75,25 +104,20 @@ async def _load(domain: Domain, args: argparse.Namespace) -> None:
 
 
 async def _clear(domain: Domain, args: argparse.Namespace) -> None:
-    if os.getenv("DEPLOYMENT_ENV", "dev") == "prod":
-        raise SystemException("This command is not available in production.")
+    """Remove all documents from the OpenSearch index and the database schema."""
 
-    def _confirm_clear(_doc_count: int) -> bool:
-        try:
-            answer = input(
-                f"All documents ({_doc_count}) will be deleted from database and OpenSearch Index '{domain.opensearch_index}'.\n"
-                f"Type '{args.group}' to confirm, or anything else to abort: "
-            )
-        except EOFError:
-            return False
-        return answer == args.group
+    _require_non_production()
 
     sync_service = SyncService(domain.opensearch_index)
     try:
         async with get_cursor() as cur:
             doc_count = await count_documents(cur)
 
-        if not _confirm_clear(doc_count):
+        if not _confirm(
+            f"All documents ({doc_count}) will be deleted from database and "
+            f"OpenSearch Index '{domain.opensearch_index}'.",
+            args.group,
+        ):
             logging.info("Aborted, nothing was deleted.")
             return
 
@@ -103,21 +127,51 @@ async def _clear(domain: Domain, args: argparse.Namespace) -> None:
         await sync_service.search.close()
 
 
+async def _recreate(domain: Domain, args: argparse.Namespace) -> None:
+    """Drop and recreate the OpenSearch index and the database schema."""
+    _require_non_production()
+
+    if not _confirm(
+        f"The OpenSearch index '{domain.opensearch_index}' and the database "
+        f"schema will be dropped and recreated. All documents and "
+        f"cached ontology terms will be lost.",
+        args.group,
+    ):
+        logging.info("Aborted, nothing was dropped.")
+        return
+
+    async with get_cursor() as cur:
+        for _name in ("drop", "create"):
+            await cur.execute(_schema_path(_name).read_text())  # type: ignore[arg-type]
+    logging.info("Recreated the database schema.")
+
+    body = OpenSearchIndexGeneratorService(domain.opensearch_fields).generate()
+    search = create_search()
+    try:
+        if await search.indices.exists(index=domain.opensearch_index):
+            await search.indices.delete(index=domain.opensearch_index)
+            logging.info("Deleted OpenSearch index %s.", domain.opensearch_index)
+        await create_index(search, domain.opensearch_index, body)
+        logging.info("Created OpenSearch index %s.", domain.opensearch_index)
+    finally:
+        await search.close()
+
+
 async def _update_snomed_ontology(release_file: Path) -> None:
     """Import release_file into Snowstorm as a new SNOMED CT release."""
     await import_snomed_release(release_file)
 
 
-async def _update_send_ontology() -> None:
-    """Update the SEND ontology cached in the database, if a newer one exists."""
-    store = PostgresOntologyStore(SEND_ONTOLOGY_ID)
-    source = SendOntologySource()
+async def _update_cached_ontology(ontology_id: str, source: OntologySource) -> None:
+    """Update an ontology cached in the database, if the source has a newer one."""
+    store = OntologyCacheStore(ontology_id)
     stored = await store.read()
     fetched = await source.fetch()
 
     if stored is not None and not source.is_newer(fetched.version, stored.version):
         logging.info(
-            "SEND ontology is already up to date (stored version '%s', fetched '%s').",
+            "%s ontology is already up to date (stored version '%s', fetched '%s').",
+            ontology_id,
             stored.version,
             fetched.version,
         )
@@ -126,11 +180,17 @@ async def _update_send_ontology() -> None:
     changed = stored is None or fetched.sha256 != stored.sha256
     await store.write(fetched)
     logging.info(
-        "Updated SEND ontology to version '%s' with '%d' concepts%s",
+        "Updated %s ontology to version '%s' with '%d' concepts%s",
+        ontology_id,
         fetched.version,
         len(fetched.concepts),
         "." if changed else " (content unchanged).",
     )
+
+
+async def _update_send_ontology() -> None:
+    """Update the SEND ontology cached in the database, if a newer one exists."""
+    await _update_cached_ontology(SEND_ONTOLOGY_ID, SendOntologySource())
 
 
 # How each ontology is updated from its source, keyed by ontology id. Signatures
@@ -242,6 +302,15 @@ if __name__ == "__main__":
             "clear", help="Delete all data from the database and the OpenSearch index."
         )
 
+        # recreate
+        commands.add_parser(
+            "recreate",
+            help=(
+                "Drop and recreate the OpenSearch index and the database schema, "
+                "discarding all data. Not available in production."
+            ),
+        )
+
     # snomed (deployment-independent)
     snomed_commands = groups.add_parser(
         "snomed", help="Manage the shared SNOMED CT preferred terms cache."
@@ -294,3 +363,5 @@ if __name__ == "__main__":
             asyncio.run(_create_index(domain))
         elif args.command == "clear":
             asyncio.run(_clear(domain, args))
+        elif args.command == "recreate":
+            asyncio.run(_recreate(domain, args))

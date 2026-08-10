@@ -28,13 +28,11 @@ from datetime import date
 import httpx
 
 from search_api.exceptions import SystemException
-from search_api.services.ontology.cached import (
-    BootstrapCachedOntologySource,
-    CachedOntologySource,
-    PostgresOntologyStore,
-    CachedOntologyConcept,
+from search_api.services.ontology.cache.models import (
     CachedOntology,
+    CachedOntologyConcept,
 )
+from search_api.services.ontology.cache.source import OntologySource
 
 SEND_ONTOLOGY_ID = "SEND"
 
@@ -122,7 +120,7 @@ def parse_send_ontology_version(content: bytes) -> str:
     return max(dates).isoformat()
 
 
-class SendOntologySource(CachedOntologySource):
+class SendOntologySource(OntologySource):
     """Fetches SEND controlled terminology from the URLs NCI EVS publishes it at."""
 
     async def fetch(self) -> CachedOntology:
@@ -140,9 +138,3 @@ class SendOntologySource(CachedOntologySource):
     def is_newer(self, version: str, other: str) -> bool:
         """A SEND version is a release or modification date."""
         return date.fromisoformat(version) > date.fromisoformat(other)
-
-
-def send_ontology_source() -> BootstrapCachedOntologySource:
-    return BootstrapCachedOntologySource(
-        PostgresOntologyStore(SEND_ONTOLOGY_ID), SendOntologySource()
-    )

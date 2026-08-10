@@ -8,7 +8,8 @@ CREATE TABLE terms_cache (
     PRIMARY KEY (ontology_id, concept_id, field_id)
 );
 
-CREATE INDEX idx_terms_cache_updated_at ON terms_cache (updated_at);
+CREATE INDEX idx_terms_cache_ontology_id_updated_at
+    ON terms_cache (ontology_id, updated_at);
 
 -- Full ontology cache. Suitable for small ontologies (e.g. SEND).
 CREATE TABLE ontology_cache (
@@ -19,6 +20,7 @@ CREATE TABLE ontology_cache (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Documents to be synced to OpenSearch.
 CREATE TABLE document (
     id          TEXT        NOT NULL PRIMARY KEY,
     payload     JSONB       NOT NULL,

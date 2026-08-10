@@ -4,13 +4,13 @@ from search_api.api.admin.auth import require_admin
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID, BeaconFilteringTerm
 from search_api.api.models import FieldValue
 from search_api.exceptions import UserException
-from search_api.services.ontology.term_cache import OntologyTermCacheService
+from search_api.services.ontology.term_cache import OntologyTermCache
 from search_api.services.ontology.snomed import SnomedService, is_concept_id
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)])
 
 
-def _snomed_term_service(request: Request) -> OntologyTermCacheService:
+def _snomed_term_service(request: Request) -> OntologyTermCache:
     """Return the SNOMED CT term cache from app state."""
     return request.app.state.ontology_term_services[SNOMED_ONTOLOGY_ID]
 
@@ -47,9 +47,7 @@ def _get_ontology_filtering_term(
 
 async def _get_ontology_field_counts(field_id: str, request: Request) -> dict[str, int]:
     _get_ontology_filtering_term(field_id, request)
-    field_counts = (
-        await request.app.state.beacon_service.get_indexed_field_value_counts(field_id)
-    )
+    field_counts = await request.app.state.beacon_service.get_value_counts(field_id)
     return field_counts.counts
 
 
@@ -81,7 +79,7 @@ async def unexpected_concepts(field_id: str, request: Request) -> list[FieldValu
     if not valid_format:
         return []
 
-    in_cache = await _snomed_term_service(request).get_preferred_terms(
+    in_cache = await _snomed_term_service(request).get_terms_by_concept_id(
         field_id, set(valid_format.keys())
     )
     results = [

@@ -44,13 +44,27 @@ class SnowstormConfiguration(BaseSettings):
     SNOWSTORM_URL: str = Field(description="Snowstorm SNOMED CT server base URL.")
 
 
-class SnomedTermCacheConfiguration(BaseSettings):
-    """SNOMED CT preferred term in-memory cache configuration."""
+class CacheConfiguration(BaseSettings):
+    """In-memory cache configuration."""
 
-    SNOMED_CACHE_REFRESH: int = Field(
+    ONTOLOGY_CACHE_REFRESH: int = Field(
         default=300,
         description=(
-            "Frequency (in seconds) to update theSNOMED CT preferred term in-memory cache."
+            "Frequency (in seconds) to check whether the stored ontology changed."
+        ),
+    )
+    TERM_CACHE_REFRESH: int = Field(
+        default=300,
+        description=(
+            "Frequency (in seconds) to check whether an ontology's cached "
+            "preferred terms changed."
+        ),
+    )
+    VALUE_COUNT_CACHE_REFRESH: int = Field(
+        default=300,
+        description=(
+            "Frequency (in seconds) to check whether a document has been synced to "
+            "the search index since the value counts were last counted."
         ),
     )
 
@@ -179,9 +193,9 @@ def admin_config() -> AdminConfiguration:
     return AdminConfiguration()
 
 
-def snomed_term_cache_config() -> SnomedTermCacheConfiguration:
-    """Get SNOMED term cache configuration."""
-    return SnomedTermCacheConfiguration()
+def cache_config() -> CacheConfiguration:
+    """Get in-memory cache configuration."""
+    return CacheConfiguration()
 
 
 def feature_config() -> FeatureConfiguration:

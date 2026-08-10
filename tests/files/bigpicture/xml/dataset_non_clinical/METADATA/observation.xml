@@ -1,24 +1,135 @@
 <OBSERVATION_SET xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-    <!-- A non-clinical dataset carries no diagnosis. Only a non-diagnosis
-         statement is left, so extraction yields no diagnosis fields even
-         though observation.xml is present. -->
-    <OBSERVATION alias="7">
-        <IMAGE_REF alias="2" accession="bb-image-v6h3rn-8kwd5p"/>
+    <!-- A non-clinical dataset carries no diagnosis. Its observations are SEND
+         coded Finding statements, one per image. -->
+
+    <!-- IMAGE_REF with chronicity and distribution. -->
+    <OBSERVATION alias="1">
+        <IMAGE_REF alias="1" accession="bb-image-z9c4gs-7bqm2t"/>
         <STATEMENT>
             <STATEMENT_TYPE>Finding</STATEMENT_TYPE>
-            <STATEMENT_STATUS>Distinct</STATEMENT_STATUS>
+            <STATEMENT_STATUS>Summary</STATEMENT_STATUS>
             <CODE_ATTRIBUTES>
                 <CODE_ATTRIBUTE>
-                    <TAG>finding</TAG>
+                    <TAG>MISTRESC</TAG>
                     <VALUE>
-                        <CODE>404684003</CODE>
-                        <SCHEME>SNOMED CT</SCHEME>
-                        <MEANING>Clinical finding (finding)</MEANING>
-                        <SCHEME_VERSION/>
+                        <CODE>C3137</CODE>
+                        <SCHEME>SEND</SCHEME>
+                        <MEANING>INFLAMMATION</MEANING>
+                        <SCHEME_VERSION>Version 3.1.1</SCHEME_VERSION>
+                    </VALUE>
+                </CODE_ATTRIBUTE>
+                <CODE_ATTRIBUTE>
+                    <TAG>MIRESCAT</TAG>
+                    <VALUE>
+                        <CODE>C53529</CODE>
+                        <SCHEME>SEND</SCHEME>
+                        <MEANING>NON-NEOPLASTIC</MEANING>
+                        <SCHEME_VERSION>Version 3.1.1</SCHEME_VERSION>
+                    </VALUE>
+                </CODE_ATTRIBUTE>
+                <CODE_ATTRIBUTE>
+                    <TAG>MISEV</TAG>
+                    <VALUE>
+                        <CODE>C147501</CODE>
+                        <SCHEME>SEND</SCHEME>
+                        <MEANING>1 OF 5</MEANING>
+                        <SCHEME_VERSION>Version 3.1.1</SCHEME_VERSION>
+                    </VALUE>
+                </CODE_ATTRIBUTE>
+                <CODE_ATTRIBUTE>
+                    <TAG>MICHRON</TAG>
+                    <VALUE>
+                        <CODE>C14141</CODE>
+                        <SCHEME>SEND</SCHEME>
+                        <MEANING>CHRONIC</MEANING>
+                        <SCHEME_VERSION>Version 3.1.1</SCHEME_VERSION>
+                    </VALUE>
+                </CODE_ATTRIBUTE>
+                <CODE_ATTRIBUTE>
+                    <TAG>MIDISTR</TAG>
+                    <VALUE>
+                        <CODE>C25253</CODE>
+                        <SCHEME>SEND</SCHEME>
+                        <MEANING>MULTIFOCAL</MEANING>
+                        <SCHEME_VERSION>Version 3.1.1</SCHEME_VERSION>
+                    </VALUE>
+                </CODE_ATTRIBUTE>
+                <CODE_ATTRIBUTE>
+                    <TAG>MITEST</TAG>
+                    <VALUE>
+                        <CODE>C147493</CODE>
+                        <SCHEME>SEND</SCHEME>
+                        <MEANING>General Histopathologic Exam, Qual</MEANING>
+                        <SCHEME_VERSION>Version 3.1.1</SCHEME_VERSION>
                     </VALUE>
                 </CODE_ATTRIBUTE>
             </CODE_ATTRIBUTES>
-            <CUSTOM_ATTRIBUTES xsi:nil="true"/>
+            <CUSTOM_ATTRIBUTES>
+                <STRING_ATTRIBUTE>
+                    <TAG>MIORRES</TAG>
+                    <VALUE>Inflammation, minimal</VALUE>
+                </STRING_ATTRIBUTE>
+            </CUSTOM_ATTRIBUTES>
+            <FREETEXT xsi:nil="true"/>
+            <ATTRIBUTES xsi:nil="true"/>
+        </STATEMENT>
+        <ATTRIBUTES xsi:nil="true"/>
+    </OBSERVATION>
+
+    <!-- IMAGE_REF without chronicity and distribution. -->
+    <OBSERVATION alias="2">
+        <IMAGE_REF alias="2" accession="bb-image-v6h3rn-8kwd5p"/>
+        <STATEMENT>
+            <STATEMENT_TYPE>Finding</STATEMENT_TYPE>
+            <STATEMENT_STATUS>Summary</STATEMENT_STATUS>
+            <CODE_ATTRIBUTES>
+                <CODE_ATTRIBUTE>
+                    <TAG>MISTRESC</TAG>
+                    <VALUE>
+                        <CODE>C41428</CODE>
+                        <SCHEME>SEND</SCHEME>
+                        <MEANING>CELLULARITY, INCREASED</MEANING>
+                        <SCHEME_VERSION>Version 3.1.1</SCHEME_VERSION>
+                    </VALUE>
+                </CODE_ATTRIBUTE>
+                <CODE_ATTRIBUTE>
+                    <TAG>MIRESCAT</TAG>
+                    <VALUE>
+                        <CODE>C53529</CODE>
+                        <SCHEME>SEND</SCHEME>
+                        <MEANING>NON-NEOPLASTIC</MEANING>
+                        <SCHEME_VERSION>Version 3.1.1</SCHEME_VERSION>
+                    </VALUE>
+                </CODE_ATTRIBUTE>
+                <CODE_ATTRIBUTE>
+                    <TAG>MISEV</TAG>
+                    <VALUE>
+                        <CODE>C147501</CODE>
+                        <SCHEME>SEND</SCHEME>
+                        <MEANING>1 OF 5</MEANING>
+                        <SCHEME_VERSION>Version 3.1.1</SCHEME_VERSION>
+                    </VALUE>
+                </CODE_ATTRIBUTE>
+                <CODE_ATTRIBUTE>
+                    <TAG>MITEST</TAG>
+                    <VALUE>
+                        <CODE>C147493</CODE>
+                        <SCHEME>SEND</SCHEME>
+                        <MEANING>General Histopathologic Exam, Qual</MEANING>
+                        <SCHEME_VERSION>Version 3.1.1</SCHEME_VERSION>
+                    </VALUE>
+                </CODE_ATTRIBUTE>
+            </CODE_ATTRIBUTES>
+            <CUSTOM_ATTRIBUTES>
+                <STRING_ATTRIBUTE>
+                    <TAG>MIRESMOD</TAG>
+                    <VALUE>pigmented macrophages</VALUE>
+                </STRING_ATTRIBUTE>
+                <STRING_ATTRIBUTE>
+                    <TAG>MIORRES</TAG>
+                    <VALUE>Pigmented macrophages, increased, minimal</VALUE>
+                </STRING_ATTRIBUTE>
+            </CUSTOM_ATTRIBUTES>
             <FREETEXT xsi:nil="true"/>
             <ATTRIBUTES xsi:nil="true"/>
         </STATEMENT>

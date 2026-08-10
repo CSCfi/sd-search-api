@@ -148,3 +148,40 @@ def test_ontology_or_value_rejects_multivalued(tmp_path):
     )
     with pytest.raises(ConfigurationException, match="multivalued"):
         load_fields_config(path)
+
+
+def test_field_id_cannot_contain_dot(tmp_path):
+    path = _write(
+        tmp_path,
+        """\
+        filtering_terms:
+          - id: tissue.origin
+            type: keyword
+            scopes: [dataset]
+            label: "Origin"
+            description: "The origin"
+        """,
+    )
+    with pytest.raises(
+        ConfigurationException, match="id 'tissue.origin' contains a dot"
+    ):
+        load_fields_config(path)
+
+
+def test_field_group_cannot_contain_dot(tmp_path):
+    path = _write(
+        tmp_path,
+        """\
+        filtering_terms:
+          - id: origin
+            type: keyword
+            scopes: [dataset]
+            label: "Origin"
+            description: "The origin"
+            group: blocks.tissue
+        """,
+    )
+    with pytest.raises(
+        ConfigurationException, match="group 'blocks.tissue' contains a dot"
+    ):
+        load_fields_config(path)

@@ -54,6 +54,13 @@ async def get_modified_at(cur: AsyncCursor, doc_id: str) -> datetime | None:
     return row[0] if row else None
 
 
+async def max_synced_at(cur: AsyncCursor) -> datetime | None:
+    """Return when a document was last synced to the search index."""
+    await cur.execute(f"SELECT max(synced_at) FROM {DOCUMENT_TABLE}")
+    row = await cur.fetchone()
+    return row[0] if row else None
+
+
 async def iter_unsynced(
     cur: AsyncCursor, doc_id: str | None = None
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:

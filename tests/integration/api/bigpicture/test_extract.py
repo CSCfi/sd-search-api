@@ -80,6 +80,8 @@ async def test_extract_and_load_fields_plain():
     await LoadService(
         term_caches=_mock_term_caches(),
         filtering_terms=BP_DOMAIN.filtering_terms,
+        filtering_scopes=BP_DOMAIN.filtering_scopes,
+        filtering_qualifiers=BP_DOMAIN.filtering_qualifiers,
     ).store_documents(extract_documents(root=str(_XML_DIR), single_dir=False))
 
     async with get_connection() as conn:
@@ -119,6 +121,8 @@ async def test_extract_and_load_fields_c4gh(tmp_path):
     await LoadService(
         term_caches=_mock_term_caches(),
         filtering_terms=BP_DOMAIN.filtering_terms,
+        filtering_scopes=BP_DOMAIN.filtering_scopes,
+        filtering_qualifiers=BP_DOMAIN.filtering_qualifiers,
     ).store_documents(
         extract_documents(
             root=str(tmp_path),

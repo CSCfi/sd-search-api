@@ -16,10 +16,11 @@ from search_api.api.bigpicture.extract import (
     BigpictureCodeAttributeValue,
     BigpictureStainingFields,
     BigpictureSpecimenFields,
-    to_opensearch_field_values,
+    to_opensearch_values,
 )
 from search_api.services.sync import SyncService
 from search_api.database.document import DOCUMENT_TABLE
+from search_api.api.bigpicture.domain import BP_DOMAIN
 from search_api.services.load import LoadService
 from search_api.database.repository import get_connection
 
@@ -188,6 +189,12 @@ async def generate_and_load_data(image_cnt: int, dataset_cnt: int) -> None:
 
     start_time = time.time()
     generated_cnt = 0
+    load_service = LoadService(
+        term_caches={},
+        filtering_terms=BP_DOMAIN.filtering_terms,
+        filtering_scopes=BP_DOMAIN.filtering_scopes,
+        filtering_qualifiers=BP_DOMAIN.filtering_qualifiers,
+    )
 
     async with get_connection() as conn:
         async with conn.cursor() as cur:
@@ -225,6 +232,7 @@ async def generate_and_load_data(image_cnt: int, dataset_cnt: int) -> None:
                 fields = BigpictureFields(
                     image_id=image_id,
                     dataset_id=dataset_id,
+                    scope="clinical",
                     dataset_image_cnt=dataset_image_cnt[dataset_id],
                     dataset_short_name=_generate_short_name(),
                     dataset_title=_generate_title(),
@@ -255,12 +263,15 @@ async def generate_and_load_data(image_cnt: int, dataset_cnt: int) -> None:
                 # Load fields to the database for each image.
 
                 logging.info(f"Loading image '{image_id}' to the database")
+                values, groups = to_opensearch_values(fields)
                 doc = ExtractedDocument(
                     id=image_id,
+                    scope=fields.scope,
                     modified_at=fields.dataset_modified_at,
-                    values=to_opensearch_field_values(fields),
+                    values=values,
+                    groups=groups,
                 )
-                await LoadService.store_document(cur, doc)
+                await load_service.store_document(cur, doc)
 
             elapsed = time.time() - start_time
             print(

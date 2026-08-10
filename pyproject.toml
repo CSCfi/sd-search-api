@@ -71,9 +71,6 @@ plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
-markers = [
-    "requires_snowstorm: needs a live Snowstorm instance (skipped in CI via SKIP_SNOWSTORM_TESTS)",
-]
 filterwarnings = [
     "ignore::UserWarning:opensearchpy",       # SSL verify_certs=False advisory
     "ignore::DeprecationWarning:aiohttp",     # enable_cleanup_closed no-op on Python 3.14

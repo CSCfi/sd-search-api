@@ -21,6 +21,7 @@ from search_api.services.load import LoadService
 from search_api.services.sync import SyncService
 from search_api.database.document import count_documents
 from search_api.database.repository import get_cursor
+from search_api.database.terms_cache import delete_terms
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
 from search_api.services.ontology.cache.source import OntologySource
 from search_api.services.ontology.cache.store import OntologyCacheStore
@@ -104,7 +105,7 @@ async def _load(domain: Domain, args: argparse.Namespace) -> None:
 
 
 async def _clear(domain: Domain, args: argparse.Namespace) -> None:
-    """Remove all documents from the OpenSearch index and the database schema."""
+    """Remove all documents and the preferred terms cached for them."""
 
     _require_non_production()
 
@@ -115,7 +116,8 @@ async def _clear(domain: Domain, args: argparse.Namespace) -> None:
 
         if not _confirm(
             f"All documents ({doc_count}) will be deleted from database and "
-            f"OpenSearch Index '{domain.opensearch_index}'.",
+            f"OpenSearch Index '{domain.opensearch_index}', together with the "
+            f"cached preferred terms.",
             args.group,
         ):
             logging.info("Aborted, nothing was deleted.")
@@ -123,6 +125,13 @@ async def _clear(domain: Domain, args: argparse.Namespace) -> None:
 
         async with get_cursor() as cur:
             await sync_service.delete_all_documents(cur)
+
+        # The terms are cleared after the documents, and only for this
+        # deployment's own fields.
+        term_count = 0
+        for ontology_id, field_ids in domain.field_ids_by_ontology.items():
+            term_count += await delete_terms(ontology_id, field_ids)
+        logging.info("Deleted %d cached preferred term(s).", term_count)
     finally:
         await sync_service.search.close()
 

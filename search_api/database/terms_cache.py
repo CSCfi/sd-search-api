@@ -37,6 +37,17 @@ async def read_concept_ids_by_field(ontology_id: str) -> dict[str, set[str]]:
     return concept_ids_by_field
 
 
+async def delete_terms(ontology_id: str, field_ids: Sequence[str]) -> int:
+    """Delete the terms cached for these fields of an ontology, returning how many."""
+    async with get_cursor() as cur:
+        await cur.execute(
+            f"DELETE FROM {TERMS_CACHE_TABLE} "
+            f"WHERE ontology_id = %s AND field_id = ANY(%s)",
+            (ontology_id, list(field_ids)),
+        )
+        return cur.rowcount
+
+
 async def read_updated_at(ontology_id: str) -> datetime | None:
     """Return when a term of this ontology was last written, or None if none was."""
     async with get_cursor() as cur:

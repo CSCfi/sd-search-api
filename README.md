@@ -71,13 +71,15 @@ Environmental variables are defined in `tests/integration/.env`.
 
 The UI component of SD Search is available at: https://github.com/CSCfi/sd-search-ui
 
-To run them both locally at the same time, first start the API stack, redirecting the OIDC login flow back to the UI instead of the API itself:
+To run them both locally at the same time, first start the API stack, redirecting the OIDC login flow back to the UI
+instead of the API itself:
 
 ```bash
 OIDC_REDIRECT_URL=http://localhost:8081/search BASE_URL=http://localhost:8081 docker compose --env-file tests/integration/.env --profile dev up --build -d
 ```
 
-Then, from the `sd-search-ui` repository, start the UI joined to the same Compose project so it can reach the API in the same Docker network:
+Then, from the `sd-search-ui` repository, start the UI joined to the same Compose project so it can reach the API in the
+same Docker network:
 
 ```bash
 COMPOSE_PROJECT_NAME=sd-search-api docker compose up --build -d
@@ -87,7 +89,8 @@ The UI service will then be available at http://localhost:8081
 
 ## Deployment
 
-Build the Docker image for deployment and push it to the image container registry used by the OpenShift's ImageStream triggering rollout automatically.
+Build the Docker image for deployment and push it to the image container registry used by the OpenShift's ImageStream
+triggering rollout automatically.
 
 ```bash
 docker build --platform=linux/amd64 -f dockerfiles/Dockerfile -t <image-registry-url>/sd-search-api:latest .
@@ -250,14 +253,76 @@ Example output:
 }
 ```
 
-## Data loading
+## Using admin.py
 
-These commands connect directly to Postgres and OpenSearch, so the environment must define
-`POSTGRES_HOST`/`POSTGRES_PORT`/`POSTGRES_DB`/`POSTGRES_USER`/`POSTGRES_PASSWORD` and
-`OPENSEARCH_HOST`/`OPENSEARCH_PORT`/`OPENSEARCH_USER`/`OPENSEARCH_PASSWORD`; loading also resolves
-SNOMED CT preferred terms as it goes, so `SNOWSTORM_URL` must be set too. See
-`tests/integration/.env` for a working set. Pass `--env-file <path>` to load them from a file, or
-export them in the shell beforehand.
+The first positional argument selects a command group: a deployment or an ontology
+(`snomed`, `send`).
+
+### Prepare environment
+
+The commands connect directly to Postgres and OpenSearch, so the environment must define
+`POSTGRES_HOST`,`POSTGRES_PORT`,`POSTGRES_DB`,`POSTGRES_USER`,`POSTGRES_PASSWORD` and
+`OPENSEARCH_HOST`,`OPENSEARCH_PORT`,`OPENSEARCH_USER`,and `OPENSEARCH_PASSWORD`. Loading 
+and the ontology commands also resolve preferred terms, that require `SNOWSTORM_URL`.
+
+Running against a deployed environment means logging in to OpenShift, taking the credentials from
+Vault, and port-forwarding OpenSearch to localhost.
+
+1. Log in to the [Rahti web console](https://rahti.csc.fi/).
+2. Click your username in the top right corner.
+3. Select "Copy Login Command" from the dropdown menu.
+4. Authenticate again when asked.
+5. Copy the resulting `oc login ... --token=...` command and paste it into your terminal.
+
+Activate the project:
+
+```bash
+oc project sd-search
+```
+
+Take the values from
+[Vault](https://vault.sdd.csc.fi:8200/ui/vault/secrets-engines/secret/kv/sd-search/details) and
+export them:
+
+```bash
+export POSTGRES_HOST=
+export POSTGRES_PORT=
+export POSTGRES_DB=
+export POSTGRES_USER=
+export POSTGRES_PASSWORD=
+export OPENSEARCH_PORT=
+export OPENSEARCH_USER=
+export OPENSEARCH_PASSWORD=
+export SNOWSTORM_URL="https://snowstorm.rahtiapp.fi"
+```
+
+OpenSearch is reached through a port forward rather than directly, so its host is localhost:
+
+```bash
+export OPENSEARCH_HOST=localhost
+```
+
+Start the port forward. It runs in the foreground, so leave it in its own terminal, and make sure
+`OPENSEARCH_PORT` is the local side of the forward:
+
+```bash
+oc port-forward svc/opensearch 9200:9200
+```
+
+Then run the CLI in another terminal, e.g.:
+
+```bash
+uv run python scripts/admin.py Bigpicture load /path/to/datasets/ --multi-dir --load --sync
+```
+
+As an alternative to exporting the variables, `--env-file <path>` loads them from a file. It goes
+before the command group:
+
+```bash
+uv run python scripts/admin.py --env-file <path> Bigpicture load /path/to/datasets/ --load
+```
+
+`tests/integration/.env` is a working set for local integration tests.
 
 ### Bigpicture
 
@@ -283,28 +348,52 @@ To also sync to OpenSearch immediately after loading, add `--sync`:
 uv run python scripts/admin.py Bigpicture load /path/to/datasets/ --multi-dir --load --sync
 ```
 
+`.c4gh`-encrypted XML files are decrypted while they are read, given the key to decrypt them with:
+
+```bash
+uv run python scripts/admin.py Bigpicture load /path/to/datasets/ --load \
+    --c4gh-key-file /path/to/key.sec --c4gh-passphrase <passphrase>
+```
+
 #### Clear all data
 
-Delete every document from both the database and the OpenSearch index, e.g. to reload a dataset from scratch:
+Delete every document from both the database and the OpenSearch index, together with the preferred
+terms cached for them, e.g. to reload a dataset from scratch:
 
 ```bash
 uv run python scripts/admin.py Bigpicture clear
 ```
 
-#### Refresh SNOMED CT preferred terms
-
-After a new SNOMED CT release, update the stored preferred terms to match the new
-release. The preferred-terms cache is shared across deployments, so this command is
-not tied to a specific one:
+The deployment name has to be typed to confirm. Refused when `DEPLOYMENT_ENV=prod`. Only the terms
+cached for this deployment's own fields are deleted. The terms are 
+cached again as the documents are loaded:
 
 ```bash
-uv run python scripts/admin.py snomed refresh
+uv run python scripts/admin.py Bigpicture load /path/to/datasets/ --multi-dir --load --sync
+```
+
+#### Recreate the database schema and the OpenSearch index
+
+Drop and rebuild both stores, discarding all documents *and* the cached ontology terms. The 
+index is recreated from the generated mapping, so run `generate-index` first if 
+the field definitions changed:
+
+```bash
+uv run python scripts/admin.py Bigpicture recreate
+```
+
+The deployment name has to be typed to confirm. Refused when `DEPLOYMENT_ENV=prod`. Everything then
+has to be reloaded, and the ontology caches refreshed:
+
+```bash
+uv run python scripts/admin.py send refresh
+uv run python scripts/admin.py Bigpicture load /path/to/datasets/ --multi-dir --load --sync
 ```
 
 #### Generate the OpenSearch index
 
 The OpenSearch index mapping (`search_api/api/bigpicture/index/bp-image-index.json`) is
-is generated from the filtered and non-filtered field definitions, so that field names
+generated from the filtered and non-filtered field definitions, so that field names
 and types stay in sync with them.
 After changing them, regenerate and commit the file:
 
@@ -312,7 +401,7 @@ After changing them, regenerate and commit the file:
 uv run python scripts/admin.py Bigpicture generate-index
 ```
 
-An unit test fails if this file is different from a freshy generated one.
+A unit test fails if this file differs from a freshly generated one.
 
 #### Create the OpenSearch index in a new environment
 
@@ -326,7 +415,7 @@ that only surface later, disconnected from the actual cause.
 Create the index explicitly:
 
 ```bash
-uv run python scripts/admin.py --env-file <env> Bigpicture create-index
+uv run python scripts/admin.py Bigpicture create-index
 ```
 
 This fails loudly if the index already exists, rather than silently leaving a stale mapping in
@@ -336,11 +425,42 @@ documents must be resynced:
 
 ```bash
 curl -X DELETE https://<opensearch-host>:9200/bp-image-index -u <user>:<password>
-uv run python scripts/admin.py --env-file <env> Bigpicture create-index
+uv run python scripts/admin.py Bigpicture create-index
 # Reset sync state so the next --sync repopulates the recreated index:
 #   UPDATE document SET synced_at = NULL;
-uv run python scripts/admin.py --env-file <env> Bigpicture load <dir> --load --sync
+uv run python scripts/admin.py Bigpicture load <dir> --load --sync
 ```
+
+### Ontologies
+
+These commands are not tied to a deployment: every deployment resolves its terms against the same
+caches.
+
+#### Refresh SNOMED CT
+
+After a new SNOMED CT release, import it into Snowstorm and update the preferred terms cached for it
+in the database. `--release-file` is required and takes the release archive:
+
+```bash
+uv run python scripts/admin.py snomed refresh --release-file /path/to/SnomedCT_InternationalRF2_PRODUCTION_<date>.zip
+```
+
+The import is the procedure described under [Import SNOMED release](#import-snomed-release), done for
+you: the job is created, the archive uploaded, and the command polls until Snowstorm reports it
+completed.
+
+#### Refresh SEND
+
+SEND is small and simple enough to cache whole, so the concept table itself lives in the database
+rather than in a terminology server. This fetches the current release from NCI EVS, and updates the
+stored table and the preferred terms cached for it:
+
+```bash
+uv run python scripts/admin.py send refresh
+```
+
+A release no newer than the stored one is skipped. A running server picks the new table up on 
+its next poll, without a restart.
 
 ## LLM search
 

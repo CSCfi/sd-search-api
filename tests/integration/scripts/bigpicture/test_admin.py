@@ -16,7 +16,9 @@ from search_api.api.bigpicture.domain import BP_DOMAIN
 from search_api.services.load import LoadService
 from search_api.database.document import DOCUMENT_TABLE, get_document
 from search_api.api.opensearch.services import create_search
+from search_api.database.models import StoredTerm
 from search_api.database.repository import get_connection
+from search_api.database.terms_cache import TERMS_CACHE_TABLE, insert_terms, read_terms
 from search_api.exceptions import SystemException
 
 os.environ.setdefault("POSTGRES_DB", os.environ["BP_POSTGRES_DB"])
@@ -260,25 +262,73 @@ async def _sentinel_document_exists() -> bool:
             return await get_document(cur, "sentinel") is not None
 
 
+# One of the deployment's own ontology fields, so clear is expected to delete
+# the term cached for it.
+_SENTINEL_ONTOLOGY_ID, _SENTINEL_FIELD_ID = next(
+    (ontology_id, field_ids[0])
+    for ontology_id, field_ids in BP_DOMAIN.field_ids_by_ontology.items()
+)
+
+# A field of another deployment resolving against the same ontology, which clear
+# must leave alone.
+_FOREIGN_FIELD_ID = "test_clear_field"
+
+
+async def _store_sentinel_term() -> None:
+    """Cache a preferred term for one of the deployment's own fields."""
+    await insert_terms(
+        _SENTINEL_ONTOLOGY_ID,
+        [StoredTerm(field_id=_SENTINEL_FIELD_ID, concept_id="c1", preferred_term="P1")],
+    )
+
+
+async def _sentinel_term_exists() -> bool:
+    """Return True if the term cached for the deployment's own field exists."""
+    return any(
+        term.field_id == _SENTINEL_FIELD_ID
+        for term in await read_terms(_SENTINEL_ONTOLOGY_ID)
+    )
+
+
+async def _store_foreign_term() -> None:
+    """Cache a preferred term for another deployment's field."""
+    await insert_terms(
+        _SENTINEL_ONTOLOGY_ID,
+        [StoredTerm(field_id=_FOREIGN_FIELD_ID, concept_id="c1", preferred_term="P1")],
+    )
+
+
+async def _foreign_term_exists() -> bool:
+    """Return True if the term cached for the other deployment's field exists."""
+    return any(
+        term.field_id == _FOREIGN_FIELD_ID
+        for term in await read_terms(_SENTINEL_ONTOLOGY_ID)
+    )
+
+
 @pytest.mark.asyncio
 async def test_clear_refused_in_production(monkeypatch):
     monkeypatch.setenv("DEPLOYMENT_ENV", "prod")
     await _store_sentinel_document()
+    await _store_sentinel_term()
 
     with pytest.raises(SystemException, match="not available in production"):
         await _clear(BP_DOMAIN, _clear_args())
 
     assert await _sentinel_document_exists()
+    assert await _sentinel_term_exists()
 
 
 @pytest.mark.asyncio
 async def test_clear_aborts_unless_confirmed(monkeypatch):
     monkeypatch.setattr("builtins.input", lambda _prompt: "not the group name")
     await _store_sentinel_document()
+    await _store_sentinel_term()
 
     await _clear(BP_DOMAIN, _clear_args())
 
     assert await _sentinel_document_exists()
+    assert await _sentinel_term_exists()
 
 
 @pytest.mark.asyncio
@@ -289,3 +339,33 @@ async def test_clear_deletes_every_document(monkeypatch):
     await _clear(BP_DOMAIN, _clear_args())
 
     assert not await _sentinel_document_exists()
+
+
+@pytest.mark.asyncio
+async def test_clear_deletes_the_cached_preferred_terms(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _prompt: "Bigpicture")
+    await _store_sentinel_term()
+
+    await _clear(BP_DOMAIN, _clear_args())
+
+    assert not await _sentinel_term_exists()
+
+
+@pytest.mark.asyncio
+async def test_clear_keeps_the_terms_of_another_deployment(monkeypatch):
+    """terms_cache is shared, so only this deployment's own fields are cleared."""
+    monkeypatch.setattr("builtins.input", lambda _prompt: "Bigpicture")
+    await _store_foreign_term()
+
+    try:
+        await _clear(BP_DOMAIN, _clear_args())
+
+        assert await _foreign_term_exists()
+    finally:
+        async with get_connection() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    f"DELETE FROM {TERMS_CACHE_TABLE} "
+                    f"WHERE ontology_id = %s AND field_id = %s",
+                    (_SENTINEL_ONTOLOGY_ID, _FOREIGN_FIELD_ID),
+                )

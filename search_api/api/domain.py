@@ -100,6 +100,18 @@ class Domain:
         """Distinct ontology ids referenced by the filtering terms."""
         return set(self.ontology_id_by_field.values())
 
+    @property
+    def field_ids_by_ontology(self) -> dict[str, list[str]]:
+        """Map each ontology id to the filtering term ids resolving against it.
+
+        The terms cached for one deployment are the terms cached for its own
+        fields, since the ``terms_cache`` table is shared by all of them.
+        """
+        field_ids_by_ontology: dict[str, list[str]] = {}
+        for field_id, ontology_id in self.ontology_id_by_field.items():
+            field_ids_by_ontology.setdefault(ontology_id, []).append(field_id)
+        return field_ids_by_ontology
+
 
 def make_lifespan(domain: Domain) -> Callable[[FastAPI], Any]:
     """Build the FastAPI lifespan for a domain."""

@@ -109,7 +109,7 @@ class OntologyService(ABC):
     async def init(self) -> None:
         """Perform any startup initialisation"""
 
-    def start(self) -> None:
+    async def start(self) -> None:
         """Start a background task."""
 
     def stop(self) -> None:

@@ -11,7 +11,7 @@ from crypt4gh.keys.c4gh import generate as c4gh_generate
 from crypt4gh.lib import encrypt as c4gh_encrypt
 from nacl.public import PrivateKey
 
-from scripts.admin import _load, _recreate
+from scripts.admin import _clear, _load, _recreate
 from search_api.api.bigpicture.domain import BP_DOMAIN
 from search_api.services.load import LoadService
 from search_api.database.document import DOCUMENT_TABLE, get_document
@@ -164,7 +164,7 @@ def _recreate_args() -> argparse.Namespace:
 
 
 @pytest.mark.asyncio
-async def test_recreate_is_refused_in_production(monkeypatch):
+async def test_recreate_refused_in_production(monkeypatch):
     """The command destroys everything, so production must be unreachable."""
     monkeypatch.setenv("DEPLOYMENT_ENV", "prod")
 
@@ -233,3 +233,59 @@ async def test_recreate_rebuilds_the_schema_and_the_index(monkeypatch):
         assert properties["diagnosis"]["properties"]["qualifiers"]["type"] == "keyword"
     finally:
         await search.close()
+
+
+# clear
+#
+
+
+def _clear_args() -> argparse.Namespace:
+    return argparse.Namespace(group="Bigpicture")
+
+
+async def _store_sentinel_document() -> None:
+    """Store a sentinel document to check later if it exists."""
+    async with get_connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                f"INSERT INTO {DOCUMENT_TABLE} (id, payload) VALUES ('sentinel', '{{}}')"
+                " ON CONFLICT (id) DO NOTHING"
+            )
+
+
+async def _sentinel_document_exists() -> bool:
+    """Return True if the sentinel document exists."""
+    async with get_connection() as conn:
+        async with conn.cursor() as cur:
+            return await get_document(cur, "sentinel") is not None
+
+
+@pytest.mark.asyncio
+async def test_clear_refused_in_production(monkeypatch):
+    monkeypatch.setenv("DEPLOYMENT_ENV", "prod")
+    await _store_sentinel_document()
+
+    with pytest.raises(SystemException, match="not available in production"):
+        await _clear(BP_DOMAIN, _clear_args())
+
+    assert await _sentinel_document_exists()
+
+
+@pytest.mark.asyncio
+async def test_clear_aborts_unless_confirmed(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _prompt: "not the group name")
+    await _store_sentinel_document()
+
+    await _clear(BP_DOMAIN, _clear_args())
+
+    assert await _sentinel_document_exists()
+
+
+@pytest.mark.asyncio
+async def test_clear_deletes_every_document(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _prompt: "Bigpicture")
+    await _store_sentinel_document()
+
+    await _clear(BP_DOMAIN, _clear_args())
+
+    assert not await _sentinel_document_exists()

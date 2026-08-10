@@ -236,7 +236,7 @@ async def test_refresh_updates_only_renamed_terms(fill_cache):
 
 
 @pytest.mark.asyncio
-async def test_reloads_what_another_process_wrote():
+async def test_reloads_changes():
     initial_term_cnt = 500
     extra_term_cnt = 50
     initial_terms = {str(uuid.uuid4()): f"Term {i}" for i in range(initial_term_cnt)}
@@ -261,13 +261,12 @@ async def test_reloads_what_another_process_wrote():
         service = _service()
         await service.load()
 
-        assert service._updated_at is not None
+        stored_at = await read_updated_at(SNOMED_ONTOLOGY_ID)
+        assert stored_at is not None
         assert (
             await service.get_terms_by_concept_id(_FIELD_ID, set(initial_terms))
             == initial_terms
         )
-
-        assert await read_updated_at(SNOMED_ONTOLOGY_ID) == service._updated_at
 
         future_ts = datetime.now(timezone.utc) + timedelta(seconds=10)
         async with get_connection() as conn:
@@ -282,8 +281,8 @@ async def test_reloads_what_another_process_wrote():
                     ],
                 )
 
-        # Extra rows update _updated_at
-        assert await read_updated_at(SNOMED_ONTOLOGY_ID) != service._updated_at
+        # The extra rows changed updated_at, which is what a poll would notice.
+        assert await read_updated_at(SNOMED_ONTOLOGY_ID) > stored_at
 
         # Loads extra rows
         await service.load()

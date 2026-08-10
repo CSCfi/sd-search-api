@@ -63,7 +63,8 @@ class CacheConfiguration(BaseSettings):
     VALUE_COUNT_CACHE_REFRESH: int = Field(
         default=300,
         description=(
-            "Frequency (in seconds) to check whether the OpenSearch index changed."
+            "Frequency (in seconds) to check whether a document has been synced to "
+            "the search index since the value counts were last counted."
         ),
     )
 

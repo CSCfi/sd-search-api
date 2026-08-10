@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 
+from search_api.database.repository import is_healthy as is_database_healthy
 from search_api.ai.models import AISearchResult
 from search_api.ai.services import AIService
 from search_api.api.beacon.models import (
@@ -464,12 +465,22 @@ def make_beacon_router(domain: Domain) -> APIRouter:
 
     @router.get("/health")
     async def health(service: BeaconService = Depends(get_beacon_service)):
+        """Report whether both database and OpenSearch are healthy."""
         try:
-            healthy = await service.is_healthy()
+            search_healthy, database_healthy = await asyncio.gather(
+                service.is_healthy(), is_database_healthy()
+            )
         except Exception as e:
             raise SystemException("Health check failed.") from e
-        if not healthy:
-            raise HTTPException(status_code=503, detail="unhealthy")
+        if not search_healthy or not database_healthy:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "status": "unhealthy",
+                    "search": "ok" if search_healthy else "unhealthy",
+                    "database": "ok" if database_healthy else "unhealthy",
+                },
+            )
         return {"status": "ok"}
 
     return router

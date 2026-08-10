@@ -65,7 +65,7 @@ search_api/
 │   │   └── cache/      # one whole small ontology in memory:
 │   │                   # models.py source.py store.py service.py
 │   ├── auth.py session.py
-│   └── load.py sync.py
+│   └── load.py sync.py poller.py value_counts.py
 ├── database/           # every line of SQL, one module per table:
 │   │                   # repository.py (connection) models.py (rows)
 │   │                   # document.py terms_cache.py ontology_cache.py
@@ -271,12 +271,12 @@ override them via `app.dependency_overrides`.
 | `POST /ai/query` | Natural-language search (gated by `FEATURE_AI`) |
 | `GET /filtering_terms/{field_id}/values` | Indexed values with counts; ontology fields resolve concept IDs to preferred terms |
 | `GET /filtering_terms/{field_id}/suggestions` | Autocomplete restricted to indexed values |
+| `GET /health` | Both stores answer; a `503` names the one that did not |
 
 `values` and `suggestions` both accept `scope=<id>` and repeatable `qualifier=<id>:<value>`, and
 restrict their counts by both. Neither has a default: omitting one does not filter on it. A scope the
 field does not declare is a `400` rather than an empty list, since the field is never indexed for
 those documents (`validate_field_scope`).
-| `GET /health` | Health check |
 
 Admin routes (`api/admin/routes.py`, `/admin` prefix, mounted only when `ADMIN_KEY` set, SNOMED-specific):
 `/admin/snomed/reload`, `/admin/snomed/refresh`, `/admin/snomed/fields/{field_id}/invalid_concepts`,
@@ -327,7 +327,8 @@ dict. Its
 `ValueCountsKey.of(field_id, scope, qualifiers)` builds one from the `{id: [values]}` a request
 carries, and `qualifier_values_by_id` converts back. Nothing expires;
 `ValueCountsUpdater` (`services/value_counts.py`) owns what is in there, clearing it and refilling
-when `max(document.synced_at)` moves, polled every `VALUE_COUNT_CACHE_REFRESH` seconds. The requests
+when `max(document.synced_at)` moves, polled every `VALUE_COUNT_CACHE_REFRESH` seconds. Every key is
+counted concurrently, each in its own task so one failing does not stop the rest. The requests
 are enumerable — every valued field, against its own scopes, against each value of a qualifier over
 its group, which is 62 for Bigpicture — so `_value_count_keys()` yields them as keys, derived from
 the deployment's config rather than guessing what a client will ask for. One qualifier value at a
@@ -401,6 +402,25 @@ procedure: creates a Snowstorm import job, uploads the release archive, then pol
 Snowstorm's own behaviour of dropping completed jobs). Invoked by `scripts/admin.py`'s
 `snomed refresh --release-file <path>`, where `--release-file` is required.
 
+### Reloading a cache (`search_api/services/poller.py`)
+
+Every cache below is filled from a store another process writes — the admin CLI's load, sync or
+ontology refresh — so none of them re-reads the data to find out. `UpdatedPoller` holds the one loop
+they share: `start()` reads the store's `updated_at`, refreshes, then reloads whenever `updated_at`
+moves. Three details it centralises:
+
+- **`updated_at` is read before the refresh**, so a write landing during it is either included by that
+  refresh or seen by the next poll. Read afterwards, a write in that window would be recorded as
+  already loaded and missed.
+- **`None` means nothing is stored**, so the first refresh is skipped — counting an index no load has
+  reached would cache one empty answer per key.
+- **It is recorded only after a refresh succeeds**, so a failed one is retried rather than skipped.
+
+The value comes from the store, never from this process's clock: rows are stamped by the database,
+whose clock can run behind ours. Only whether it changed matters, so a deletion moving it backwards
+counts too. `start()` is therefore `async` on every cache, and it performs the initial load — callers
+do not load separately.
+
 ### Ontology term cache (`search_api/services/ontology/term_cache.py`)
 
 A persistent cache mapping `(ontology_id, field_id, concept_id)` → preferred term, served from an
@@ -410,10 +430,11 @@ what `/values` and `/suggestions` report and what a requested term resolves agai
 enough to cache whole still needs it, since the whole ontology does not say which concepts a field
 carries.
 
-`OntologyTermCache(ontology_id)` is one concrete class, not an interface: it owns the index,
-the poll loop (`changed_since` every `TERM_CACHE_REFRESH` seconds), and the resolve-against-the-
-ontology orchestration of `cache_preferred_terms` / `refresh`. Its store is `database/terms_cache.py`
-— `read_terms`, `read_concept_ids_by_field`, `changed_since`, `insert_terms`, `update_terms`, over a
+`OntologyTermCache(ontology_id)` is one concrete class, not an interface: it owns the index and the
+resolve-against-the-ontology orchestration of `cache_preferred_terms` / `refresh`, and reloads through
+an `UpdatedPoller` over `read_updated_at` every `TERM_CACHE_REFRESH` seconds. Its store is
+`database/terms_cache.py`
+— `read_terms`, `read_concept_ids_by_field`, `read_updated_at`, `insert_terms`, `update_terms`, over a
 `StoredTerm` model (`database/models.py`) rather than row tuples — so everything but the SQL is unit-testable without a
 database. All ontologies share the one `terms_cache` table
 (`ontology_id, concept_id, field_id, preferred_term, updated_at`).
@@ -438,8 +459,8 @@ terminology server. Orthogonal to the term cache above, which every ontology has
 - `CachedOntologyService` (`cache/service.py`) — an `OntologyService` built from a store and a source.
   `init` serves what the store holds, fetching from the source and storing it only when nothing is
   stored yet, then serves lookups from that in-memory table. `start()` polls
-  `OntologyCacheStore.updated_at` every `ONTOLOGY_CACHE_REFRESH` seconds and reloads when it moves,
-  so a `send refresh` by the admin CLI reaches a running server without a restart. The watermark is
+  `OntologyCacheStore.updated_at` through an `UpdatedPoller` every `ONTOLOGY_CACHE_REFRESH` seconds,
+  so a `send refresh` by the admin CLI reaches a running server without a restart. `updated_at` is
   read rather than the ontology itself, so an unchanged store costs one row. Its `_find_concept_ids` hook
   matches a concept id, preferred term or synonym via `normalise_term`, resolving to every concept
   carrying that value and then keeping only those permitted by the field's `ontologyRestriction`

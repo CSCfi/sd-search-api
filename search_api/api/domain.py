@@ -117,8 +117,7 @@ def make_lifespan(domain: Domain) -> Callable[[FastAPI], Any]:
             domain.ontology_ids
         )
         for term_service in ontology_term_services.values():
-            await term_service.load()
-            term_service.start()
+            await term_service.start()
         app.state.ontology_term_services = ontology_term_services
 
         # Initialise ontology services used by the domain.
@@ -127,7 +126,7 @@ def make_lifespan(domain: Domain) -> Callable[[FastAPI], Any]:
         ]
         for ontology_service in ontology_services:
             await ontology_service.init()
-            ontology_service.start()
+            await ontology_service.start()
 
         # Fill the value count cache and keep it updated.
         value_counts = ValueCountsUpdater(

@@ -102,7 +102,7 @@ async def test_read_updated_at_changes_on_insert(ontology_id):
 
 @pytest.mark.asyncio
 async def test_read_updated_at_changes_on_update(ontology_id):
-    """An update has to move the watermark, or a rename never reaches a reader."""
+    """An update has to move updated_at, or a rename never reaches a reader."""
     await insert_terms(ontology_id, [_term("f1", "c1", "P1")])
     updated_at = await read_updated_at(ontology_id)
 

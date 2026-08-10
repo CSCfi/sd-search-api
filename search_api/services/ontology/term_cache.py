@@ -1,7 +1,5 @@
-import asyncio
 import logging
 from collections.abc import Iterable
-from datetime import datetime
 
 from search_api.conf import cache_config
 from search_api.database.models import StoredTerm
@@ -13,6 +11,7 @@ from search_api.database.terms_cache import (
     update_terms,
 )
 from search_api.services.ontology.service import OntologyService, normalise_term
+from search_api.services.poller import UpdatedPoller
 
 logger = logging.getLogger(__name__)
 
@@ -28,11 +27,14 @@ class OntologyTermCache:
 
     def __init__(self, ontology_id: str, refresh_interval: float = 300.0) -> None:
         self._ontology_id = ontology_id
-        self._refresh_interval = refresh_interval
         self._preferred_term_by_id: PreferredTermByFieldAndConceptIdMap = {}
         self._ids_by_preferred_term: ConceptIdsByFieldAndPreferredTermMap = {}
-        self._updated_at: datetime | None = None
-        self._task: asyncio.Task | None = None
+        self._poller = UpdatedPoller(
+            "term cache",
+            lambda: read_updated_at(ontology_id),
+            lambda: self.load(),
+            refresh_interval,
+        )
 
     def _index_term(self, field_id: str, concept_id: str, preferred_term: str) -> None:
         """Map concept_id and preferred_term to each other in both directions."""
@@ -60,7 +62,6 @@ class OntologyTermCache:
         self._ids_by_preferred_term = {}
         for term in terms:
             self._index_term(term.field_id, term.concept_id, term.preferred_term)
-        self._updated_at = await read_updated_at(self._ontology_id)
         logger.info("Loaded %d preferred term(s) into memory cache.", len(terms))
 
     async def get_terms_by_concept_id(
@@ -145,29 +146,13 @@ class OntologyTermCache:
 
         logger.info("Refreshed %d preferred term(s).", total_updated)
 
-    def start(self) -> None:
-        """Start the background refresh task."""
-        if self._task is not None and not self._task.done():
-            return
-        self._task = asyncio.create_task(self._refresh_loop())
+    async def start(self) -> None:
+        """Start the background task that reloads the cache."""
+        await self._poller.start()
 
     def stop(self) -> None:
-        """Cancel the background refresh task."""
-        if self._task is not None:
-            self._task.cancel()
-            self._task = None
-
-    async def _refresh_loop(self) -> None:
-        while True:
-            await asyncio.sleep(self._refresh_interval)
-            try:
-                if await read_updated_at(self._ontology_id) == self._updated_at:
-                    continue
-                await self.load()
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception("Failed to reload term cache from the store.")
+        """Stop the background task that reloads the cache."""
+        self._poller.stop()
 
 
 def create_term_caches(

@@ -1,6 +1,4 @@
-import asyncio
 import logging
-from datetime import datetime
 from typing import override
 
 from search_api.api.beacon.models import BeaconFilteringTerm
@@ -11,6 +9,7 @@ from search_api.services.ontology.cache.models import (
 from search_api.services.ontology.cache.source import OntologySource
 from search_api.services.ontology.cache.store import OntologyCacheStore
 from search_api.services.ontology.service import OntologyService, normalise_term
+from search_api.services.poller import UpdatedPoller
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +30,12 @@ class CachedOntologyService(OntologyService):
     ) -> None:
         self._store = store
         self._source = source
-        self._refresh_interval = refresh_interval
-        self._updated_at: datetime | None = None
-        self._task: asyncio.Task | None = None
+        self._poller = UpdatedPoller(
+            "ontology",
+            lambda: store.updated_at(),
+            lambda: self._reload(),
+            refresh_interval,
+        )
         self._version: str | None = None
         self._by_id: dict[str, CachedOntologyConcept] = {}
         self._by_value: dict[
@@ -74,39 +76,24 @@ class CachedOntologyService(OntologyService):
             stored = await self._source.fetch()
             await self._store.write(stored)
         self._set_concepts(stored)
-        self._updated_at = await self._store.updated_at()
 
     @override
-    def start(self) -> None:
+    async def start(self) -> None:
         """Start the background task that reloads the cache when the store changes."""
-        if self._task is not None and not self._task.done():
-            return
-        self._task = asyncio.create_task(self._refresh_loop())
+        await self._poller.start()
 
     @override
     def stop(self) -> None:
         """Stop the background task that reloads the cache when the store changes."""
-        if self._task is not None:
-            self._task.cancel()
-            self._task = None
+        self._poller.stop()
 
-    async def _refresh_loop(self) -> None:
-        while True:
-            await asyncio.sleep(self._refresh_interval)
-            try:
-                updated_at = await self._store.updated_at()
-                if updated_at == self._updated_at:
-                    continue
-                stored = await self._store.read()
-                if stored is None:
-                    continue
-                self._set_concepts(stored)
-                self._updated_at = updated_at
-                logger.info("Refreshed the ontology.")
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception("Failed to refresh the ontology.")
+    async def _reload(self) -> None:
+        """Reload the stored ontology into the cache."""
+        stored = await self._store.read()
+        if stored is None:
+            return
+        self._set_concepts(stored)
+        logger.info("Refreshed the ontology.")
 
     @override
     def is_concept_id(self, value: str) -> bool:

@@ -7,6 +7,7 @@ from search_api.api.beacon.services import OpenSearchBeaconService
 from search_api.api.models import ValueCountsKey
 from search_api.database.document import max_synced_at
 from search_api.database.repository import get_cursor
+from search_api.services.poller import UpdatedPoller
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +31,12 @@ class ValueCountsUpdater:
         refresh_interval: float = 300.0,
     ) -> None:
         self._beacon_service = beacon_service
-        self._refresh_interval = refresh_interval
-        self._synced_at: datetime | None = None
-        self._task: asyncio.Task | None = None
+        self._poller = UpdatedPoller(
+            "value counts",
+            lambda: self._max_document_synced_at(),
+            lambda: self.refresh(),
+            refresh_interval,
+        )
 
     def _value_count_keys(self) -> Iterator[ValueCountsKey]:
         """Yield every valid value counts key."""
@@ -59,15 +63,23 @@ class ValueCountsUpdater:
                 yield {qualifier.id: [value]}
 
     async def refresh(self) -> None:
-        """Refresh the cached value counts."""
+        """Refresh the cached value counts.
+
+        The poller does not call this until a document has been synced.
+
+        Every key is counted concurrently. One key count failing will
+        not affect the others.
+        """
         self._beacon_service.clear_value_counts()
         keys: Sequence[ValueCountsKey] = list(self._value_count_keys())
-        for key in keys:
-            try:
-                await self._beacon_service.refresh_value_counts(key)
-            except Exception:
-                logger.exception("Failed to cache value counts for %s.", key)
+        await asyncio.gather(*(self._refresh_key(key) for key in keys))
         logger.info("Refreshed value counts")
+
+    async def _refresh_key(self, key: ValueCountsKey) -> None:
+        try:
+            await self._beacon_service.refresh_value_counts(key)
+        except Exception:
+            logger.exception("Failed to cache value counts for %s.", key)
 
     async def _max_document_synced_at(self) -> datetime | None:
         async with get_cursor() as cur:
@@ -75,31 +87,8 @@ class ValueCountsUpdater:
 
     async def start(self) -> None:
         """Start the background task that refreshes the value count cache."""
-        self._synced_at = await self._max_document_synced_at()
-        if self._synced_at is None:
-            logger.info("No documents have been synced.")
-        else:
-            await self.refresh()
-        if self._task is not None and not self._task.done():
-            return
-        self._task = asyncio.create_task(self._refresh_loop())
+        await self._poller.start()
 
     def stop(self) -> None:
         """Stop the background task that refreshes the value count cache."""
-        if self._task is not None:
-            self._task.cancel()
-            self._task = None
-
-    async def _refresh_loop(self) -> None:
-        while True:
-            await asyncio.sleep(self._refresh_interval)
-            try:
-                synced_at = await self._max_document_synced_at()
-                if synced_at == self._synced_at:
-                    continue
-                self._synced_at = synced_at
-                await self.refresh()
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception("Failed to refresh the value count cache.")
+        self._poller.stop()

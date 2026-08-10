@@ -552,3 +552,29 @@ def test_filtering_term_rejects_a_scope_the_field_is_not_in(
     assert (
         client.get(f"/filtering_terms/diagnosis/{path}", params=ok).status_code == 200
     )
+
+
+def _database_health(monkeypatch, healthy: bool) -> None:
+    async def is_healthy() -> bool:
+        return healthy
+
+    monkeypatch.setattr("search_api.api.beacon.routes.is_database_healthy", is_healthy)
+
+
+def test_database_health_ok(client: TestClient, monkeypatch):
+    _database_health(monkeypatch, True)
+
+    resp = client.get("/health")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok"}
+
+
+def test_database_health_unhealthy(client: TestClient, monkeypatch):
+    _database_health(monkeypatch, False)
+
+    resp = client.get("/health")
+
+    assert resp.status_code == 503
+    assert resp.json()["detail"]["database"] == "unhealthy"
+    assert resp.json()["detail"]["search"] == "ok"

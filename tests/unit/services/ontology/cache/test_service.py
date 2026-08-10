@@ -274,7 +274,7 @@ async def test_reloads_when_another_process_writes_the_store():
     store.stored = cached_ontology(V2_CONCEPTS, version="v2", sha256="hash2")
     store.stored_at = datetime(2026, 2, 1, tzinfo=timezone.utc)
 
-    service.start()
+    await service.start()
     try:
         await asyncio.sleep(0.05)
     finally:
@@ -291,10 +291,10 @@ async def test_does_not_reload_while_the_store_is_unchanged():
     service = CachedOntologyService(
         store, MockSource(cached_ontology(V1_CONCEPTS)), refresh_interval=0.01
     )
-    await service.init()
+
+    await service.start()
     reads = store.read_count
 
-    service.start()
     try:
         await asyncio.sleep(0.05)
     finally:
@@ -306,10 +306,10 @@ async def test_does_not_reload_while_the_store_is_unchanged():
 @pytest.mark.asyncio
 async def test_stop_refresh():
     service = make_service(V1_CONCEPTS)
-    service.start()
-    task = service._task
+    await service.start()
+    task = service._poller._task
     service.stop()
     await asyncio.sleep(0)
 
     assert task is not None and task.done()
-    assert service._task is None
+    assert service._poller._task is None

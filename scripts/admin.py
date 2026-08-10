@@ -22,6 +22,7 @@ from search_api.services.sync import SyncService
 from search_api.database.document import count_documents
 from search_api.database.repository import get_cursor
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
+from search_api.services.ontology.cache.source import OntologySource
 from search_api.services.ontology.cache.store import OntologyCacheStore
 from search_api.services.ontology.service import get_ontology_service
 from search_api.services.ontology.send import SEND_ONTOLOGY_ID, SendOntologySource
@@ -161,16 +162,16 @@ async def _update_snomed_ontology(release_file: Path) -> None:
     await import_snomed_release(release_file)
 
 
-async def _update_send_ontology() -> None:
-    """Update the SEND ontology cached in the database, if a newer one exists."""
-    store = OntologyCacheStore(SEND_ONTOLOGY_ID)
-    source = SendOntologySource()
+async def _update_cached_ontology(ontology_id: str, source: OntologySource) -> None:
+    """Update an ontology cached in the database, if the source has a newer one."""
+    store = OntologyCacheStore(ontology_id)
     stored = await store.read()
     fetched = await source.fetch()
 
     if stored is not None and not source.is_newer(fetched.version, stored.version):
         logging.info(
-            "SEND ontology is already up to date (stored version '%s', fetched '%s').",
+            "%s ontology is already up to date (stored version '%s', fetched '%s').",
+            ontology_id,
             stored.version,
             fetched.version,
         )
@@ -179,11 +180,17 @@ async def _update_send_ontology() -> None:
     changed = stored is None or fetched.sha256 != stored.sha256
     await store.write(fetched)
     logging.info(
-        "Updated SEND ontology to version '%s' with '%d' concepts%s",
+        "Updated %s ontology to version '%s' with '%d' concepts%s",
+        ontology_id,
         fetched.version,
         len(fetched.concepts),
         "." if changed else " (content unchanged).",
     )
+
+
+async def _update_send_ontology() -> None:
+    """Update the SEND ontology cached in the database, if a newer one exists."""
+    await _update_cached_ontology(SEND_ONTOLOGY_ID, SendOntologySource())
 
 
 # How each ontology is updated from its source, keyed by ontology id. Signatures

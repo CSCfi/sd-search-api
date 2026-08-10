@@ -44,6 +44,9 @@ jobs:
         run: docker compose --env-file tests/integration/.env --profile dev up --build -d --wait
 
       - name: Run integration tests
+        env:
+          # snowstorm.rahtiapp.fi is on an internal-only network the runner can't reach.
+          SKIP_SNOWSTORM_TESTS: "true"
         run: |
           set -a
           source tests/integration/.env

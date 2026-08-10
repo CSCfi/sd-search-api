@@ -191,6 +191,7 @@ async def test_cache_preferred_terms_skip_when_snowstorm_returns_empty():
     assert await _stored_term("337915000") is None
 
 
+@pytest.mark.requires_snowstorm
 @pytest.mark.asyncio
 async def test_cache_preferred_terms_resolves_via_snowstorm():
     service = _service()

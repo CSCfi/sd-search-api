@@ -640,6 +640,7 @@ async def test_query_filter_staining_he_and_ihc(bp_opensearch_index, client):
 #
 
 
+@pytest.mark.requires_snowstorm
 @pytest.mark.asyncio
 async def test_query_filter_staining_substance(bp_opensearch_index, client):
     result = query(client, ("staining_substance", "antibody"))

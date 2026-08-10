@@ -1,4 +1,5 @@
 import json
+import os
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -15,6 +16,25 @@ from search_api.api.opensearch.services import create_search  # noqa: E402
 from tests.integration.mockauth import MockAuthProvider  # noqa: E402
 
 bp_search = create_search()
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    """Skip `requires_snowstorm` tests when SKIP_SNOWSTORM_TESTS is set.
+
+    GitHub Actions runners can't reach the internal-only Snowstorm route that
+    tests/integration/.env points SNOWSTORM_URL at, so CI sets this env var to
+    skip those tests there while still running them locally.
+    """
+    if os.environ.get("SKIP_SNOWSTORM_TESTS", "").lower() != "true":
+        return
+    skip_snowstorm = pytest.mark.skip(
+        reason="Requires live Snowstorm, unreachable from GitHub Actions"
+    )
+    for item in items:
+        if "requires_snowstorm" in item.keywords:
+            item.add_marker(skip_snowstorm)
 
 
 @pytest.fixture(scope="session", autouse=True)

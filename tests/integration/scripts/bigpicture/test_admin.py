@@ -101,6 +101,7 @@ async def test_load_extract_only():
                 )
 
 
+@pytest.mark.requires_snowstorm
 @pytest.mark.asyncio
 async def test_load_plain_files():
     """The load command inserts clinical and non-clinical datasets."""
@@ -116,6 +117,7 @@ async def test_load_plain_files():
                 assert payload["scope"] == scope
 
 
+@pytest.mark.requires_snowstorm
 @pytest.mark.asyncio
 async def test_load_c4gh_files(tmp_path):
     """The load command decrypts Crypt4GH-encrypted XML files and inserts them into the database."""

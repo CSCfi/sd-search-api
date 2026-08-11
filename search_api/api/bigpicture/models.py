@@ -107,10 +107,10 @@ BP_FILTERING_TERM_BY_ID = {term.id: term for term in BP_FILTERING_TERMS}
 def _document_fields() -> dict[str, OpenSearchField]:
     """Returns a dict of OpenSearch document fields keyed by field name (the id)."""
 
-    def leaf(path: str) -> str:
+    def field_id(path: str) -> str:
         return path.rsplit(".", 1)[-1]
 
-    def group(path: str) -> str | None:
+    def nested_group(path: str) -> str | None:
         prefix, _, _ = path.rpartition(".")
         return prefix or None
 
@@ -132,16 +132,16 @@ def _document_fields() -> dict[str, OpenSearchField]:
             # Concept ID and free text are stored in separate fields.
             add_field(
                 OpenSearchField(
-                    id=leaf(osf.concept_value_field),
+                    id=field_id(osf.concept_value_field),
                     type="ontology",
-                    group=group(osf.concept_value_field),
+                    nested_group=nested_group(osf.concept_value_field),
                 )
             )
             add_field(
                 OpenSearchField(
-                    id=leaf(osf.other_value_field),
+                    id=field_id(osf.other_value_field),
                     type="keyword",
-                    group=group(osf.other_value_field),
+                    nested_group=nested_group(osf.other_value_field),
                 )
             )
         else:

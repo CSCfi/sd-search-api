@@ -5,14 +5,14 @@ from search_api.api.groups import validate_filtering_groups
 from search_api.exceptions import ConfigurationException
 
 
-def _term(field_id: str, ui_group: str | None) -> BeaconFilteringTerm:
+def _term(field_id: str, group: str | None) -> BeaconFilteringTerm:
     return BeaconFilteringTerm(
         id=field_id,
         type="text",
         scopes=["dataset"],
         label=field_id,
         description=field_id,
-        ui_group=ui_group,
+        group=group,
     )
 
 

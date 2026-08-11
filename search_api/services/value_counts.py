@@ -45,7 +45,7 @@ class ValueCountsUpdater:
         for term in service.filtering_terms:
             if term.type not in _CACHED_VALUE_TYPES:
                 continue
-            qualifier_values = list(self._valid_qualifier_values(term.group))
+            qualifier_values = list(self._valid_qualifier_values(term.nested_group))
             for scope in (None, *term.scopes):
                 for qualifiers in qualifier_values:
                     yield ValueCountsKey.of(term.id, scope, qualifiers)

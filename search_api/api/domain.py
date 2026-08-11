@@ -73,7 +73,11 @@ class Domain:
     @property
     def nested_groups(self) -> set[str]:
         """The nested groups the filtering terms place fields in."""
-        return {term.group for term in self.filtering_terms if term.group is not None}
+        return {
+            term.nested_group
+            for term in self.filtering_terms
+            if term.nested_group is not None
+        }
 
     @property
     def opensearch_fields(self) -> list[OpenSearchField]:

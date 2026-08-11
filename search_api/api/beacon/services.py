@@ -233,7 +233,7 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm, S]):
         )
         group_clauses = self._qualifier_clauses_by_group(
             key.qualifier_values_by_id
-        ).get(term.group or "")
+        ).get(term.nested_group or "")
         group_item_filter = (
             {"bool": {"filter": group_clauses}} if group_clauses else None
         )

@@ -56,7 +56,6 @@ them with Docker Compose:
 
 ```bash
 docker compose --env-file tests/integration/.env --profile dev up --build -d
-
 ```
 
 Then run:

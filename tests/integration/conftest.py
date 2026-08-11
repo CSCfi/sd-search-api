@@ -1,4 +1,5 @@
 import json
+import os
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -15,6 +16,43 @@ from search_api.api.opensearch.services import create_search  # noqa: E402
 from tests.integration.mockauth import MockAuthProvider  # noqa: E402
 
 bp_search = create_search()
+
+_SNOWSTORM_MARKER = "requires_snowstorm"
+_SKIP_SNOWSTORM_ENV = "SKIP_SNOWSTORM_TESTS"
+_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Register the Snowstorm marker.
+
+    Registered rather than used bare, so a mistyped mark fails the run under
+    ``--strict-markers`` instead of quietly never being skipped.
+    """
+    config.addinivalue_line(
+        "markers",
+        f"{_SNOWSTORM_MARKER}: needs a reachable Snowstorm, so it is skipped "
+        f"when {_SKIP_SNOWSTORM_ENV} is set.",
+    )
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    """Skip the tests needing a live Snowstorm when the environment has none.
+
+    GitHub Actions runners can't reach the internal-only Snowstorm route that
+    tests/integration/.env points SNOWSTORM_URL at, so CI sets this env var to
+    skip those tests there while still running them locally.
+    """
+    if os.environ.get(_SKIP_SNOWSTORM_ENV, "").strip().lower() not in _TRUE_VALUES:
+        return
+
+    skip_snowstorm = pytest.mark.skip(
+        reason=f"Requires a live Snowstorm, and {_SKIP_SNOWSTORM_ENV} is set"
+    )
+    for item in items:
+        if item.get_closest_marker(_SNOWSTORM_MARKER) is not None:
+            item.add_marker(skip_snowstorm)
 
 
 @pytest.fixture(scope="session", autouse=True)

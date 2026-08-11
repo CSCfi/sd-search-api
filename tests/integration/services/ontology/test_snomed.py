@@ -5,6 +5,7 @@ from search_api.api.bigpicture.models import BP_FILTERING_TERM_BY_ID
 from search_api.services.ontology.snomed import SnomedService
 
 
+@pytest.mark.requires_snowstorm
 @pytest.mark.asyncio
 async def test_find_concept():
     service = SnomedService()
@@ -17,6 +18,7 @@ async def test_find_concept():
         assert concept.preferred_term == "Homo sapiens"
 
 
+@pytest.mark.requires_snowstorm
 @pytest.mark.asyncio
 async def test_get_preferred_terms():
     service = SnomedService()
@@ -25,6 +27,7 @@ async def test_get_preferred_terms():
     assert result["80248007"] == "Left breast structure"
 
 
+@pytest.mark.requires_snowstorm
 @pytest.mark.asyncio
 async def test_get_preferred_terms_unknown_id_omitted():
     service = SnomedService()
@@ -39,6 +42,7 @@ async def test_get_preferred_terms_empty():
     assert await service.get_preferred_terms(set()) == {}
 
 
+@pytest.mark.requires_snowstorm
 @pytest.mark.asyncio
 async def test_find_descendants():
     service = SnomedService()
@@ -52,6 +56,7 @@ async def test_find_descendants():
     assert all(c.preferred_term for c in concepts)
 
 
+@pytest.mark.requires_snowstorm
 @pytest.mark.asyncio
 async def test_describes_true_for_preferred_term_or_synonym():
     # "Homo sapiens" is 337915000's preferred term, "Human" a synonym of it.
@@ -59,11 +64,13 @@ async def test_describes_true_for_preferred_term_or_synonym():
     assert await SnomedService._describes("337915000", "Human") is True
 
 
+@pytest.mark.requires_snowstorm
 @pytest.mark.asyncio
 async def test_describes_is_case_and_space_insensitive():
     assert await SnomedService._describes("337915000", "  HOMO   SAPIENS  ") is True
 
 
+@pytest.mark.requires_snowstorm
 @pytest.mark.asyncio
 async def test_describes_false_for_a_partial_term():
     # "Formalin" is only part of 1388516000's description "Neutral buffered
@@ -71,6 +78,7 @@ async def test_describes_false_for_a_partial_term():
     assert await SnomedService._describes("1388516000", "Formalin") is False
 
 
+@pytest.mark.requires_snowstorm
 @pytest.mark.asyncio
 async def test_describes_false_for_an_unrelated_value():
     assert await SnomedService._describes("337915000", "zzz nonsense") is False

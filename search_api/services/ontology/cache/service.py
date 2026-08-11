@@ -2,6 +2,7 @@ import logging
 from typing import override
 
 from search_api.api.beacon.models import BeaconFilteringTerm
+from search_api.exceptions import SystemException
 from search_api.services.ontology.cache.models import (
     CachedOntology,
     CachedOntologyConcept,
@@ -44,6 +45,14 @@ class CachedOntologyService(OntologyService):
         self._children: dict[
             str, set[str]
         ] = {}  # child concept ids by parent concept id
+        self._initialised = False
+
+    def _require_initialised(self) -> None:
+        """Raises SystemException: if ``init`` has not been called."""
+        if not self._initialised:
+            raise SystemException(
+                f"The {self._store.ontology_id} ontology has not been initialised."
+            )
 
     def _set_concepts(self, cached: CachedOntology) -> None:
         by_id: dict[str, CachedOntologyConcept] = {}
@@ -67,6 +76,7 @@ class CachedOntologyService(OntologyService):
         self._by_id = by_id
         self._by_value = by_value
         self._children = children
+        self._initialised = True
 
     @override
     async def init(self) -> None:
@@ -97,10 +107,12 @@ class CachedOntologyService(OntologyService):
 
     @override
     def is_concept_id(self, value: str) -> bool:
+        self._require_initialised()
         return value in self._by_id
 
     @override
     async def get_preferred_terms(self, concept_ids: set[str]) -> dict[str, str]:
+        self._require_initialised()
         return {
             concept_id: self._by_id[concept_id].preferred_term
             for concept_id in concept_ids
@@ -111,6 +123,7 @@ class CachedOntologyService(OntologyService):
     async def _find_concept_ids(
         self, value: str, filtering_term: BeaconFilteringTerm
     ) -> set[str]:
+        self._require_initialised()
         concept_ids = set(self._by_value.get(normalise_term(value), ()))
 
         # Keep only the concepts the field is restricted to. An
@@ -125,6 +138,7 @@ class CachedOntologyService(OntologyService):
 
     @override
     async def _find_descendant_ids(self, concept_ids: set[str]) -> set[str]:
+        self._require_initialised()
         result: set[str] = set()
         child_ids: list[str] = []
         for concept_id in concept_ids:

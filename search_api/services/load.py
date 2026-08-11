@@ -112,6 +112,11 @@ class LoadService:
         for cache in self._term_caches.values():
             await cache.load()
 
+        # The ontologies must be initialised before load to
+        # resolve preferred terms for the terms cache.
+        for ontology in set(self._ontology_by_field.values()):
+            await ontology.init()
+
         loaded = 0
         skipped = 0
 

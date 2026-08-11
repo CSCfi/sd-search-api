@@ -23,6 +23,11 @@ class OntologyCacheStore:
     def __init__(self, ontology_id: str) -> None:
         self._ontology_id = ontology_id
 
+    @property
+    def ontology_id(self) -> str:
+        """The ontology this store holds."""
+        return self._ontology_id
+
     async def read(self) -> CachedOntology | None:
         stored = await read_ontology(self._ontology_id)
         if stored is None:

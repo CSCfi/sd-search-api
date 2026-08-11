@@ -7,8 +7,10 @@ import pytest
 from search_api.api.beacon.models import (
     BeaconFilteringOntology,
     BeaconFilteringTerm,
+    BeaconQueryFilter,
     OntologyRestriction,
 )
+from search_api.exceptions import SystemException
 from search_api.services.ontology.cache.models import (
     CachedOntology,
     CachedOntologyConcept,
@@ -72,6 +74,8 @@ class MockSource(OntologySource):
 
 class MockStore:
     """Stands in for the ontology_cache table."""
+
+    ontology_id = "TEST"
 
     def __init__(self) -> None:
         self.stored: CachedOntology | None = None
@@ -313,3 +317,42 @@ async def test_stop_refresh():
 
     assert task is not None and task.done()
     assert service._poller._task is None
+
+
+@pytest.mark.asyncio
+async def test_require_initialized():
+    service = make_service(V1_CONCEPTS)
+
+    with pytest.raises(SystemException, match="has not been initialised"):
+        service.is_concept_id("C1")
+    with pytest.raises(SystemException, match="has not been initialised"):
+        await service.get_preferred_terms({"C1"})
+    with pytest.raises(SystemException, match="has not been initialised"):
+        await service._find_concept_ids("P1", term())
+    with pytest.raises(SystemException, match="has not been initialised"):
+        await service._find_descendant_ids({"C1"})
+    with pytest.raises(SystemException, match="has not been initialised"):
+        await service.prepare_ontology_filter(
+            BeaconQueryFilter(id="species", value="P1"), [term()]
+        )
+
+
+@pytest.mark.asyncio
+async def test_after_initialized():
+    service = make_service(V1_CONCEPTS)
+
+    await service.init()
+
+    assert service.is_concept_id("C1")
+    assert await service.get_preferred_terms({"C1"}) == {"C1": "P1"}
+
+
+@pytest.mark.asyncio
+async def test_after_reload():
+    store = MockStore()
+    store.stored = cached_ontology(V1_CONCEPTS)
+    service = CachedOntologyService(store, MockSource(cached_ontology(V1_CONCEPTS)))
+
+    await service._reload()
+
+    assert service.is_concept_id("C1")

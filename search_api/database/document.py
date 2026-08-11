@@ -99,6 +99,12 @@ async def count_documents(cur: AsyncCursor) -> int:
     return row[0] if row else 0
 
 
+async def reset_synced_at(cur: AsyncCursor) -> int:
+    """Reset every document to pending sync and return the number of documents."""
+    await cur.execute(f"UPDATE {DOCUMENT_TABLE} SET synced_at = NULL")
+    return cur.rowcount
+
+
 async def delete_all_documents(cur: AsyncCursor) -> int:
     """Delete all documents from the database and return the number of deleted documents."""
     await cur.execute(f"DELETE FROM {DOCUMENT_TABLE}")

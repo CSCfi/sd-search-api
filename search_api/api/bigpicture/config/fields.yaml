@@ -60,7 +60,6 @@ filtering_terms:
       concept_ids: [ "410607006" ]  # Organism (organism)
       include_descendants: true
     ui_group: "subject"
-    ui_display: false
 
   - id: anatomical_site
     type: ontology

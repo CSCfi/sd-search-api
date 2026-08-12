@@ -4,10 +4,9 @@ from search_api.api.bigpicture.domain import BP_DOMAIN
 from search_api.api.domain import Domain
 from search_api.exceptions import SystemException
 
-# Register new deployments here.
-DOMAINS: dict[str, Domain] = {
-    "Bigpicture": BP_DOMAIN,
-}
+# Register new deployments here. A deployment is keyed by domain name,
+# so the deployment name and the domain name cannot disagree.
+DOMAINS: dict[str, Domain] = {BP_DOMAIN.name: BP_DOMAIN}
 
 
 def get_domain(deployment_type: str) -> Domain:

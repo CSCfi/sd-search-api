@@ -486,6 +486,25 @@ def get_dataset_url(
 
 
 @pytest.mark.asyncio
+async def test_status(bp_opensearch_index, client):
+    body = client.get("/status").json()
+
+    assert body["deployment"] == "Bigpicture"
+    assert body["documents"]["indexed"] == len(OPENSEARCH_DOCS)
+    assert body["scopes"]["non_clinical"]["documents"]["indexed"] == len(
+        OPENSEARCH_DOCS
+    )
+    assert body["scopes"]["clinical"]["documents"]["indexed"] == 0
+    assert set(body["scopes"]) == {"clinical", "non_clinical"}
+
+
+def test_status_needs_session():
+    with httpx.Client(base_url="http://localhost:8000", timeout=30.0) as anonymous:
+        assert anonymous.get("/status").status_code == 401
+        assert anonymous.get("/health").status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_query_no_filters_returns_all_datasets(bp_opensearch_index, client):
     result = query(client)
     assert get_dataset_ids(result) == {DATASET_1, DATASET_2}

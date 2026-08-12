@@ -23,7 +23,7 @@ async def test_delete_all_documents(bp_opensearch_index, bp_opensearch_index_nam
     try:
         async with get_connection() as conn:
             async with conn.cursor() as cur:
-                database_count_before = await count_documents(cur)
+                database_count_before = await count_documents()
                 opensearch_count_before = (
                     await sync_service.search.count(index=bp_opensearch_index_name)
                 )["count"]
@@ -40,7 +40,7 @@ async def test_delete_all_documents(bp_opensearch_index, bp_opensearch_index_nam
                     index=bp_opensearch_index_name
                 )
 
-                assert await count_documents(cur) == database_count_before + 2
+                assert await count_documents() == database_count_before + 2
                 opensearch_count_after_sync = (
                     await sync_service.search.count(index=bp_opensearch_index_name)
                 )["count"]
@@ -48,7 +48,7 @@ async def test_delete_all_documents(bp_opensearch_index, bp_opensearch_index_nam
 
                 await sync_service.delete_all_documents(cur)
 
-                assert await count_documents(cur) == 0
+                assert await count_documents() == 0
                 opensearch_count_after_delete = (
                     await sync_service.search.count(index=bp_opensearch_index_name)
                 )["count"]

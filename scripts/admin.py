@@ -31,16 +31,6 @@ from search_api.services.ontology.term_cache import create_term_caches
 from search_api.services.ontology.snomed import import_snomed_release
 
 
-def _index_path(domain: Domain) -> Path:
-    return (
-        Path(search_api.__file__).parent
-        / "api"
-        / domain.name
-        / "index"
-        / f"{domain.opensearch_index}.json"
-    )
-
-
 def _schema_path(name: str) -> Path:
     return Path(search_api.__file__).parent / "database" / "schema" / f"{name}.sql"
 
@@ -121,8 +111,7 @@ async def _clear(domain: Domain, args: argparse.Namespace) -> None:
 
     sync_service = SyncService(domain.opensearch_index)
     try:
-        async with get_cursor() as cur:
-            doc_count = await count_documents(cur)
+        doc_count = await count_documents()
 
         if not _confirm(
             f"All documents ({doc_count}) will be deleted from database and "
@@ -258,7 +247,7 @@ async def _refresh_ontology(ontology_id: str) -> None:
 
 def _generate_index(domain: Domain) -> None:
     body = OpenSearchIndexGeneratorService(domain.opensearch_fields).generate()
-    path = _index_path(domain)
+    path = domain.index_file
     path.write_text(json.dumps(body, indent=2) + "\n")
     logging.info("Wrote OpenSearch index to %s.", path)
 

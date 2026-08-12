@@ -6,7 +6,6 @@ from datetime import datetime
 from search_api.api.beacon.services import OpenSearchBeaconService
 from search_api.api.models import ValueCountsKey
 from search_api.database.document import max_synced_at
-from search_api.database.repository import get_cursor
 from search_api.services.poller import UpdatedPoller
 
 logger = logging.getLogger(__name__)
@@ -31,9 +30,11 @@ class ValueCountsUpdater:
         refresh_interval: float = 300.0,
     ) -> None:
         self._beacon_service = beacon_service
+        # Called through a lambda rather than passed as bound methods, so the poller
+        # looks them up on each call.
         self._poller = UpdatedPoller(
             "value counts",
-            lambda: self._max_document_synced_at(),
+            lambda: self._max_synced_at(),
             lambda: self.refresh(),
             refresh_interval,
         )
@@ -81,9 +82,8 @@ class ValueCountsUpdater:
         except Exception:
             logger.exception("Failed to cache value counts for %s.", key)
 
-    async def _max_document_synced_at(self) -> datetime | None:
-        async with get_cursor() as cur:
-            return await max_synced_at(cur)
+    async def _max_synced_at(self) -> datetime | None:
+        return await max_synced_at()
 
     async def start(self) -> None:
         """Start the background task that refreshes the value count cache."""

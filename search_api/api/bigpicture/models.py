@@ -48,11 +48,13 @@ class BigpictureBeaconResultSetsResponse(
     """Beacon V2 result sets response for the Bigpicture document schema."""
 
 
-BP_DOMAIN_NAME = "bigpicture"
+BP_DOMAIN_NAME = "Bigpicture"
 BP_OPENSEARCH_INDEX = "bp-image-index"
 
+# The Beacon's identity, reported by /info. The id differentiates responses
+# within a Beacon network, so it is a reversed domain string.
 BP_BEACON_ID = "fi.csc.bigpicture.beacon.v2"
-BP_BEACON_NAME = "fi.csc.bigpicture.beacon.v2"
+BP_BEACON_NAME = "CSC Bigpicture Beacon"
 
 BP_DATASET_SCHEMA = "dataset"
 BP_BIOLOGICAL_BEING_SCHEMA = "biological_being"

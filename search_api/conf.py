@@ -28,6 +28,23 @@ class DatabaseConfiguration(BaseSettings):
     POSTGRES_USER: str = Field(description="PostgreSQL user.")
     POSTGRES_PASSWORD: str = Field(description="PostgreSQL password.")
 
+    POSTGRES_POOL_MIN_SIZE: int = Field(
+        default=2, description="Connections the pool keeps open."
+    )
+    POSTGRES_POOL_MAX_SIZE: int = Field(
+        default=10, description="Connections the pool may open at once."
+    )
+    POSTGRES_POOL_MAX_LIFETIME: float = Field(
+        default=3600.0,
+        description="Seconds after which a pooled connection is replaced.",
+    )
+    POSTGRES_POOL_TIMEOUT: float = Field(
+        default=5.0,
+        description=(
+            "Seconds a caller waits for a connection from the pool before failing."
+        ),
+    )
+
 
 class OpenSearchConfiguration(BaseSettings):
     """OpenSearch connection configuration."""

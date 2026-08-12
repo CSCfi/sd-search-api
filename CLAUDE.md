@@ -131,6 +131,36 @@ pattern: `BP_DOMAIN`, `BP_LOADER`).
    `SyncService` (`services/sync.py`, constructed with the index name) reads unsynced rows, bulk-indexes
    via `index_documents`, then stamps `synced_at`.
 
+### Database connections (`database/repository.py`)
+
+`get_cursor()` / `get_connection()` are how everything reaches Postgres. **The server pools its
+connections; nothing else does.** `make_lifespan` calls `open_pool` before the caches that poll the
+database start, and `close_pool` after they stop; while no pool is open `get_connection` connects
+directly, which is what the admin CLI and the tests get. A load or sync holds one connection for its
+whole run, so a pool would save it nothing and leave background workers to shut down. Measured on
+localhost, a query costs ~6 ms unpooled against ~0.7 ms pooled, connecting being the difference.
+
+The pool is a `psycopg_pool.AsyncConnectionPool` sized by `POSTGRES_POOL_MIN_SIZE` /
+`POSTGRES_POOL_MAX_SIZE`, with three things set deliberately:
+
+- **`check=AsyncConnectionPool.check_connection`** — every connection is probed on the way out of
+  the pool, so one the server closed while it sat idle (a restart, an idle timeout, a dropped
+  network) is discarded and replaced instead of failing the query that got it. The probe is one
+  round trip, replacing the several that connecting costs. Without it a terminated backend surfaces
+  as `AdminShutdown` to whichever request is handed it.
+- **`timeout=POSTGRES_POOL_TIMEOUT`** (5 s, against psycopg_pool's 30) — how long a caller waits
+  when every connection is in use, after which it raises `PoolTimeout`. That bound is what
+  `tests/integration/database/test_repository.py` covers: hold `POSTGRES_POOL_MAX_SIZE` connections,
+  each answering a `SELECT 1`, and the next one times out rather than opening a connection the
+  database would eventually refuse.
+- **`await pool.open(wait=False)`** — a database that is not up must not stop the server from
+  starting, since `/health` is what reports that. The pool fills in the background and a query made
+  before it does raises exactly as it would with no pool.
+
+`POSTGRES_POOL_MAX_LIFETIME` replaces a connection once it reaches that age even while it is
+working, so a database restarted or reconfigured since is reconnected to rather than only after
+something breaks.
+
 The OpenSearch-shaped payload is produced at **load** time by `build_document(document)`
 (`api/opensearch/document.py`), which converts each `OpenSearchFieldValue`; `age_at_extraction`
 ISO-8601 duration tuples become `{gte, lte}` day ranges via `iso8601_duration_to_days`.
@@ -302,7 +332,19 @@ override them via `app.dependency_overrides`.
 | `POST /ai/query` | Natural-language search (gated by `FEATURE_AI`) |
 | `GET /filtering_terms/{field_id}/values` | Indexed values with counts; ontology fields resolve concept IDs to preferred terms |
 | `GET /filtering_terms/{field_id}/suggestions` | Autocomplete restricted to indexed values |
+| `GET /status` | What the deployment holds: documents indexed and pending, in total and per scope, and when a document was last synced |
 | `GET /health` | Both stores answer; a `503` names the one that did not |
+
+`AuthMiddleware` (`api/middlewares.py`) requires a session on every route outside `PUBLIC_PATHS`,
+which is why `/health` and `/info` answer anonymously while `/status` — the same kind of operational
+report, but one that says how much data a deployment holds — is a `401` without one. `/admin` is
+public to the middleware and gated by `ADMIN_KEY` instead.
+
+`/status` reads its pending counts and last-synced time from Postgres and its indexed counts from
+OpenSearch, one `count` per scope plus one for the total. An index that does not exist counts zero
+rather than erroring, so the endpoint still answers before `index create` has been run. Every count
+is a term lookup, so nothing here scales with the number of documents — except the pending
+counts, which read one row per document still awaiting sync.
 
 `values` and `suggestions` both accept `scope=<id>` and repeatable `qualifier=<id>:<value>`, and
 restrict their counts by both. Neither has a default: omitting one does not filter on it. A scope the
@@ -542,7 +584,9 @@ constrains the LLM to emit JSON matching the model; `result.output` is the concr
 ### Configuration (`conf.py`)
 
 Settings come from the environment (pydantic-settings); most fields are **required** (no hardcoded
-host/db/password defaults). Defaults that exist: `POSTGRES_PORT=5432`, `OPENSEARCH_PORT=9200`,
+host/db/password defaults). Defaults that exist: `POSTGRES_PORT=5432`,
+`POSTGRES_POOL_MIN_SIZE=2`, `POSTGRES_POOL_MAX_SIZE=10`, `POSTGRES_POOL_MAX_LIFETIME=3600`,
+`POSTGRES_POOL_TIMEOUT=5`, `OPENSEARCH_PORT=9200`,
 `DEPLOYMENT_ENV=dev`, `TERM_CACHE_REFRESH=300`, `ONTOLOGY_CACHE_REFRESH=300`,
 `VALUE_COUNT_CACHE_REFRESH=300`, `FEATURE_AI=false`, `ADMIN_KEY=None` (admin
 endpoints unmounted when unset), plus `OIDC_SCOPE`, `OIDC_SECURE_COOKIE=true`, `JWT_ISSUER` and
@@ -562,7 +606,7 @@ tests/            # mirrors the search_api/ package layout
 ├── integration/   # require Postgres/OpenSearch (route tests hit a running server)
 │   ├── api/bigpicture/        # endpoints incl. AI (test_routes_ai.py, @skip — needs Ollama),
 │   │                          # plus extract + load against Postgres
-│   ├── database/              # one module per table
+│   ├── database/              # one module per table, plus test_repository.py (the pool)
 │   ├── scripts/               # test_admin.py (ontology updates) + bigpicture/test_admin.py
 │   └── services/{ontology/,test_load.py,test_poller.py,test_sync.py}
 ├── performance/   # locust load tests

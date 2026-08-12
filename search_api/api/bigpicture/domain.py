@@ -3,6 +3,7 @@
 import argparse
 from collections.abc import Iterator
 from dataclasses import dataclass
+from pathlib import Path
 
 from search_api.api.bigpicture.models import (
     BP_BEACON_ID,
@@ -90,6 +91,7 @@ BP_LOADER = Loader(
 BP_DOMAIN = Domain(
     name=BP_DOMAIN_NAME,
     opensearch_index=BP_OPENSEARCH_INDEX,
+    index_file=Path(__file__).parent / "index" / f"{BP_OPENSEARCH_INDEX}.json",
     filtering_terms=BP_FILTERING_TERMS,
     filtering_groups=BP_FILTERING_GROUPS,
     filtering_scopes=BP_FILTERING_SCOPES,

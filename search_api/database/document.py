@@ -1,8 +1,4 @@
-"""JSONB document store.
-
-A document holds a JSONB payload. The document freshness is tracked by
-modified_at. OpenSearch sync state is tracked by synced_at.
-"""
+"""The document table."""
 
 from collections.abc import AsyncIterator, Sequence
 from datetime import datetime

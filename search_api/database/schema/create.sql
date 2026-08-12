@@ -29,3 +29,15 @@ CREATE TABLE document (
 );
 
 CREATE INDEX idx_document_synced_at ON document (synced_at);
+
+-- Problems found while loading a document.
+CREATE TABLE document_log (
+    id          BIGINT      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    document_id TEXT        NOT NULL,
+    field_id    TEXT,
+    severity    TEXT        NOT NULL CHECK (severity IN ('WARNING', 'ERROR')),
+    message     TEXT        NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_document_log_document_id ON document_log (document_id);

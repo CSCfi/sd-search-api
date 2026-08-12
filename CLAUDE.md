@@ -75,10 +75,10 @@ search_api/
 │   │   └── cache/      # one whole small ontology in memory:
 │   │                   # models.py source.py store.py service.py
 │   ├── auth.py session.py
-│   └── load.py sync.py poller.py value_counts.py
+│   └── load.py sync.py poller.py value_counts.py validate.py
 ├── database/           # every line of SQL, one module per table:
 │   │                   # repository.py (connection) models.py (rows)
-│   │                   # document.py terms_cache.py ontology_cache.py
+│   │                   # document.py document_log.py terms_cache.py ontology_cache.py
 │   └── schema/         # create.sql drop.sql
 ├── utils/              # stateless helpers: crypt.py dir.py xml.py
 ├── ai/  conf.py  exceptions.py  main.py
@@ -156,6 +156,27 @@ indexed at the root under `SCOPE_FIELD` (`api/scopes.py`), and `Domain` contribu
 `LoadService.validate_document` is the boundary where a deployment's extraction meets the generic
 store: it checks `scope` against `filtering_scopes` and each group's qualifier ids/values against
 `filtering_qualifiers`, so each extractor does not restate the declared configuration.
+
+### Document log (`search_api/database/document_log.py`)
+
+A load records what it could not make sense of in the `document_log` table (`document_id`,
+optional `field_id`, `severity`, `message`, `created_at`), keyed to the document it is about.
+`severity` is `WARNING` or `ERROR`, constrained in the schema and by `LogSeverity`
+(`database/models.py`), and `_log_entry` (`services/load.py`) both builds the row and emits it
+through `logging` at the matching level, so a problem cannot be in one and not the other. The
+message names only what the columns do not — the value and the ontology — and reads the same for
+every occurrence, so rows group by it.
+
+What it currently records: every value of a strict `ontology` field that reached no preferred term.
+Such a value **is** indexed, but `/filtering_terms/{field_id}/values` builds its response from the
+resolved terms, so the value is missing from the facet and nothing can search for it by name — the
+silent failure the table exists to make visible. An `ontologyOrValue` field is exempt, since an
+unresolvable value there is indexed as free text by design. The check is against the term cache
+rather than the resolution call, because the two provider kinds fail differently: a cached ontology
+rejects an unknown id in `is_concept_id` before resolution is attempted, while SNOMED accepts any
+well-formed id and fails to resolve it later.
+
+The rows are about documents, so `admin.py <deployment> clear` deletes them with the documents.
 
 ### XML ingestion (`search_api/api/bigpicture/extract.py`)
 
@@ -535,17 +556,24 @@ A working set is in `tests/integration/.env`.
 tests/            # mirrors the search_api/ package layout
 ├── unit/          # run by tox; no external services needed
 │   ├── api/{admin,auth,beacon,bigpicture,opensearch}/
-│   ├── services/{ontology/,test_auth.py,test_session.py,test_validate.py}
+│   ├── services/{ontology/,test_auth.py,test_load.py,test_poller.py,
+│   │              test_session.py,test_validate.py,test_value_counts.py}
 │   └── utils/                 # crypt, dir, xml
 ├── integration/   # require Postgres/OpenSearch (route tests hit a running server)
 │   ├── api/bigpicture/        # endpoints incl. AI (test_routes_ai.py, @skip — needs Ollama),
 │   │                          # plus extract + load against Postgres
-│   ├── database/, scripts/bigpicture/
-│   └── services/{ontology/,test_sync.py}   # SNOMED hits a live Snowstorm
+│   ├── database/              # one module per table
+│   ├── scripts/               # test_admin.py (ontology updates) + bigpicture/test_admin.py
+│   └── services/{ontology/,test_load.py,test_poller.py,test_sync.py}
 ├── performance/   # locust load tests
 ├── utils/         # test helpers (generate_data.py)
 └── files/bigpicture/xml/dataset_{clinical,non_clinical}/METADATA/   # XML fixtures
 ```
+
+A test needing a reachable Snowstorm carries `@pytest.mark.requires_snowstorm`, and
+`SKIP_SNOWSTORM_TESTS=true` skips those — set in CI, which cannot reach the internal-only Snowstorm
+that `tests/integration/.env` points at. The marker is registered and the skip applied in
+`tests/integration/conftest.py`.
 
 Integration `conftest.py` loads `tests/integration/.env` and provides module-scoped fixtures:
 `bp_opensearch_docs` (override to supply inline documents), `bp_opensearch_index_name` (returns a

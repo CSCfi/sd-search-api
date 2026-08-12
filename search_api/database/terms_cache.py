@@ -1,3 +1,5 @@
+"""The terms_cache table."""
+
 from datetime import datetime
 from typing import Sequence
 

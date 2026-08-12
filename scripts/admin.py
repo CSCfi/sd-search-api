@@ -19,6 +19,7 @@ from search_api.exceptions import SystemException
 from search_api.services.load import LoadService
 from search_api.services.sync import SyncService
 from search_api.database.document import count_documents, reset_synced_at
+from search_api.database.document_log import delete_all_document_logs
 from search_api.database.repository import get_cursor
 from search_api.database.terms_cache import delete_all_terms
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
@@ -125,8 +126,8 @@ async def _clear(domain: Domain, args: argparse.Namespace) -> None:
 
         if not _confirm(
             f"All documents ({doc_count}) will be deleted from database and "
-            f"OpenSearch Index '{domain.opensearch_index}', together with the "
-            f"cached preferred terms.",
+            f"OpenSearch Index '{domain.opensearch_index}', together with any "
+            f"associated data.",
             args.group,
         ):
             logging.info("Aborted, nothing was deleted.")
@@ -134,6 +135,8 @@ async def _clear(domain: Domain, args: argparse.Namespace) -> None:
 
         async with get_cursor() as cur:
             await sync_service.delete_all_documents(cur)
+            log_count = await delete_all_document_logs(cur)
+            logging.info("Deleted %d document log row(s).", log_count)
 
         # The terms are cleared after the documents.
         term_count = await delete_all_terms()

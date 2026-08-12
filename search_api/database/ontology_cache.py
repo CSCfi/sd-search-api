@@ -1,4 +1,4 @@
-"""The ontology_cache table: one ontology's whole concept table, as one JSON row."""
+"""The ontology_cache table."""
 
 from datetime import datetime
 

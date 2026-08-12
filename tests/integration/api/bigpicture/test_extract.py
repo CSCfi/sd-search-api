@@ -50,9 +50,15 @@ _EXPECTED_DOCUMENTS = {
 
 
 def _mock_term_caches() -> dict:
-    """One mock term cache per ontology in play (keyed like the serving side)."""
+    """One mock term cache per ontology.
+
+    Reports every concept id as known.
+    """
     return {
-        ontology_id: MagicMock(load=AsyncMock(), cache_preferred_terms=AsyncMock())
+        ontology_id: MagicMock(
+            load=AsyncMock(),
+            cache_preferred_terms=AsyncMock(return_value=set()),
+        )
         for ontology_id in BP_DOMAIN.ontology_ids
     }
 

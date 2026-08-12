@@ -8,7 +8,11 @@ from search_api.api.bigpicture.extract import (
     to_opensearch_values,
 )
 from search_api.api.bigpicture.domain import BP_DOMAIN
-from search_api.services.load import concept_ids_from_values, ontology_services_by_field
+from search_api.services.load import (
+    ontology_field_values,
+    ontology_services_by_field,
+    OntologyFieldValues,
+)
 
 _ONTOLOGY_BY_FIELD = ontology_services_by_field(BP_DOMAIN.filtering_terms)
 
@@ -58,22 +62,29 @@ def _code(code: str) -> BigpictureCodeAttributeValue:
     return BigpictureCodeAttributeValue(code=code, meaning=code)
 
 
-def _concept_ids(fields: BigpictureFields) -> dict[str, set[str]]:
+def _ontology_field_values(fields: BigpictureFields) -> dict[str, OntologyFieldValues]:
     values, groups = to_opensearch_values(fields)
-    return concept_ids_from_values(
+    return ontology_field_values(
         ExtractedDocument(id="img", values=values, groups=groups).all_values,
         _ONTOLOGY_BY_FIELD,
     )
 
 
-def test_concept_ids_from_values_animal_species():
+def _concept_ids(fields: BigpictureFields) -> dict[str, set[str]]:
+    return {
+        field_id: split.concept_ids
+        for field_id, split in _ontology_field_values(fields).items()
+    }
+
+
+def test_concept_ids_animal_species():
     result = _concept_ids(
         _fields(specimen={BigpictureSpecimenFields(animal_species=_code(_SPECIES))})
     )
     assert _SPECIES in result.get("animal_species", set())
 
 
-def test_concept_ids_from_values_anatomical_site():
+def test_concept_ids_anatomical_site():
     specimen = BigpictureSpecimenFields(
         anatomical_site=frozenset([_code(_BREAST), _code(_AXILLA)])
     )
@@ -81,7 +92,7 @@ def test_concept_ids_from_values_anatomical_site():
     assert {_BREAST, _AXILLA} <= result.get("anatomical_site", set())
 
 
-def test_concept_ids_from_values_fixation_type():
+def test_concept_ids_fixation_type():
     result = _concept_ids(
         _fields(specimen={BigpictureSpecimenFields(fixation_type=_code(_FFPE))})
     )
@@ -92,13 +103,23 @@ def test_concept_ids_from_values_fixation_type():
     assert "Formalin" not in result.get("fixation_type", set())
 
 
-def test_concept_ids_from_values_staining_procedure():
+def test_ontology_field_values_no_concept_id():
+    """The same walk keeps both halves, so neither can be forgotten."""
+    specimen = BigpictureSpecimenFields(fixation_type=_code("Formalin"))
+
+    split = _ontology_field_values(_fields(specimen={specimen}))["fixation_type"]
+
+    assert split.non_concept_ids == {"Formalin"}
+    assert split.concept_ids == set()
+
+
+def test_concept_ids_staining_procedure():
     stain = BigpictureStainingFields(staining_procedure=_code(_HE))
     result = _concept_ids(_fields(staining={stain}))
     assert _HE in result.get("staining_procedure", set())
 
 
-def test_concept_ids_from_values_multiple_specimens():
+def test_concept_ids_multiple_specimens():
     specimen1 = BigpictureSpecimenFields(animal_species=_code(_SPECIES))
     specimen2 = BigpictureSpecimenFields(block_preparation=_code(_PARAFFIN))
     result = _concept_ids(_fields(specimen={specimen1, specimen2}))

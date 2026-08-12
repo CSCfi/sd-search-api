@@ -21,6 +21,12 @@ from scripts.admin import (
 from search_api.api.bigpicture.domain import BP_DOMAIN
 from search_api.services.load import LoadService
 from search_api.database.document import DOCUMENT_TABLE, get_document
+from search_api.database.document_log import (
+    DOCUMENT_LOG_TABLE,
+    insert_document_log,
+    read_document_logs,
+)
+from search_api.database.models import StoredDocumentLog
 from search_api.api.opensearch.services import create_search
 from search_api.database.models import StoredTerm
 from search_api.database.repository import get_connection
@@ -100,6 +106,10 @@ async def delete_test_rows():
                 await cur.execute(
                     f"DELETE FROM {TERMS_CACHE_TABLE} WHERE ontology_id = %s",
                     (_SENTINEL_ONTOLOGY_ID,),
+                )
+                await cur.execute(
+                    f"DELETE FROM {DOCUMENT_LOG_TABLE} WHERE document_id = %s",
+                    (_SENTINEL_DOCUMENT_ID,),
                 )
 
     await _delete()
@@ -371,6 +381,27 @@ async def _store_sentinel_term() -> None:
     )
 
 
+async def _store_sentinel_log() -> None:
+    """Log a row for the sentinel document, to check later if it exists."""
+    async with get_connection() as conn:
+        async with conn.cursor() as cur:
+            await insert_document_log(
+                cur,
+                StoredDocumentLog(
+                    document_id=_SENTINEL_DOCUMENT_ID,
+                    severity="ERROR",
+                    message="Something was not found.",
+                ),
+            )
+
+
+async def _sentinel_log_exists() -> bool:
+    """Return True if the row logged for the sentinel document exists."""
+    async with get_connection() as conn:
+        async with conn.cursor() as cur:
+            return bool(await read_document_logs(cur, _SENTINEL_DOCUMENT_ID))
+
+
 async def _sentinel_term_exists() -> bool:
     """Return True if the cached preferred term exists."""
     return bool(await read_terms(_SENTINEL_ONTOLOGY_ID))
@@ -381,12 +412,14 @@ async def test_clear_refused_in_production(monkeypatch):
     monkeypatch.setenv("DEPLOYMENT_ENV", "prod")
     await _store_sentinel_document()
     await _store_sentinel_term()
+    await _store_sentinel_log()
 
     with pytest.raises(SystemException, match="not available in production"):
         await _clear(BP_DOMAIN, _clear_args())
 
     assert await _sentinel_document_exists()
     assert await _sentinel_term_exists()
+    assert await _sentinel_log_exists()
 
 
 @pytest.mark.asyncio
@@ -394,11 +427,13 @@ async def test_clear_aborts_unless_confirmed(monkeypatch):
     monkeypatch.setattr("builtins.input", lambda _prompt: "not the group name")
     await _store_sentinel_document()
     await _store_sentinel_term()
+    await _store_sentinel_log()
 
     await _clear(BP_DOMAIN, _clear_args())
 
     assert await _sentinel_document_exists()
     assert await _sentinel_term_exists()
+    assert await _sentinel_log_exists()
 
 
 @pytest.mark.asyncio
@@ -409,6 +444,17 @@ async def test_clear_deletes_every_document(monkeypatch):
     await _clear(BP_DOMAIN, _clear_args())
 
     assert not await _sentinel_document_exists()
+
+
+@pytest.mark.asyncio
+async def test_clear_deletes_the_document_log(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _prompt: "Bigpicture")
+    await _store_sentinel_document()
+    await _store_sentinel_log()
+
+    await _clear(BP_DOMAIN, _clear_args())
+
+    assert not await _sentinel_log_exists()
 
 
 @pytest.mark.asyncio

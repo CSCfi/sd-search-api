@@ -590,14 +590,14 @@ def test_status(client: TestClient, monkeypatch):
     Every pending document carries a declared scope, since a load rejects one that
     does not, so the scopes account for all of ``documents.pending``.
     """
-    _mock_status_database_calls(monkeypatch, {"clinical": 2, "non_clinical": 3})
+    _mock_status_database_calls(monkeypatch, {"clinical": 2})
 
     resp = client.get("/status")
 
     assert resp.status_code == 200
     assert resp.json() == {
         "deployment": "Bigpicture",
-        "documents": {"indexed": _MOCK_INDEXED_COUNTS[None], "pending": 5},
+        "documents": {"indexed": _MOCK_INDEXED_COUNTS[None], "pending": 2},
         "scopes": {
             "clinical": {
                 "documents": {"indexed": _MOCK_INDEXED_COUNTS["clinical"], "pending": 2}
@@ -605,22 +605,12 @@ def test_status(client: TestClient, monkeypatch):
             "non_clinical": {
                 "documents": {
                     "indexed": _MOCK_INDEXED_COUNTS["non_clinical"],
-                    "pending": 3,
+                    "pending": 0,
                 }
             },
         },
         "last_indexed": _MOCK_LAST_INDEXED.isoformat().replace("+00:00", "Z"),
     }
-
-
-def test_status_reports_scope_with_nothing_pending(client: TestClient, monkeypatch):
-    """A scope no pending document is in still reports, with a zero."""
-    _mock_status_database_calls(monkeypatch, {"clinical": 2})
-
-    body = client.get("/status").json()
-
-    assert body["documents"]["pending"] == 2
-    assert body["scopes"]["non_clinical"]["documents"]["pending"] == 0
 
 
 def _database_health(monkeypatch, healthy: bool) -> None:

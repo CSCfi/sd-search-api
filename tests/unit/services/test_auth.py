@@ -169,7 +169,7 @@ def test_logout_clears_cookie_and_redirects():
     response = handler.logout()
 
     assert response.status_code == 303
-    assert response.headers["location"] == "http://localhost:8000/docs"
+    assert response.headers["location"] == "http://localhost:8000/"
 
     set_cookie = response.headers["set-cookie"]
     assert set_cookie.startswith("access_token=")

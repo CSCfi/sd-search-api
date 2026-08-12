@@ -24,7 +24,11 @@ from search_api.database.document import DOCUMENT_TABLE, get_document
 from search_api.api.opensearch.services import create_search
 from search_api.database.models import StoredTerm
 from search_api.database.repository import get_connection
-from search_api.database.terms_cache import insert_terms, read_terms
+from search_api.database.terms_cache import (
+    TERMS_CACHE_TABLE,
+    insert_terms,
+    read_terms,
+)
 from search_api.exceptions import SystemException
 
 os.environ.setdefault("POSTGRES_DB", os.environ["BP_POSTGRES_DB"])
@@ -61,6 +65,11 @@ _EXPECTED_DOCUMENTS = {
 }
 
 
+# Rows the tests below insert to check what a command leaves behind.
+_SENTINEL_DOCUMENT_ID = "sentinel"
+_SENTINEL_ONTOLOGY_ID = "TEST-clear"
+
+
 def _args(**kwargs) -> argparse.Namespace:
     defaults = dict(
         directory=str(_XML_DIR),
@@ -74,16 +83,24 @@ def _args(**kwargs) -> argparse.Namespace:
 
 
 @pytest_asyncio.fixture(autouse=True)
-async def delete_images():
-    """Delete fixture images before and after each test."""
+async def delete_test_rows():
+    """Delete everything these tests write, before and after each of them.
+
+    Rows are deleted before and after the test runs. Some rows are
+    intentionally left behind by the tests and must be removed.
+    """
 
     async def _delete() -> None:
         async with get_connection() as conn:
             async with conn.cursor() as cur:
-                for image_id in _EXPECTED_DOCUMENTS:
+                for image_id in (*_EXPECTED_DOCUMENTS, _SENTINEL_DOCUMENT_ID):
                     await cur.execute(
                         f"DELETE FROM {DOCUMENT_TABLE} WHERE id = %s", (image_id,)
                     )
+                await cur.execute(
+                    f"DELETE FROM {TERMS_CACHE_TABLE} WHERE ontology_id = %s",
+                    (_SENTINEL_ONTOLOGY_ID,),
+                )
 
     await _delete()
     yield
@@ -186,18 +203,13 @@ async def test_recreate_aborts_unless_confirmed(monkeypatch):
     """A wrong answer must leave the schema and its data untouched."""
     monkeypatch.setattr("builtins.input", lambda _prompt: "not the group name")
 
-    async with get_connection() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                f"INSERT INTO {DOCUMENT_TABLE} (id, payload) VALUES ('sentinel', '{{}}')"
-                " ON CONFLICT (id) DO NOTHING"
-            )
+    await _store_sentinel_document()
 
     await _recreate(BP_DOMAIN, _recreate_args())
 
     async with get_connection() as conn:
         async with conn.cursor() as cur:
-            assert await get_document(cur, "sentinel") is not None
+            assert await get_document(cur, _SENTINEL_DOCUMENT_ID) is not None
 
 
 @pytest.mark.asyncio
@@ -213,19 +225,14 @@ async def test_recreate_rebuilds_the_schema_and_the_index(monkeypatch):
             index=BP_DOMAIN.opensearch_index,
             body={"mappings": {"properties": {"stale_field": {"type": "text"}}}},
         )
-        async with get_connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    f"INSERT INTO {DOCUMENT_TABLE} (id, payload) VALUES ('sentinel', '{{}}')"
-                    " ON CONFLICT (id) DO NOTHING"
-                )
+        await _store_sentinel_document()
 
         await _recreate(BP_DOMAIN, _recreate_args())
 
         # The schema is back and empty.
         async with get_connection() as conn:
             async with conn.cursor() as cur:
-                assert await get_document(cur, "sentinel") is None
+                assert await get_document(cur, _SENTINEL_DOCUMENT_ID) is None
                 await cur.execute(
                     "SELECT table_name FROM information_schema.tables"
                     " WHERE table_schema = 'public'"
@@ -257,7 +264,8 @@ async def _sentinel_is_synced() -> bool:
     async with get_connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                f"SELECT synced_at FROM {DOCUMENT_TABLE} WHERE id = 'sentinel'"
+                f"SELECT synced_at FROM {DOCUMENT_TABLE} WHERE id = %s",
+                (_SENTINEL_DOCUMENT_ID,),
             )
             row = await cur.fetchone()
     return row is not None and row[0] is not None
@@ -281,7 +289,9 @@ async def test_index_recreate_aborts_unless_confirmed(monkeypatch):
 
         await _recreate_index(BP_DOMAIN, _index_args())
 
-        assert await search.exists(index=BP_DOMAIN.opensearch_index, id="sentinel")
+        assert await search.exists(
+            index=BP_DOMAIN.opensearch_index, id=_SENTINEL_DOCUMENT_ID
+        )
         assert await _sentinel_is_synced(), "the sync state was reset by an abort"
     finally:
         await search.close()
@@ -314,12 +324,16 @@ async def test_index_recreate_rebuilds_the_mapping_and_sync_refills_it(monkeypat
 
         # Empty, and every document is pending again, so a sync refills it.
         await search.indices.refresh(index=BP_DOMAIN.opensearch_index)
-        assert not await search.exists(index=BP_DOMAIN.opensearch_index, id="sentinel")
+        assert not await search.exists(
+            index=BP_DOMAIN.opensearch_index, id=_SENTINEL_DOCUMENT_ID
+        )
         assert not await _sentinel_is_synced()
 
         await _sync(BP_DOMAIN)
         await search.indices.refresh(index=BP_DOMAIN.opensearch_index)
-        assert await search.exists(index=BP_DOMAIN.opensearch_index, id="sentinel")
+        assert await search.exists(
+            index=BP_DOMAIN.opensearch_index, id=_SENTINEL_DOCUMENT_ID
+        )
     finally:
         await search.close()
 
@@ -337,8 +351,8 @@ async def _store_sentinel_document() -> None:
     async with get_connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                f"INSERT INTO {DOCUMENT_TABLE} (id, payload) VALUES ('sentinel', '{{}}')"
-                " ON CONFLICT (id) DO NOTHING"
+                f"INSERT INTO {DOCUMENT_TABLE} (id, payload) VALUES (%s, '{{}}')",
+                (_SENTINEL_DOCUMENT_ID,),
             )
 
 
@@ -346,10 +360,7 @@ async def _sentinel_document_exists() -> bool:
     """Return True if the sentinel document exists."""
     async with get_connection() as conn:
         async with conn.cursor() as cur:
-            return await get_document(cur, "sentinel") is not None
-
-
-_SENTINEL_ONTOLOGY_ID = "TEST-clear"
+            return await get_document(cur, _SENTINEL_DOCUMENT_ID) is not None
 
 
 async def _store_sentinel_term() -> None:

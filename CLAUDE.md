@@ -68,7 +68,7 @@ search_api/
 │   └── bigpicture/     # everything Bigpicture-specific lives here, nowhere else:
 │       ├── domain.py models.py ai.py opensearch.py extract.py
 │       ├── config/     # hand-edited fields/groups/scopes YAML
-│       ├── index/      # GENERATED OpenSearch mapping (generate-index writes it)
+│       ├── index/      # GENERATED OpenSearch mapping (`index generate` writes it)
 │       └── schemas/    # XSDs used to validate the ingested XML
 ├── services/           # generic services
 │   ├── ontology/       # service.py registrations.py snomed.py send.py term_cache.py
@@ -214,7 +214,7 @@ Indexed fields and filtering terms are declared in `api/bigpicture/config/fields
 `api/fields.py` (`load_fields_config`) into `BP_DOCUMENT_FIELDS` / `BP_FILTERING_TERMS`
 (`api/bigpicture/models.py`). The OpenSearch index mapping JSON is generated from these fields by
 `OpenSearchIndexGeneratorService` (`api/opensearch/index_generator.py`) via the
-`generate-index` admin command.
+`index generate` admin command.
 
 An `ontology` / `ontologyOrValue` field may declare an `ontologyRestriction` — the part of the
 ontology its values may resolve to. It is deployment configuration, excluded from both API
@@ -473,7 +473,7 @@ terminology server. Orthogonal to the term cache above, which every ontology has
   `init` serves what the store holds, fetching from the source and storing it only when nothing is
   stored yet, then serves lookups from that in-memory table. `start()` polls
   `OntologyCacheStore.updated_at` through an `UpdatedPoller` every `ONTOLOGY_CACHE_REFRESH` seconds,
-  so a `send refresh` by the admin CLI reaches a running server without a restart. `updated_at` is
+  so a `refresh send` by the admin CLI reaches a running server without a restart. `updated_at` is
   read rather than the ontology itself, so an unchanged store costs one row. Its `_find_concept_ids` hook
   matches a concept id, preferred term or synonym via `normalise_term`, resolving to every concept
   carrying that value and then keeping only those permitted by the field's `ontologyRestriction`

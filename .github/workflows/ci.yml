@@ -71,11 +71,11 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log into Rahti Registry
-        run: echo "${{ secrets.RAHTI_TOKEN }}" | docker login -u unused --password-stdin image-registry.apps.2.rahti.csc.fi
+        run: echo "${{ secrets.RAHTI_TOKEN }}" | docker login -u unused --password-stdin ${{ secrets.RAHTI_REGISTRY }}
 
       - name: Build and Tag Image
         run: |
-          docker build -f dockerfiles/Dockerfile -t image-registry.apps.2.rahti.csc.fi/${{ secrets.RAHTI_PROJECT }}/sd-search-api:latest .
+          docker build -f dockerfiles/Dockerfile -t ${{ secrets.RAHTI_REGISTRY }}/${{ secrets.RAHTI_PROJECT }}/sd-search-api:latest .
 
       - name: Push Image
-        run: docker push image-registry.apps.2.rahti.csc.fi/${{ secrets.RAHTI_PROJECT }}/sd-search-api:latest
+        run: docker push ${{ secrets.RAHTI_REGISTRY }}/${{ secrets.RAHTI_PROJECT }}/sd-search-api:latest

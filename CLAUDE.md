@@ -26,17 +26,27 @@ DEPLOYMENT_TYPE=Bigpicture sd_search_api
 # image and the server runs stale code.
 docker compose --env-file tests/integration/.env --profile dev up --build
 
-# Admin CLI (load data, generate index, refresh an ontology)
-# `<ontology> refresh` has two parts: update the ontology from its source, then
-# refresh the preferred terms cached for it in terms_cache.
-uv run python scripts/admin.py Bigpicture load <dir> --load --sync
-uv run python scripts/admin.py Bigpicture generate-index
-uv run python scripts/admin.py Bigpicture create-index   # once per environment
-# `recreate` drops and rebuilds both stores — needed after a mapping change, since
-# OpenSearch cannot alter an existing field's type. Refused when DEPLOYMENT_ENV=prod.
+# Admin CLI. The first positional is the deployment to act on: every command under it
+# acts on that deployment's own stores, its ontology caches included, since each
+# deployment has its own database. `snomed` sits beside the deployments instead, since
+# one Snowstorm is shared by all of them.
+uv run python scripts/admin.py Bigpicture load <dir> --sync   # --dry-run parses only
+uv run python scripts/admin.py Bigpicture sync                # only the documents pending sync
+uv run python scripts/admin.py Bigpicture index generate      # writes the mapping file, touches no cluster
+uv run python scripts/admin.py Bigpicture index create        # once per environment
+uv run python scripts/admin.py Bigpicture index recreate      # index only; marks documents pending, so follow with sync
+# A mapping change needs the index dropped, since OpenSearch cannot alter an existing
+# field's type: `index recreate` rebuilds the index alone, `recreate` both stores.
+# Refused when DEPLOYMENT_ENV=prod, as are `clear` and `index recreate`.
 uv run python scripts/admin.py Bigpicture recreate
-uv run python scripts/admin.py snomed refresh --release-file <path/to/SnomedCT_*.zip>
-uv run python scripts/admin.py send refresh
+# `<deployment> refresh <id>` refreshes the preferred terms that deployment caches,
+# updating the ontology from its source first if the database caches it whole
+# (SEND does, SNOMED does not — Snowstorm serves it).
+uv run python scripts/admin.py Bigpicture refresh snomed
+uv run python scripts/admin.py Bigpicture refresh send
+# Importing a SNOMED release writes to the shared Snowstorm and to no deployment. Takes
+# hours, so it is its own command rather than part of a refresh.
+uv run python scripts/admin.py snomed import --release-file <path/to/SnomedCT_*.zip>
 ```
 
 Dependencies are managed with `uv`. The virtualenv is at `.venv/`. Most config is supplied
@@ -58,7 +68,7 @@ search_api/
 │   └── bigpicture/     # everything Bigpicture-specific lives here, nowhere else:
 │       ├── domain.py models.py ai.py opensearch.py extract.py
 │       ├── config/     # hand-edited fields/groups/scopes YAML
-│       ├── index/      # GENERATED OpenSearch mapping (generate-index writes it)
+│       ├── index/      # GENERATED OpenSearch mapping (`index generate` writes it)
 │       └── schemas/    # XSDs used to validate the ingested XML
 ├── services/           # generic services
 │   ├── ontology/       # service.py registrations.py snomed.py send.py term_cache.py
@@ -204,7 +214,7 @@ Indexed fields and filtering terms are declared in `api/bigpicture/config/fields
 `api/fields.py` (`load_fields_config`) into `BP_DOCUMENT_FIELDS` / `BP_FILTERING_TERMS`
 (`api/bigpicture/models.py`). The OpenSearch index mapping JSON is generated from these fields by
 `OpenSearchIndexGeneratorService` (`api/opensearch/index_generator.py`) via the
-`generate-index` admin command.
+`index generate` admin command.
 
 An `ontology` / `ontologyOrValue` field may declare an `ontologyRestriction` — the part of the
 ontology its values may resolve to. It is deployment configuration, excluded from both API
@@ -400,7 +410,8 @@ enable.
 procedure: creates a Snowstorm import job, uploads the release archive, then polls
 `/imports/{id}` until it reports `COMPLETED` (raising on `FAILED`; a `404` also means done, per
 Snowstorm's own behaviour of dropping completed jobs). Invoked by `scripts/admin.py`'s
-`snomed refresh --release-file <path>`, where `--release-file` is required.
+`snomed import --release-file <path>`, which writes to the shared Snowstorm alone; refreshing the
+terms a deployment caches against it is that deployment's own `refresh snomed`.
 
 ### Reloading a cache (`search_api/services/poller.py`)
 
@@ -437,7 +448,9 @@ an `UpdatedPoller` over `read_updated_at` every `TERM_CACHE_REFRESH` seconds. It
 — `read_terms`, `read_concept_ids_by_field`, `read_updated_at`, `insert_terms`, `update_terms`, over a
 `StoredTerm` model (`database/models.py`) rather than row tuples — so everything but the SQL is unit-testable without a
 database. All ontologies share the one `terms_cache` table
-(`ontology_id, concept_id, field_id, preferred_term, updated_at`).
+(`ontology_id, concept_id, field_id, preferred_term, updated_at`) — shared across ontologies, not
+across deployments: no table carries a deployment column, because each deployment has its own
+database (`POSTGRES_DB`), so a second deployment caches its own copy of everything.
 
 `create_term_caches(ontology_ids)` builds one cache per ontology id. There is no factory registry:
 every ontology's cache is constructed the same way, so `make_lifespan` and the admin CLI just call it.
@@ -460,7 +473,7 @@ terminology server. Orthogonal to the term cache above, which every ontology has
   `init` serves what the store holds, fetching from the source and storing it only when nothing is
   stored yet, then serves lookups from that in-memory table. `start()` polls
   `OntologyCacheStore.updated_at` through an `UpdatedPoller` every `ONTOLOGY_CACHE_REFRESH` seconds,
-  so a `send refresh` by the admin CLI reaches a running server without a restart. `updated_at` is
+  so a `refresh send` by the admin CLI reaches a running server without a restart. `updated_at` is
   read rather than the ontology itself, so an unchanged store costs one row. Its `_find_concept_ids` hook
   matches a concept id, preferred term or synonym via `normalise_term`, resolving to every concept
   carrying that value and then keeping only those permitted by the field's `ontologyRestriction`
@@ -471,7 +484,7 @@ terminology server. Orthogonal to the term cache above, which every ontology has
   `ontology_id`; `write` always replaces the entire stored snapshot (never per-concept updates). It
   maps rows to and from the models; the SQL is `database/ontology_cache.py`.
 - Nothing re-fetches on its own after that first store. Deliberate updates come from
-  `scripts/admin.py`'s `send refresh`, which fetches live, skips entirely if the new version isn't
+  `scripts/admin.py`'s `<deployment> refresh send`, which fetches live, skips entirely if the new version isn't
   newer than what's stored, and otherwise writes — bumping `version` even if `sha256` is unchanged
   (a republish with no real content change), or replacing the data too when `sha256` differs. A
   running server notices that write through the `updated_at` poll above.

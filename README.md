@@ -254,8 +254,11 @@ Example output:
 
 ## Using admin.py
 
-The first positional argument selects a command group: a deployment or an ontology
-(`snomed`, `send`).
+The first positional argument selects the deployment to act on. Every command under 
+it acts on that deployment's own Postgres database and OpenSearch index.
+
+The exception is `snomed`, which sits beside the deployments rather. The Snowstorm 
+is a single server shared by all of the deployments.
 
 ### Prepare environment
 
@@ -308,17 +311,17 @@ Start the port forward. It runs in the foreground, so leave it in its own termin
 oc port-forward svc/opensearch 9200:9200
 ```
 
-Then run the CLI in another terminal, e.g.:
+Then run the CLI in another terminal:
 
 ```bash
-uv run python scripts/admin.py Bigpicture load /path/to/datasets/ --multi-dir --load --sync
+uv run python scripts/admin.py ...
 ```
 
 As an alternative to exporting the variables, `--env-file <path>` loads them from a file. It goes
 before the command group:
 
 ```bash
-uv run python scripts/admin.py --env-file <path> Bigpicture load /path/to/datasets/ --load
+uv run python scripts/admin.py --env-file <path> ...
 ```
 
 `tests/integration/.env` is a working set for local integration tests.
@@ -327,139 +330,100 @@ uv run python scripts/admin.py --env-file <path> Bigpicture load /path/to/datase
 
 #### Load datasets
 
-Load a single dataset directory (default):
-
 ```bash
-uv run python scripts/admin.py Bigpicture load /path/to/dataset/ --load
+uv run python scripts/admin.py Bigpicture load /path/to/dataset/
 ```
+Options:
+- `--multi-dir` — the directory holds several dataset subdirectories instead of one dataset.
+- `--dry-run` — parse and validate the sources, writing nothing.
+- `--sync` — sync to OpenSearch after loading.
+- `--c4gh-key-file FILE`, `--c4gh-passphrase PASSPHRASE` — decrypt `.c4gh` XML files while reading them.
 
-Load from a parent directory containing multiple dataset subdirectories:
+#### Sync documents to OpenSearch
 
-```bash
-uv run python scripts/admin.py Bigpicture load /path/to/datasets/ --multi-dir --load
-```
-
-Omit `--load` to parse XMLs without loading them to the database.
-
-To also sync to OpenSearch immediately after loading, add `--sync`:
-
-```bash
-uv run python scripts/admin.py Bigpicture load /path/to/datasets/ --multi-dir --load --sync
-```
-
-`.c4gh`-encrypted XML files are decrypted while they are read, given the key to decrypt them with:
+Send the documents pending sync to OpenSearch.
 
 ```bash
-uv run python scripts/admin.py Bigpicture load /path/to/datasets/ --load \
-    --c4gh-key-file /path/to/key.sec --c4gh-passphrase <passphrase>
+uv run python scripts/admin.py Bigpicture sync
 ```
 
 #### Clear all data
 
-Delete every document from both the database and the OpenSearch index, together with the preferred
-terms cached for them, e.g. to reload a dataset from scratch:
+Delete every document from the database and the OpenSearch index, and 
+every preferred term cache.
 
 ```bash
 uv run python scripts/admin.py Bigpicture clear
 ```
 
-The deployment name has to be typed to confirm. Refused when `DEPLOYMENT_ENV=prod`. Only the terms
-cached for this deployment's own fields are deleted. The terms are 
-cached again as the documents are loaded:
-
-```bash
-uv run python scripts/admin.py Bigpicture load /path/to/datasets/ --multi-dir --load --sync
-```
+The deployment name has to be typed to confirm. Refused when `DEPLOYMENT_ENV=prod`.
 
 #### Recreate the database schema and the OpenSearch index
 
-Drop and rebuild both stores, discarding all documents *and* the cached ontology terms. The 
-index is recreated from the generated mapping, so run `generate-index` first if 
-the field definitions changed:
+Drop and recreate both stores, discarding all data.
 
 ```bash
 uv run python scripts/admin.py Bigpicture recreate
 ```
 
-The deployment name has to be typed to confirm. Refused when `DEPLOYMENT_ENV=prod`. Everything then
-has to be reloaded, and the ontology caches refreshed:
+The deployment name has to be typed to confirm. Refused when `DEPLOYMENT_ENV=prod`.
+
+#### Generate the OpenSearch index mapping
+
+Write `search_api/api/bigpicture/index/bp-image-index.json` from the field definitions,
+and commit the file.
 
 ```bash
-uv run python scripts/admin.py send refresh
-uv run python scripts/admin.py Bigpicture load /path/to/datasets/ --multi-dir --load --sync
+uv run python scripts/admin.py Bigpicture index generate
 ```
 
-#### Generate the OpenSearch index
+#### Create the OpenSearch index
 
-The OpenSearch index mapping (`search_api/api/bigpicture/index/bp-image-index.json`) is
-generated from the filtered and non-filtered field definitions, so that field names
-and types stay in sync with them.
-After changing them, regenerate and commit the file:
+Create the index from the generated mapping. Required once per environment 
+before the first sync, and fails if the index already exists.
 
 ```bash
-uv run python scripts/admin.py Bigpicture generate-index
+uv run python scripts/admin.py Bigpicture index create
 ```
 
-A unit test fails if this file differs from a freshly generated one.
+#### Recreate the OpenSearch index
 
-#### Create the OpenSearch index in a new environment
-
-`generate-index` only writes the mapping to a local file — it does not create the index in
-OpenSearch. **A new OpenSearch instance needs the index created from that mapping before the
-first `--sync`.** If documents are synced into an index that doesn't exist yet, OpenSearch
-silently auto-creates it with a dynamic mapping (e.g. `keyword` fields become `text`, and
-`nested` fields become plain objects), which breaks aggregations and nested queries in ways
-that only surface later, disconnected from the actual cause.
-
-Create the index explicitly:
+Drop the index and create it from the generated mapping, leaving the database untouched. 
+Marks every document as pending sync, so follow it with `sync`.
 
 ```bash
-uv run python scripts/admin.py Bigpicture create-index
+uv run python scripts/admin.py Bigpicture index generate 
+uv run python scripts/admin.py Bigpicture index recreate
+uv run python scripts/admin.py Bigpicture sync
 ```
 
-This fails loudly if the index already exists, rather than silently leaving a stale mapping in
-place. If an index was already auto-created with the wrong mapping, OpenSearch cannot change an
-existing field's type in place, so it must be deleted and recreated, and previously-synced
-documents must be resynced:
+The deployment name has to be typed to confirm. Refused when `DEPLOYMENT_ENV=prod`.
+
+#### Refresh an ontology cache
+
+Refresh the preferred terms this deployment caches for an ontology, updating the ontology from its
+source first when the database caches it whole (e.g. SEND). SNOMED CT is served by
+Snowstorm, so only its terms are refreshed.
 
 ```bash
-curl -X DELETE https://<opensearch-host>:9200/bp-image-index -u <user>:<password>
-uv run python scripts/admin.py Bigpicture create-index
-# Reset sync state so the next --sync repopulates the recreated index:
-#   UPDATE document SET synced_at = NULL;
-uv run python scripts/admin.py Bigpicture load <dir> --load --sync
+uv run python scripts/admin.py Bigpicture refresh snomed
+uv run python scripts/admin.py Bigpicture refresh send
 ```
 
-### Ontologies
+### Snowstorm
 
-These commands are not tied to a deployment: every deployment resolves its terms against the same
-caches.
+One Snowstorm serves all deployments.
 
-#### Refresh SNOMED CT
+#### Import a SNOMED CT release
 
-After a new SNOMED CT release, import it into Snowstorm and update the preferred terms cached for it
-in the database. `--release-file` is required and takes the release archive:
+Import a release into Snowstorm, automating the procedure under
+[Import SNOMED release](#import-snomed-release). Follow this up
+with each deployment's `refresh snomed`.
 
 ```bash
-uv run python scripts/admin.py snomed refresh --release-file /path/to/SnomedCT_InternationalRF2_PRODUCTION_<date>.zip
+uv run python scripts/admin.py snomed import --release-file /path/to/SnomedCT_InternationalRF2_PRODUCTION_<date>.zip
+uv run python scripts/admin.py Bigpicture refresh snomed
 ```
-
-The import is the procedure described under [Import SNOMED release](#import-snomed-release), done for
-you: the job is created, the archive uploaded, and the command polls until Snowstorm reports it
-completed.
-
-#### Refresh SEND
-
-SEND is small and simple enough to cache whole, so the concept table itself lives in the database
-rather than in a terminology server. This fetches the current release from NCI EVS, and updates the
-stored table and the preferred terms cached for it:
-
-```bash
-uv run python scripts/admin.py send refresh
-```
-
-A release no newer than the stored one is skipped. A running server picks the new table up on 
-its next poll, without a restart.
 
 ## LLM search
 

@@ -136,7 +136,7 @@ def test_unexpected_concepts_non_ontology_field(client):
 def test_unexpected_concepts(beacon_service, snomed_term_service, client):
     beacon_service.get_value_counts = AsyncMock(
         return_value=ValueCounts(
-            counts={"410607006": 10, "999999999": 3, "invalid1": 6}
+            counts={"410607006": 10, "999999006": 3, "invalid1": 6}
         )
     )
     snomed_term_service.get_terms_by_concept_id = AsyncMock(
@@ -147,5 +147,5 @@ def test_unexpected_concepts(beacon_service, snomed_term_service, client):
     )
     assert resp.status_code == 200
     assert resp.json() == [
-        FieldValue(value="999999999", count=3).model_dump(),
+        FieldValue(value="999999006", count=3).model_dump(),
     ]

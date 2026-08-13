@@ -29,6 +29,14 @@ class OntologyService(ABC):
     async def get_preferred_terms(self, concept_ids: set[str]) -> dict[str, str]:
         """Return preferred terms for concept IDs. IDs not found are omitted."""
 
+    async def replacement_concept_id(self, concept_id: str) -> str | None:
+        """Return the active concept that replaces an inactive one, if there is one.
+
+        None when the concept is unknown, active, has no replacement,
+        or when the ontology does not record replacements.
+        """
+        return None
+
     @abstractmethod
     async def _find_concept_ids(
         self, value: str, filtering_term: BeaconFilteringTerm

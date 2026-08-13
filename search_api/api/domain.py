@@ -72,6 +72,8 @@ class Domain:
     ai_assistant_description: str
     ai_result_model: type[AISearchResult]
     ai_result_instructions: str
+    # Whether to replace retired concepts with an active one.
+    replace_concepts: bool = True
 
     @property
     def nested_groups(self) -> set[str]:

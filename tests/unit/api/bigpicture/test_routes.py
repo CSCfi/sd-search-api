@@ -105,7 +105,7 @@ class MockBeaconService(
 
 SUGGESTIONS_AND_VALUES_INDEXED_COUNTS: dict[str, ValueCounts] = {
     "sex": ValueCounts(counts={"Male": 10, "Female": 8}),
-    "animal_species": ValueCounts(counts={"410607006": 5, "388480002": 3}),
+    "animal_species": ValueCounts(counts={"410607006": 5, "78678003": 3}),
     "fixation_type": ValueCounts(
         counts={"1388477003": 4}, other_counts={"Formalin": 2, "Custom fix": 1}
     ),
@@ -113,7 +113,7 @@ SUGGESTIONS_AND_VALUES_INDEXED_COUNTS: dict[str, ValueCounts] = {
 
 PREFERRED_TERMS: dict[str, str] = {
     "410607006": "Homo sapiens",
-    "388480002": "Sus scrofa",
+    "78678003": "Sus scrofa",
     "1388477003": "Tissue fixative",
 }
 

@@ -21,7 +21,7 @@ _BREAST = "80248007"
 _AXILLA = "368209003"
 _FFPE = "1388477003"
 _PARAFFIN = "311731000"
-_HE = "406768004"
+_HE = "104210008"  # Hematoxylin and eosin stain method
 
 
 def _fields(*, scope: str = "clinical", **kwargs) -> BigpictureFields:

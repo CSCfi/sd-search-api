@@ -40,7 +40,7 @@ KIDNEY_CONCEPT_ID = "64033007"
 
 # fixation_type
 FFPE_CONCEPT_ID = "431510009"
-FROZEN_FIX_CONCEPT_ID = "1286895009"
+FROZEN_FIX_CONCEPT_ID = "16214131000119104"  # frozen tissue section specimen
 
 # block_preparation
 PARAFFIN_CONCEPT_ID = "311731000"
@@ -48,7 +48,7 @@ FROZEN_PREP_CONCEPT_ID = "433469005"
 
 # staining_procedure
 HE_CONCEPT_ID = "12710003"  # haematoxylin and eosin
-IHC_CONCEPT_ID = "406917005"  # immunohistochemistry
+IHC_CONCEPT_ID = "117617002"  # immunohistochemistry
 ISH_CONCEPT_ID = "115959002"  # in situ hybridisation
 
 # specimen_type

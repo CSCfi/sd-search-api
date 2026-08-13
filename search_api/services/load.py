@@ -106,12 +106,14 @@ class LoadService:
         filtering_terms: Sequence[BeaconFilteringTerm],
         filtering_scopes: Sequence[BeaconFilteringScope] = (),
         filtering_qualifiers: Sequence[BeaconFilteringQualifier] = (),
+        replace_concepts: bool = True,
     ) -> None:
         self._term_caches = term_caches
         self._ontology_id_by_field = get_ontology_id_by_field(filtering_terms)
         self._ontology_by_field = ontology_services_by_field(filtering_terms)
         self._filtering_scopes = filtering_scopes
         self._filtering_qualifiers = filtering_qualifiers
+        self._replace_concepts = replace_concepts
 
     def validate_document(self, doc: ExtractedDocument) -> None:
         """Check an extracted document's scope and qualifiers against the
@@ -141,6 +143,38 @@ class LoadService:
         """
         self.validate_document(doc)
         await upsert_document(cur, doc.id, build_document(doc), doc.modified_at)
+
+    async def _substitute_retired_concepts(
+        self, cur: AsyncCursor, doc: ExtractedDocument
+    ) -> None:
+        """Substitute retired concept id in the document with active ones.
+
+        Does nothing when the deployment turns substitution off
+        (``Domain.replace_concepts``).
+        """
+        if not self._replace_concepts:
+            return
+
+        for value in doc.all_values:
+            ontology = self._ontology_by_field.get(value.field.id)
+            if (
+                ontology is None
+                or not isinstance(value.value, str)
+                or not ontology.is_concept_id(value.value)
+            ):
+                continue
+            replacement = await ontology.replacement_concept_id(value.value)
+            if replacement is None:
+                continue
+            await _store_log_entry(
+                cur,
+                doc.id,
+                value.field.id,
+                "WARNING",
+                f"Value '{value.value}' is replaced by '{replacement}' in "
+                f"ontology '{self._ontology_id_by_field[value.field.id]}'.",
+            )
+            value.value = replacement
 
     async def store_documents(self, docs_iter: Iterator[ExtractedDocument]) -> None:
         """
@@ -177,6 +211,7 @@ class LoadService:
                     skipped += 1
                     continue
 
+                await self._substitute_retired_concepts(cur, doc)
                 await self.store_document(cur, doc)
                 loaded += 1
                 logger.debug("Loaded document %s.", doc.id)

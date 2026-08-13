@@ -11,7 +11,7 @@ from search_api.api.opensearch.models import (
     OpenSearchBeaconFilteringTerm,
     OpenSearchFieldValue,
 )
-from search_api.database.document import DOCUMENT_TABLE
+from search_api.database.document import DOCUMENT_TABLE, get_document
 from search_api.database.document_log import (
     DOCUMENT_LOG_TABLE,
     read_document_logs,
@@ -36,9 +36,16 @@ os.environ.setdefault("POSTGRES_PORT", os.environ["BP_POSTGRES_PORT"])
 _CONCEPT_ID = "C1"
 _PREFERRED_TERM = "P1"
 
+# A concept the ontology has retired, and the active one replacing it. Retiring a
+# concept does not remove it — SNOMED CT resolves a retired id to its preferred term
+# as readily as an active one — so the source below serves both.
+_RETIRED_CONCEPT_ID = "C9"
+_RETIRED_PREFERRED_TERM = "P9"
+_REPLACEMENT_CONCEPT_ID = _CONCEPT_ID
+
 
 class _Source(OntologySource):
-    """Serves one concept"""
+    """Serves one active concept and one the ontology has retired."""
 
     async def fetch(self) -> CachedOntology:
         return CachedOntology(
@@ -47,12 +54,26 @@ class _Source(OntologySource):
             concepts=[
                 CachedOntologyConcept(
                     concept_id=_CONCEPT_ID, preferred_term=_PREFERRED_TERM
-                )
+                ),
+                CachedOntologyConcept(
+                    concept_id=_RETIRED_CONCEPT_ID,
+                    preferred_term=_RETIRED_PREFERRED_TERM,
+                ),
             ],
         )
 
     def is_newer(self, version: str, other: str) -> bool:
         return version > other
+
+
+class _ReplacingService(CachedOntologyService):
+    """Takes ``C9`` for a concept the ontology has replaced by ``C1``."""
+
+    def is_concept_id(self, value: str) -> bool:
+        return value in (_RETIRED_CONCEPT_ID, _REPLACEMENT_CONCEPT_ID)
+
+    async def replacement_concept_id(self, concept_id: str) -> str | None:
+        return _REPLACEMENT_CONCEPT_ID if concept_id == _RETIRED_CONCEPT_ID else None
 
 
 class _IsConceptIdService(CachedOntologyService):
@@ -119,7 +140,7 @@ async def test_load_caches_preferred_term(ontology_id, document_id):
 
 
 async def _load_document_with_ontology_value(
-    ontology_id: str, document_id: str, value: str
+    ontology_id: str, document_id: str, value: str, replace_concepts: bool = True
 ) -> None:
     """Load a document whose one ontology field carries this value."""
     field = _ontology_field(ontology_id)
@@ -127,9 +148,11 @@ async def _load_document_with_ontology_value(
         id=document_id,
         values=[OpenSearchFieldValue(field=field, value=value)],
     )
-    await LoadService(create_term_caches({ontology_id}), [field]).store_documents(
-        iter([document])
-    )
+    await LoadService(
+        create_term_caches({ontology_id}),
+        [field],
+        replace_concepts=replace_concepts,
+    ).store_documents(iter([document]))
 
 
 @pytest.mark.asyncio
@@ -183,3 +206,68 @@ async def test_load_logs_nothing_for_valid_concept_id(ontology_id, document_id):
 
     async with get_cursor() as cur:
         assert await read_document_logs(cur, document_id) == []
+
+
+@pytest.mark.asyncio
+async def test_load_substitutes_a_replaced_concept(ontology_id, document_id):
+    """A retired concept is stored as its replacement, and the swap is logged.
+
+    The document is stored with the replacement, so its facet entry and any subtree
+    search reach it, while the log keeps what the source said.
+    """
+    register_ontology_service(
+        ontology_id,
+        _ReplacingService(OntologyCacheStore(ontology_id), _Source()),
+    )
+
+    await _load_document_with_ontology_value(
+        ontology_id, document_id, _RETIRED_CONCEPT_ID
+    )
+
+    async with get_cursor() as cur:
+        payload = await get_document(cur, document_id)
+        logs = await read_document_logs(cur, document_id)
+    assert payload["test_field"] == _REPLACEMENT_CONCEPT_ID
+    assert [(log.severity, log.message) for log in logs] == [
+        (
+            "WARNING",
+            f"Value '{_RETIRED_CONCEPT_ID}' is replaced by "
+            f"'{_REPLACEMENT_CONCEPT_ID}' in ontology '{ontology_id}'.",
+        )
+    ]
+    # The replacement is what a preferred term is cached for.
+    assert {
+        (term.concept_id, term.preferred_term) for term in await read_terms(ontology_id)
+    } == {(_REPLACEMENT_CONCEPT_ID, _PREFERRED_TERM)}
+
+
+@pytest.mark.asyncio
+async def test_load_keeps_a_replaced_concept_when_substitution_is_off(
+    ontology_id, document_id
+):
+    """``replace_concepts=False`` indexes what the source said, unchanged.
+
+    The ontology still names a replacement, so only the flag stands between this
+    and the substitution the previous test asserts. The retired concept keeps its
+    own preferred term, so the value is still named in the field's values and
+    nothing is logged against the document.
+    """
+    register_ontology_service(
+        ontology_id,
+        _ReplacingService(OntologyCacheStore(ontology_id), _Source()),
+    )
+
+    await _load_document_with_ontology_value(
+        ontology_id, document_id, _RETIRED_CONCEPT_ID, replace_concepts=False
+    )
+
+    async with get_cursor() as cur:
+        payload = await get_document(cur, document_id)
+        logs = await read_document_logs(cur, document_id)
+    assert payload["test_field"] == _RETIRED_CONCEPT_ID
+    assert logs == []
+    # The retired concept is what a preferred term is cached for, so the value is
+    # named in the field's values rather than missing from them.
+    assert {
+        (term.concept_id, term.preferred_term) for term in await read_terms(ontology_id)
+    } == {(_RETIRED_CONCEPT_ID, _RETIRED_PREFERRED_TERM)}

@@ -108,6 +108,7 @@ loader: Loader[…]                              # how source data is ingested
 beacon_service_factory                         # builds the BeaconService for a search client
 result_sets_response_model                     # deployment's Beacon resultSets shape
 ai_assistant_description, ai_result_model, ai_result_instructions   # AI search persona + output
+replace_concepts = True                        # substitute a retired concept at load
 ```
 
 - `Domain.ontology_ids` → distinct `ontology.id`s referenced by the filtering terms.
@@ -196,6 +197,17 @@ optional `field_id`, `severity`, `message`, `created_at`), keyed to the document
 through `logging` at the matching level, so a problem cannot be in one and not the other. The
 message names only what the columns do not — the value and the ontology — and reads the same for
 every occurrence, so rows group by it.
+
+A retired concept is substituted before the document is stored: `LoadService._substitute_replaced_concepts`
+asks the ontology for a replacement, indexes that instead, and logs the swap as a `WARNING`.
+`Domain.replace_concepts` (default `True`) turns it off for a deployment that must index its source
+unchanged. Nothing is logged then, and nothing is lost from the facet: SNOMED resolves a retired
+concept to its own preferred term as readily as an active one, so what substitution buys is reach —
+the subtree searches a retired concept falls out of — not a name. Only a single still-active `SAME_AS` or `REPLACED_BY` target counts — `POSSIBLY_EQUIVALENT_TO` is explicitly
+uncertain, and several targets are a judgement rather than a substitution. This matters because
+retiring a concept strips its relationships: a retired concept descends from nothing, so no subtree
+query reaches a document citing one, whatever `activeFilter` is set to (measured: an ECL descendant
+count is identical either way).
 
 What it currently records: every value of a strict `ontology` field that reached no preferred term.
 Such a value **is** indexed, but `/filtering_terms/{field_id}/values` builds its response from the
@@ -425,7 +437,8 @@ comes from `request.query.requestedGranularity`.
 ### Ontology providers (`search_api/services/ontology/service.py`)
 
 `OntologyService` (ABC) abstracts term resolution for one ontology: `is_concept_id`,
-`get_preferred_terms`, and `prepare_ontology_filter`. `prepare_ontology_filter` is a template
+`get_preferred_terms`, `prepare_ontology_filter`, and `replacement_concept_id` — the last one
+concrete, returning `None`, so an ontology that retires nothing need not answer it. `prepare_ontology_filter` is a template
 method implemented once on the ABC — filtering-term lookup, value normalisation, the
 resolved/unresolved split, and the final filter rebuild are identical across providers. Each
 provider only implements two hooks: `_find_concept_ids(value, filtering_term)` (one value ->
@@ -466,7 +479,12 @@ ontology. Registering a new provider means adding it there, not adding an import
   rejected even though it appears in "Neutral buffered formalin 10% solution", because the concept
   a value resolved to is not reported back to the caller.
 
-`_fetch_all_concepts` and `_fetch_descriptions` are cached for 30 days. Set `SNOWSTORM_URL` to
+`_fetch_concept` is the one call for reading a single concept whole, cached for 30 days and shared by
+`replacement_concept_id` and `_describes`. It reads Snowstorm's **browser** view, because
+`/{branch}/concepts/{id}` returns the concept's own columns alone — no `associationTargets`, no
+`inactivationIndicator`, no `descriptions` (measured: the browser view costs 10.1 kB against the
+3.5 kB of the descriptions alone for `84499006`, and 68.7 kB against 65.1 kB for `138875005`, where
+the descriptions dominate either way). `_fetch_all_concepts` is cached for 30 days too. Set `SNOWSTORM_URL` to
 enable.
 
 `import_snomed_release(release_file, branch)` automates the README's "Import SNOMED release"

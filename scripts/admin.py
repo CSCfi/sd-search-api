@@ -82,6 +82,7 @@ async def _load(domain: Domain, args: argparse.Namespace) -> None:
         domain.filtering_terms,
         domain.filtering_scopes,
         domain.filtering_qualifiers,
+        domain.replace_concepts,
     )
     await load_service.store_documents(docs_iter)
 

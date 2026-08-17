@@ -39,12 +39,6 @@ def _add_field_value(target: dict[str, Any], value: OpenSearchFieldValue) -> Non
     """
     encoded = _encode_value(value)
     if encoded is None:
-        # Only an ontology value encodes to None: no ontology the field accepts coded
-        # it, and the load's fallback to its meaning named no concept either, so there
-        # is no concept id to index. Writing it would put a null in a keyword field —
-        # or [null] in a multivalued one. A load has already dropped such a value
-        # (LoadService._drop_unresolved_ontology_values); this is what keeps the rule
-        # for callers that build a document without loading it.
         return
     if value.field.multivalued:
         target.setdefault(value.field.id, []).append(encoded)

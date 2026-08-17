@@ -4,6 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from search_api.api.beacon.models import BeaconFilteringTerm
+from search_api.api.extract_logs import ExtractLog
 
 # Semantic field type. The index generator maps them to a concrete OpenSearch field type.
 OpenSearchFieldType = Literal[
@@ -159,6 +160,8 @@ class ExtractedDocument(BaseModel):
     values: list[OpenSearchFieldValue] = Field(default_factory=list)
     groups: list[OpenSearchGroup] = Field(default_factory=list)
     modified_at: datetime | None = None
+    # Document extraction logs, written to the database by the load.
+    logs: list[ExtractLog] = Field(default_factory=list)
 
     @property
     def all_values(self) -> list[OpenSearchFieldValue]:

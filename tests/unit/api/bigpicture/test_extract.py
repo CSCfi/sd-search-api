@@ -1,4 +1,3 @@
-import logging
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +9,11 @@ from lxml import etree
 
 from search_api.api.opensearch.document import build_document
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
+from search_api.api.extract_logs import (
+    ExtractLog,
+    invalid_duration_log,
+    invalid_scheme_log,
+)
 from search_api.exceptions import UserException
 from search_api.api.bigpicture.models import BP_FILTERING_QUALIFIERS
 from search_api.api.bigpicture.extract import (
@@ -294,25 +298,37 @@ def test_matches_scheme():
     assert not _matches_scheme("SNOMED CT", "UNKNOWN")
 
 
-def test_require_scheme():
+def test_require_scheme_error():
+    logs: list[ExtractLog] = []
+
     # No value.
-    assert _require_scheme(None, SNOMED_ONTOLOGY_ID) is None
+    assert _require_scheme(None, SNOMED_ONTOLOGY_ID, "animal_species", logs) is None
 
     # Matching scheme.
     value = _code("SNOMED CT")
-    assert _require_scheme(value, SNOMED_ONTOLOGY_ID) == value
+    assert _require_scheme(value, SNOMED_ONTOLOGY_ID, "animal_species", logs) == value
+    assert logs == []
 
-    # Other scheme.
+    # Other scheme: dropped, and recorded for the document.
     value = _code("ICDO")
-    result = _require_scheme(value, SNOMED_ONTOLOGY_ID)
-    assert result is None
+    assert _require_scheme(value, SNOMED_ONTOLOGY_ID, "animal_species", logs) is None
+    assert logs == [
+        invalid_scheme_log("animal_species", "1", "Test", "ICDO", SNOMED_ONTOLOGY_ID)
+    ]
 
 
 def test_filter_by_scheme():
     matching = _code("SNOMED CT")
     mismatched = _code("ICDO")
-    result = _filter_by_scheme([matching, mismatched], SNOMED_ONTOLOGY_ID)
+    logs: list[ExtractLog] = []
+
+    result = _filter_by_scheme(
+        [matching, mismatched], SNOMED_ONTOLOGY_ID, "anatomical_site", logs
+    )
+
     assert result == frozenset([matching])
+    assert len(logs) == 1
+    assert "Value ('1', 'Test') is ignored" in logs[0].message
 
 
 def test_process_code_attribute():
@@ -338,7 +354,7 @@ def test_process_code_attribute():
     """
     elem = etree.fromstring(xml)
 
-    attribute = _extract_code_attribute_value(elem, "animal_species", None)
+    attribute = _extract_code_attribute_value(elem, "animal_species", None, [])
 
     assert attribute.code == "1"
     assert attribute.meaning == "Cat"
@@ -384,7 +400,7 @@ def test_extract_age_at_extraction_range_valid_one_specimen():
     """
     elem = etree.fromstring(xml)
 
-    result = _extract_age_at_extraction_range(elem)
+    result = _extract_age_at_extraction_range(elem, [])
 
     assert result == ("P40Y", "P41Y")
 
@@ -431,11 +447,11 @@ def test_extract_age_at_extraction_range_valid_two_specimen():
     elem = etree.fromstring(xml)
     specimen_1, specimen_2 = elem.xpath("/SAMPLE_SET/SPECIMEN")
 
-    assert _extract_age_at_extraction_range(specimen_1) == ("P10Y", "P11Y")
-    assert _extract_age_at_extraction_range(specimen_2) == ("P50Y", "P51Y")
+    assert _extract_age_at_extraction_range(specimen_1, []) == ("P10Y", "P11Y")
+    assert _extract_age_at_extraction_range(specimen_2, []) == ("P50Y", "P51Y")
 
 
-def test_extract_age_at_extraction_range_invalid(caplog):
+def test_extract_age_at_extraction_range_error(caplog):
 
     xml = """
     <SPECIMEN>
@@ -458,11 +474,12 @@ def test_extract_age_at_extraction_range_invalid(caplog):
     """
     elem = etree.fromstring(xml)
 
-    with caplog.at_level(logging.ERROR):
-        result = _extract_age_at_extraction_range(elem)
+    logs: list[ExtractLog] = []
+
+    result = _extract_age_at_extraction_range(elem, logs)
 
     assert result is None
-    assert "NOT_VALID" in caplog.text
+    assert logs == [invalid_duration_log("age_at_extraction", ("NOT_VALID", "P1Y"))]
 
 
 def test_add_iso8601_durations():
@@ -497,7 +514,7 @@ def test_process_age_of_extraction_range():
     """
     elem = etree.fromstring(xml)
 
-    start, end = _extract_age_at_extraction_range(elem)
+    start, end = _extract_age_at_extraction_range(elem, [])
 
     assert start == "P40Y"
     assert end == "P41Y"
@@ -524,7 +541,7 @@ def test_process_age_of_extraction_range():
      """
     elem = etree.fromstring(xml)
 
-    start, end = _extract_age_at_extraction_range(elem)
+    start, end = _extract_age_at_extraction_range(elem, [])
 
     assert start == "P40Y"
     assert end == "P40Y"
@@ -548,7 +565,7 @@ def test_extract_code_attribute_values_single():
     """
     elem = etree.fromstring(xml)
 
-    values = _extract_code_attribute_values(elem, "anatomical_site", None)
+    values = _extract_code_attribute_values(elem, "anatomical_site", None, [])
 
     assert values == frozenset(
         [
@@ -586,7 +603,7 @@ def test_extract_code_attribute_values_from_list():
     """
     elem = etree.fromstring(xml)
 
-    values = _extract_code_attribute_values(elem, "anatomical_site", None)
+    values = _extract_code_attribute_values(elem, "anatomical_site", None, [])
 
     assert values == frozenset(
         [
@@ -632,7 +649,7 @@ def test_extract_anatomical_sites_from_set():
     """
     elem = etree.fromstring(xml)
 
-    sites = _extract_anatomical_sites(elem)
+    sites = _extract_anatomical_sites(elem, [])
 
     assert sites == frozenset(
         [
@@ -678,7 +695,7 @@ def test_extract_anatomical_sites_from_list_and_set():
     """
     elem = etree.fromstring(xml)
 
-    sites = _extract_anatomical_sites(elem)
+    sites = _extract_anatomical_sites(elem, [])
 
     assert sites == frozenset(
         [
@@ -710,7 +727,7 @@ def test_extract_fixation_type_standard_scheme():
     """
     elem = etree.fromstring(xml)
 
-    fixation_type, fixation_type_text = _extract_fixation_type(elem)
+    fixation_type, fixation_type_text = _extract_fixation_type(elem, [])
 
     assert fixation_type == BigpictureCodeAttributeValue(
         code="3", scheme="SNOMED CT", meaning="Test3", scheme_version=""
@@ -736,7 +753,7 @@ def test_extract_fixation_type_unsupported_scheme():
     """
     elem = etree.fromstring(xml)
 
-    fixation_type, fixation_type_text = _extract_fixation_type(elem)
+    fixation_type, fixation_type_text = _extract_fixation_type(elem, [])
     assert fixation_type is None
     assert fixation_type_text is None
 
@@ -759,7 +776,7 @@ def test_extract_fixation_type_other_scheme():
     """
     elem = etree.fromstring(xml)
 
-    fixation_type, fixation_type_text = _extract_fixation_type(elem)
+    fixation_type, fixation_type_text = _extract_fixation_type(elem, [])
 
     assert fixation_type is None
     assert fixation_type_text == "Test7"
@@ -915,8 +932,26 @@ def test_extract_code_attribute_value():
     </ROOT>
     """
     value = _extract_code_attribute_value(
-        etree.fromstring(xml), "specimen_type", SNOMED_ONTOLOGY_ID
+        etree.fromstring(xml), "specimen_type", SNOMED_ONTOLOGY_ID, []
     )
 
     assert value is not None
     assert (value.code, value.meaning) == ("5", "Tissue specimen")
+
+
+def test_extract_invalid_scheme_error():
+    dropped = invalid_scheme_log(
+        "diagnosis",
+        "8500/3",
+        "Infiltrating duct carcinoma, NOS",
+        "ICDO",
+        SNOMED_ONTOLOGY_ID,
+    )
+
+    clinical = {
+        doc.id: doc.logs for doc in extract_dataset_documents(str(CLINICAL_DATASET_DIR))
+    }
+    non_clinical = list(extract_dataset_documents(str(NON_CLINICAL_DATASET_DIR)))
+
+    assert clinical == {CLINICAL_IMAGE_1: [dropped], CLINICAL_IMAGE_2: [dropped]}
+    assert all(not doc.logs for doc in non_clinical)

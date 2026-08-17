@@ -194,10 +194,34 @@ store: it checks `scope` against `filtering_scopes` and each group's qualifier i
 A load records what it could not make sense of in the `document_log` table (`document_id`,
 optional `field_id`, `severity`, `message`, `created_at`), keyed to the document it is about.
 `severity` is `WARNING` or `ERROR`, constrained in the schema and by `LogSeverity`
-(`database/models.py`), and `_log_entry` (`services/load.py`) both builds the row and emits it
+(`severity.py`, its own module so `api/` and `database/` share the type without either importing
+the other), and `write_document_log` (`database/document_log.py`) both inserts the row and emits it
 through `logging` at the matching level, so a problem cannot be in one and not the other. The
 message names only what the columns do not — the value and the ontology — and reads the same for
 every occurrence, so rows group by it.
+
+**Loading a document again replaces its rows** (`delete_document_logs` before the first is written),
+so the table says what is wrong with the document as it stands rather than what was wrong with every
+version of it: a problem corrected in the source disappears on the next load instead of sitting
+there indistinguishable from a current one. A document skipped as not newer keeps the rows it has.
+
+**Extraction reaches no database**, so what it cannot make sense of rides out on
+`ExtractedDocument.logs` as `ExtractLog`s (`api/extract_logs.py`: `severity`, `field_id`, `message`)
+and `extraction_logs` (`services/load.py`) turns each into a `document_log` row. That keeps
+`load --dry-run` independent of the database, and it reports the same messages rather than writing
+them, which makes a dry run a validation pass. Every `ExtractLog` is built by a named function in
+`api/extract_logs.py` (`invalid_scheme_log`, `invalid_duration_log`) rather than by a deployment's
+extractor, so the same problem reads the same whichever deployment found it.
+
+A message names the **XML tag** only where the tag is not the field id, since the field id is
+already a column. Bigpicture declares those cases in one table, `_XML_TAGS` — the five SEND
+findings (`finding_severity` from `MISEV`) and `staining_substance` from `staining_compound` — so
+every extraction call passes the **field id alone** and `_xml_tag` supplies the tag for the xpath.
+Passing the tag instead is what made a log name a field that does not exist.
+
+A deployment attributes its logs itself: Bigpicture pairs each parsed XML object with its own logs
+(`_Extracted`) and extends the images that object is part of, so a statement's dropped code reaches
+those documents and no others.
 
 A retired concept is substituted before the document is stored: `LoadService._substitute_replaced_concepts`
 asks the ontology for a replacement, indexes that instead, and logs the swap as a `WARNING`.
@@ -253,8 +277,8 @@ Bigpicture models below, then `to_opensearch_values(fields)` converts them to th
 top-level `OpenSearchFieldValue`s and one `OpenSearchGroup` per nested item, keyed by the fields
 declared in `BP_DOCUMENT_FIELDS`. An item contributing no indexable value is not indexed at all. `age_at_extraction`
 is an ISO-8601 duration tuple `(start, end)` — e.g. `("P40Y", "P41Y")` — computed by
-`_add_iso8601_durations` (uses `isodate`, normalises month overflow); invalid durations are logged
-and dropped. `.c4gh`-encrypted XML is decrypted on the fly (`utils/crypt.py`).
+`_add_iso8601_durations` (uses `isodate`, normalises month overflow); an invalid duration is dropped and
+recorded as an error against the document. `.c4gh`-encrypted XML is decrypted on the fly (`utils/crypt.py`).
 
 The parsing models are also in `extract.py`; `BigpictureFields` is the per-image root, holding the
 ids, `scope`, the dataset fields, and the `specimen`, `staining`, `diagnosis` and `finding` sets. `BigpictureSpecimenFields` flattens the biological being, specimen and block
@@ -262,8 +286,9 @@ fields into one model (see the grouping rationale in `fields.yaml`).
 
 Every `CODE_ATTRIBUTE` contributes the pair `(CODE, MEANING)` as its value, the meaning being what the
 load falls back to when the code is no concept id (see *Ontology providers*). `_require_scheme` /
-`_filter_by_scheme` drop a value whose scheme is not the field's ontology, warning as they do, since its
-code is no concept id of the one required however much it may look like one. A scheme of `Other`
+`_filter_by_scheme` drop a value whose scheme is not the field's ontology — recording an error against
+the document, since nothing downstream can see what was dropped — because its code is no concept id of
+the one required however much it may look like one. A scheme of `Other`
 (`_UNCODED_SCHEME`) declares the value uncoded and is read by `_extract_fixation_type` alone, which
 routes such a value's text to `fixation_type_other` — an `ontologyOrValue` field has that field to put it
 in.

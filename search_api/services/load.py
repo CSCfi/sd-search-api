@@ -15,6 +15,8 @@ from search_api.api.opensearch.models import ExtractedDocument
 from search_api.api.qualifiers import validate_requested_qualifiers
 from search_api.api.scopes import validate_document_scope
 from search_api.database.document import get_modified_at, upsert_document
+from search_api.database.document_log import delete_document_logs, write_document_log
+from search_api.database.models import StoredDocumentLog
 from search_api.database.repository import get_cursor
 from search_api.exceptions import UserException
 from search_api.services.ontology.term_cache import OntologyTermCache
@@ -25,6 +27,17 @@ from search_api.services.ontology.values import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def extraction_logs(doc: ExtractedDocument) -> Iterator[StoredDocumentLog]:
+    """Return the log entries from document extraction."""
+    for log in doc.logs:
+        yield StoredDocumentLog(
+            document_id=doc.id,
+            field_id=log.field_id,
+            severity=log.severity,
+            message=log.message,
+        )
 
 
 class LoadService:
@@ -109,6 +122,13 @@ class LoadService:
                     )
                     skipped += 1
                     continue
+
+                # A document loaded again replaces its log rows.
+                await delete_document_logs(cur, doc.id)
+
+                # Write messages from document extraction.
+                for log in extraction_logs(doc):
+                    await write_document_log(cur, log)
 
                 # The document's ontology values are resolved to concept
                 # ids before the document is stored. Values that could not

@@ -1,9 +1,9 @@
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-LogSeverity = Literal["WARNING", "ERROR"]
+from search_api.severity import LogSeverity
 
 
 class StoredTerm(BaseModel):

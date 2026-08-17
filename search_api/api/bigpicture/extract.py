@@ -2,10 +2,11 @@
 
 import logging
 import re
-from collections.abc import Iterable, Sequence, Set
+from collections.abc import Callable, Iterable, Sequence, Set
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator, Literal, TypeVar, cast, get_args
+from typing import Any, Generic, Iterator, Literal, TypeVar, cast, get_args
 from lxml.etree import _Element as Element, _ElementTree as ElementTree  # noqa
 
 import fsspec  # type: ignore
@@ -14,6 +15,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
 from search_api.api.bigpicture.models import BP_DOCUMENT_FIELDS
+from search_api.api.extract_logs import (
+    ExtractLog,
+    invalid_duration_log,
+    invalid_scheme_log,
+)
 from search_api.api.qualifiers import QUALIFIERS_FIELD
 from search_api.exceptions import SystemException, UserException
 from search_api.services.ontology.send import SEND_ONTOLOGY_ID
@@ -31,6 +37,28 @@ from search_api.utils.xml import parse_xml, validate_xml, get_xml_value
 
 
 _UNCODED_SCHEME = "Other"
+
+# Finding tag values keyed to fields ids.
+_FINDING_XML_TAGS = (
+    ("finding", "MISTRESC"),
+    ("finding_severity", "MISEV"),
+    ("finding_chronicity", "MICHRON"),
+    ("finding_distribution", "MIDISTR"),
+    ("finding_result_category", "MIRESCAT"),
+)
+
+
+_FINDING_FIELD_IDS = tuple(dict(_FINDING_XML_TAGS))
+
+_XML_TAGS: dict[str, str] = {
+    **dict(_FINDING_XML_TAGS),
+    "staining_substance": "staining_compound",
+}
+
+
+def _xml_tag(field_id: str) -> str:
+    """Return the XML tag a field's value is read from."""
+    return _XML_TAGS.get(field_id, field_id)
 
 
 class BigpictureCodeAttributeValue(BaseModel):
@@ -264,7 +292,10 @@ def _matches_scheme(scheme: str | None, ontology_id: str) -> bool:
 
 
 def _require_scheme(
-    value: BigpictureCodeAttributeValue | None, ontology_id: str | None
+    value: BigpictureCodeAttributeValue | None,
+    ontology_id: str | None,
+    field_id: str,
+    logs: list[ExtractLog],
 ) -> BigpictureCodeAttributeValue | None:
     """Return the code value only if the schema matches the required ontology."""
     if (
@@ -273,18 +304,19 @@ def _require_scheme(
         or _matches_scheme(value.scheme, ontology_id)
     ):
         return value
-    # TODO: change to error and log to database
-    logging.warning(
-        "Ignored code %r with scheme %r; expected %r.",
-        value.code,
-        value.scheme,
-        ontology_id,
+    logs.append(
+        invalid_scheme_log(
+            field_id, value.code, value.meaning, value.scheme, ontology_id
+        )
     )
     return None
 
 
 def _filter_by_scheme(
-    values: Iterable[BigpictureCodeAttributeValue], ontology_id: str | None
+    values: Iterable[BigpictureCodeAttributeValue],
+    ontology_id: str | None,
+    field_id: str,
+    logs: list[ExtractLog],
 ) -> frozenset[BigpictureCodeAttributeValue]:
     """Return the code values for mathing ontology schemas."""
     values = frozenset(values)
@@ -293,7 +325,7 @@ def _filter_by_scheme(
     return frozenset(
         required
         for value in values
-        if (required := _require_scheme(value, ontology_id)) is not None
+        if (required := _require_scheme(value, ontology_id, field_id, logs)) is not None
     )
 
 
@@ -303,15 +335,6 @@ _OBSERVATION_BLOCK_REF = "BLOCK_REF"
 _OBSERVATION_SPECIMEN_REF = "SPECIMEN_REF"
 _OBSERVATION_BIOLOGICAL_BEING_REF = "BIOLOGICAL_BEING_REF"
 _OBSERVATION_CASE_REF = "CASE_REF"
-
-_OBSERVATION_REFS = (
-    _OBSERVATION_IMAGE_REF,
-    _OBSERVATION_SLIDE_REF,
-    _OBSERVATION_BLOCK_REF,
-    _OBSERVATION_SPECIMEN_REF,
-    _OBSERVATION_BIOLOGICAL_BEING_REF,
-    _OBSERVATION_CASE_REF,
-)
 
 
 class ObjectKey(BaseModel):
@@ -344,6 +367,21 @@ class ObjectIds(BaseModel):
         return keys
 
 
+FieldsT = TypeVar("FieldsT")
+
+
+@dataclass(frozen=True)
+class _Extracted(Generic[FieldsT]):
+    """One extracted XML object.
+
+    A dataclass rather than a pydantic model to avoid copying the logs.
+    """
+
+    ids: ObjectIds
+    fields: FieldsT
+    logs: list[ExtractLog]
+
+
 # Maps object's key to the ids of each related object.
 type IdMap = dict[ObjectKey, set[ObjectIds]]
 # Maps object's key to image accessions if present, else the image aliases.
@@ -353,9 +391,13 @@ RelatedIdType = TypeVar("RelatedIdType", ObjectIds, str)
 
 
 def _related_ids(
-    keys: Iterable[ObjectKey], id_map: dict[ObjectKey, set[RelatedIdType]]
+    keys: Iterable[ObjectKey], key_to_ids: dict[ObjectKey, set[RelatedIdType]]
 ) -> set[RelatedIdType]:
-    return {related_id for key in keys for related_id in id_map.get(key, set())}
+    return {related_id for key in keys for related_id in key_to_ids.get(key, set())}
+
+
+def _related_keys(keys: Iterable[ObjectKey], key_to_ids: IdMap) -> Sequence[ObjectKey]:
+    return _object_keys(_related_ids(keys, key_to_ids))
 
 
 def _object_keys(source: Element | Iterable[ObjectIds]) -> Sequence[ObjectKey]:
@@ -378,40 +420,60 @@ def _object_ids(elem: Element) -> ObjectIds:
 def _map_ref(
     elem: Element,
     ref_tag: str,
-    id_map: dict[ObjectKey, set[RelatedIdType]],
+    key_to_ids: dict[ObjectKey, set[RelatedIdType]],
     value: RelatedIdType,
 ) -> None:
     """Map reference aliases and optional accessions to the provided value."""
     for ref in elem.xpath(f"./{ref_tag}"):
         for key in _object_keys(ref):
-            id_map.setdefault(key, set()).add(value)
+            key_to_ids.setdefault(key, set()).add(value)
 
 
-def _image_ids_from_slides(
-    slide_keys: Iterable[ObjectKey], map_slide_key_to_image_ids: ImageIdMap
-) -> set[str]:
-    return _related_ids(slide_keys, map_slide_key_to_image_ids)
+@dataclass(frozen=True)
+class _References:
+    image_key_to_image_ids: ImageIdMap = field(default_factory=dict)
+    slide_key_to_image_ids: ImageIdMap = field(default_factory=dict)
+    block_key_to_slide_ids: IdMap = field(default_factory=dict)
+    staining_key_to_slide_ids: IdMap = field(default_factory=dict)
+    specimen_key_to_block_ids: IdMap = field(default_factory=dict)
+    being_key_to_specimen_ids: IdMap = field(default_factory=dict)
+    case_key_to_specimen_ids: IdMap = field(default_factory=dict)
+
+    def image_ids_from_images(self, image_keys: Iterable[ObjectKey]) -> set[str]:
+        return _related_ids(image_keys, self.image_key_to_image_ids)
+
+    def image_ids_from_slides(self, slide_keys: Iterable[ObjectKey]) -> set[str]:
+        return _related_ids(slide_keys, self.slide_key_to_image_ids)
+
+    def image_ids_from_blocks(self, block_keys: Iterable[ObjectKey]) -> set[str]:
+        slide_keys = _related_keys(block_keys, self.block_key_to_slide_ids)
+        return self.image_ids_from_slides(slide_keys)
+
+    def image_ids_from_stainings(self, staining_keys: Iterable[ObjectKey]) -> set[str]:
+        slide_keys = _related_keys(staining_keys, self.staining_key_to_slide_ids)
+        return self.image_ids_from_slides(slide_keys)
+
+    def image_ids_from_specimens(self, specimen_keys: Iterable[ObjectKey]) -> set[str]:
+        block_keys = _related_keys(specimen_keys, self.specimen_key_to_block_ids)
+        return self.image_ids_from_blocks(block_keys)
+
+    def image_ids_from_beings(self, being_keys: Iterable[ObjectKey]) -> set[str]:
+        specimen_keys = _related_keys(being_keys, self.being_key_to_specimen_ids)
+        return self.image_ids_from_specimens(specimen_keys)
+
+    def image_ids_from_cases(self, case_keys: Iterable[ObjectKey]) -> set[str]:
+        specimen_keys = _related_keys(case_keys, self.case_key_to_specimen_ids)
+        return self.image_ids_from_specimens(specimen_keys)
 
 
-def _image_ids_from_blocks(
-    block_keys: Iterable[ObjectKey],
-    map_block_key_to_slide_ids: IdMap,
-    map_slide_key_to_image_ids: ImageIdMap,
-) -> set[str]:
-    slides = _related_ids(block_keys, map_block_key_to_slide_ids)
-    return _image_ids_from_slides(_object_keys(slides), map_slide_key_to_image_ids)
-
-
-def _image_ids_from_specimens(
-    specimen_keys: Iterable[ObjectKey],
-    map_specimen_key_to_block_ids: IdMap,
-    map_block_key_to_slide_ids: IdMap,
-    map_slide_key_to_image_ids: ImageIdMap,
-) -> set[str]:
-    blocks = _related_ids(specimen_keys, map_specimen_key_to_block_ids)
-    return _image_ids_from_blocks(
-        _object_keys(blocks), map_block_key_to_slide_ids, map_slide_key_to_image_ids
-    )
+_OBSERVATION_REFS: dict[str, Callable[[_References, Sequence[ObjectKey]], set[str]]] = {
+    _OBSERVATION_IMAGE_REF: _References.image_ids_from_images,
+    _OBSERVATION_SLIDE_REF: _References.image_ids_from_slides,
+    _OBSERVATION_BLOCK_REF: _References.image_ids_from_blocks,
+    _OBSERVATION_SPECIMEN_REF: _References.image_ids_from_specimens,
+    _OBSERVATION_BIOLOGICAL_BEING_REF: _References.image_ids_from_beings,
+    _OBSERVATION_CASE_REF: _References.image_ids_from_cases,
+}
 
 
 def _get_last_modification_time(
@@ -560,19 +622,19 @@ def extract_dataset_documents(
 
     images: list[ObjectIds] = []
     map_image_id_to_document_id: dict[str, str] = {}
-    map_image_key_to_image_ids: ImageIdMap = {}
-    map_slide_key_to_image_ids: ImageIdMap = {}
-    map_block_key_to_slide_ids: IdMap = {}
-    map_staining_key_to_slide_ids: IdMap = {}
-    map_specimen_key_to_block_ids: IdMap = {}
-    map_biological_being_key_to_specimen_ids: IdMap = {}
-    map_case_key_to_specimen_ids: IdMap = {}
-    map_block_id_to_fields: dict[str, BigpictureSampleBlockFields] = {}
-    map_specimen_id_to_fields: dict[str, BigpictureSampleSpecimenFields] = {}
-    list_biological_being_fields: list[
-        tuple[ObjectIds, BigpictureSampleBiologicalBeingFields]
-    ] = []
-    list_staining_fields: list[tuple[ObjectIds, list[BigpictureStainingFields]]] = []
+    references = _References()
+    blocks: dict[str, _Extracted[BigpictureSampleBlockFields]] = {}
+    specimens: dict[str, _Extracted[BigpictureSampleSpecimenFields]] = {}
+    beings: list[_Extracted[BigpictureSampleBiologicalBeingFields]] = []
+    stainings: list[_Extracted[list[BigpictureStainingFields]]] = []
+
+    # Logs are collected by image id.
+    logs_by_image_id: dict[str, list[ExtractLog]] = {}
+
+    def _add_logs(_image_ids: Iterable[str], _logs: list[ExtractLog]) -> None:
+        """Add extract logs for each image."""
+        for _image_id in _image_ids:
+            logs_by_image_id.setdefault(_image_id, []).extend(_logs)
 
     # Read dataset XML.
     #
@@ -619,8 +681,8 @@ def extract_dataset_documents(
             else f"{dataset_id}-{image_ids.alias}"
         )
         for key in image_ids.keys:
-            map_image_key_to_image_ids.setdefault(key, set()).add(image_ids.id)
-        _map_ref(xml, "IMAGE_OF", map_slide_key_to_image_ids, image_ids.id)
+            references.image_key_to_image_ids.setdefault(key, set()).add(image_ids.id)
+        _map_ref(xml, "IMAGE_OF", references.slide_key_to_image_ids, image_ids.id)
 
     # Read policy XML.
     #
@@ -638,40 +700,39 @@ def extract_dataset_documents(
 
     for xml in sample_xml.xpath("/SLIDE | /SAMPLE_SET/SLIDE"):
         slide_ids = _object_ids(xml)
-        _map_ref(xml, "CREATED_FROM_REF", map_block_key_to_slide_ids, slide_ids)
+        _map_ref(xml, "CREATED_FROM_REF", references.block_key_to_slide_ids, slide_ids)
         _map_ref(
             xml,
             "STAINING_INFORMATION_REF",
-            map_staining_key_to_slide_ids,
+            references.staining_key_to_slide_ids,
             slide_ids,
         )
 
     for xml in sample_xml.xpath("/BLOCK | /SAMPLE_SET/BLOCK"):
-        block_ids = _object_ids(xml)
         # Extract fields from XML.
-        map_block_id_to_fields[block_ids.id] = _extract_sample_block_fields(xml)
-        _map_ref(xml, "SAMPLED_FROM_REF", map_specimen_key_to_block_ids, block_ids)
+        block = _extract_sample_block_fields(xml)
+        blocks[block.ids.id] = block
+        _map_ref(
+            xml, "SAMPLED_FROM_REF", references.specimen_key_to_block_ids, block.ids
+        )
 
     for xml in sample_xml.xpath("/SPECIMEN | /SAMPLE_SET/SPECIMEN"):
-        specimen_ids = _object_ids(xml)
         # Extract fields from XML.
-        map_specimen_id_to_fields[specimen_ids.id] = _extract_sample_specimen_fields(
-            xml
-        )
+        specimen = _extract_sample_specimen_fields(xml)
+        specimens[specimen.ids.id] = specimen
         _map_ref(
             xml,
             "EXTRACTED_FROM_REF",
-            map_biological_being_key_to_specimen_ids,
-            specimen_ids,
+            references.being_key_to_specimen_ids,
+            specimen.ids,
         )
-        _map_ref(xml, "PART_OF_CASE_REF", map_case_key_to_specimen_ids, specimen_ids)
+        _map_ref(
+            xml, "PART_OF_CASE_REF", references.case_key_to_specimen_ids, specimen.ids
+        )
 
     for xml in sample_xml.xpath("/BIOLOGICAL_BEING | /SAMPLE_SET/BIOLOGICAL_BEING"):
         # Extract fields from XML.
-        being_ids = _object_ids(xml)
-        list_biological_being_fields.append(
-            (being_ids, _extract_sample_biological_being_fields(xml))
-        )
+        beings.append(_extract_sample_biological_being_fields(xml))
 
     # Read staining XML.
     #
@@ -681,8 +742,7 @@ def extract_dataset_documents(
 
     for xml in staining_xml.xpath("/STAINING | /STAINING_SET/STAINING"):
         # Extract fields from XML.
-        staining_ids = _object_ids(xml)
-        list_staining_fields.append((staining_ids, _extract_staining_fields(xml)))
+        stainings.append(_extract_staining_fields(xml))
 
     # Finished reading XMLs.
 
@@ -705,87 +765,41 @@ def extract_dataset_documents(
     # Add specimen fields. A specimen is extracted from exactly one
     # biological being, and its block has a single field, so both are
     # flattened into the specimen.
-    for (
-        biological_being_ids,
-        biological_being_fields,
-    ) in list_biological_being_fields:
+    for being in beings:
         for specimen_ids in _related_ids(
-            biological_being_ids.keys, map_biological_being_key_to_specimen_ids
+            being.ids.keys, references.being_key_to_specimen_ids
         ):
             for block_ids in _related_ids(
-                specimen_ids.keys, map_specimen_key_to_block_ids
+                specimen_ids.keys, references.specimen_key_to_block_ids
             ):
-                being_values = biological_being_fields.model_dump()
+                being_values = being.fields.model_dump()
                 if is_clinical:
                     # Animal species is a non-clinical field only.
                     being_values["animal_species"] = None
-                specimen = BigpictureSpecimenFields(
-                    **map_block_id_to_fields[block_ids.id].model_dump(),
-                    **map_specimen_id_to_fields[specimen_ids.id].model_dump(),
+                block = blocks[block_ids.id]
+                specimen = specimens[specimen_ids.id]
+                specimen_fields = BigpictureSpecimenFields(
+                    **block.fields.model_dump(),
+                    **specimen.fields.model_dump(),
                     **being_values,
                 )
-                for image_id in _image_ids_from_blocks(
-                    block_ids.keys,
-                    map_block_key_to_slide_ids,
-                    map_slide_key_to_image_ids,
-                ):
-                    fields[image_id].specimen.add(specimen)
+                specimen_image_ids = references.image_ids_from_blocks(block_ids.keys)
+                for image_id in specimen_image_ids:
+                    fields[image_id].specimen.add(specimen_fields)
+                _add_logs(specimen_image_ids, block.logs + specimen.logs + being.logs)
 
     # Add staining fields.
-    for (
-        staining_ids,
-        staining_fields_list,
-    ) in list_staining_fields:
-        stained_slide_keys = _object_keys(
-            _related_ids(staining_ids.keys, map_staining_key_to_slide_ids)
-        )
-        for staining_fields in staining_fields_list:
+    for staining in stainings:
+        staining_image_ids = references.image_ids_from_stainings(staining.ids.keys)
+        _add_logs(staining_image_ids, staining.logs)
+        for staining_fields in staining.fields:
             if any(v is not None for v in staining_fields.model_dump().values()):
-                for image_id in _image_ids_from_slides(
-                    stained_slide_keys, map_slide_key_to_image_ids
-                ):
+                for image_id in staining_image_ids:
                     fields[image_id].staining.add(staining_fields)
 
     # Add observation fields. A clinical dataset carries diagnoses, a
     # non-clinical one findings; the statement type decides which.
     if observation_file_path is not None:
-
-        def _images_for_ref(_tag: str, ref_keys: Sequence[ObjectKey]) -> set[str]:
-            if _tag == _OBSERVATION_IMAGE_REF:
-                return _related_ids(ref_keys, map_image_key_to_image_ids)
-            if _tag == _OBSERVATION_SLIDE_REF:
-                return _image_ids_from_slides(ref_keys, map_slide_key_to_image_ids)
-            if _tag == _OBSERVATION_BLOCK_REF:
-                return _image_ids_from_blocks(
-                    ref_keys,
-                    map_block_key_to_slide_ids,
-                    map_slide_key_to_image_ids,
-                )
-            if _tag == _OBSERVATION_SPECIMEN_REF:
-                return _image_ids_from_specimens(
-                    ref_keys,
-                    map_specimen_key_to_block_ids,
-                    map_block_key_to_slide_ids,
-                    map_slide_key_to_image_ids,
-                )
-            if _tag == _OBSERVATION_BIOLOGICAL_BEING_REF:
-                return _image_ids_from_specimens(
-                    _object_keys(
-                        _related_ids(ref_keys, map_biological_being_key_to_specimen_ids)
-                    ),
-                    map_specimen_key_to_block_ids,
-                    map_block_key_to_slide_ids,
-                    map_slide_key_to_image_ids,
-                )
-            if _tag == _OBSERVATION_CASE_REF:
-                return _image_ids_from_specimens(
-                    _object_keys(_related_ids(ref_keys, map_case_key_to_specimen_ids)),
-                    map_specimen_key_to_block_ids,
-                    map_block_key_to_slide_ids,
-                    map_slide_key_to_image_ids,
-                )
-            return set()
-
         observation_xml = parse_xml(read_file(fs, observation_file_path, keys))
         validate_xml(observation_xml, XML_SCHEMA_DIR, OBSERVATION_XML_SCHEMA_FILE)
 
@@ -799,7 +813,7 @@ def extract_dataset_documents(
             if statement_type not in ("Diagnosis", "Finding"):
                 continue
             status = statement.findtext("STATEMENT_STATUS")
-            for tag in _OBSERVATION_REFS:
+            for tag, image_ids_for_ref in _OBSERVATION_REFS.items():
                 ref = observation.find(tag)
                 if ref is None:
                     continue
@@ -809,24 +823,26 @@ def extract_dataset_documents(
                 qualifier_value = (
                     OBSERVATION_CONFIRMED if confirmed else OBSERVATION_CANDIDATE
                 )
-                ref_image_ids = _images_for_ref(tag, _object_keys(ref))
+                ref_image_ids = image_ids_for_ref(references, _object_keys(ref))
                 qualifier = {
                     QUALIFIERS_FIELD: frozenset(
                         {(OBSERVATION_QUALIFIER, qualifier_value)}
                     )
                 }
+                statement_logs: list[ExtractLog] = []
                 if statement_type == "Diagnosis":
                     group = "diagnosis"
                     items: list[BaseModel] = [
                         BigpictureDiagnosisFields(diagnosis=code, **qualifier)
-                        for code in _extract_diagnoses(statement)
+                        for code in _extract_diagnoses(statement, statement_logs)
                     ]
                 else:
                     group = "finding"
-                    finding = _extract_finding(statement, **qualifier)
+                    finding = _extract_finding(statement, statement_logs, **qualifier)
                     items = [finding] if finding is not None else []
                 for ref_image_id in ref_image_ids:
                     getattr(fields[ref_image_id], group).update(items)
+                _add_logs(ref_image_ids, statement_logs)
                 break
 
     # Return iterator of extracted documents.
@@ -840,61 +856,89 @@ def extract_dataset_documents(
             values=values,
             groups=groups,
             scope=bp_fields.scope,
+            logs=logs_by_image_id.get(image_id, []),
         )
 
 
-def _extract_sample_block_fields(xml: ElementTree) -> BigpictureSampleBlockFields:
-    return BigpictureSampleBlockFields(
-        block_preparation=_extract_code_attribute_value(
-            xml, "block_preparation", SNOMED_ONTOLOGY_ID
-        )
+def _extract_sample_block_fields(
+    xml: Element,
+) -> _Extracted[BigpictureSampleBlockFields]:
+    logs: list[ExtractLog] = []
+    return _Extracted(
+        ids=_object_ids(xml),
+        fields=BigpictureSampleBlockFields(
+            block_preparation=_extract_code_attribute_value(
+                xml, "block_preparation", SNOMED_ONTOLOGY_ID, logs
+            )
+        ),
+        logs=logs,
     )
 
 
 def _extract_sample_biological_being_fields(
-    xml: ElementTree,
-) -> BigpictureSampleBiologicalBeingFields:
-    return BigpictureSampleBiologicalBeingFields(
-        animal_species=_extract_code_attribute_value(
-            xml, "animal_species", SNOMED_ONTOLOGY_ID
+    xml: Element,
+) -> _Extracted[BigpictureSampleBiologicalBeingFields]:
+    logs: list[ExtractLog] = []
+    return _Extracted(
+        ids=_object_ids(xml),
+        fields=BigpictureSampleBiologicalBeingFields(
+            animal_species=_extract_code_attribute_value(
+                xml, "animal_species", SNOMED_ONTOLOGY_ID, logs
+            ),
+            sex=cast(
+                Literal["Male", "Female", "Not-known", "Other"] | None,
+                _extract_string_attribute_value(xml, "sex"),
+            ),
         ),
-        sex=cast(
-            Literal["Male", "Female", "Not-known", "Other"] | None,
-            _extract_string_attribute_value(xml, "sex"),
-        ),
+        logs=logs,
     )
 
 
-def _extract_sample_specimen_fields(xml: ElementTree) -> BigpictureSampleSpecimenFields:
-    fixation_type, fixation_type_text = _extract_fixation_type(xml)
+def _extract_sample_specimen_fields(
+    xml: Element,
+) -> _Extracted[BigpictureSampleSpecimenFields]:
+    logs: list[ExtractLog] = []
+    fixation_type, fixation_type_text = _extract_fixation_type(xml, logs)
 
-    return BigpictureSampleSpecimenFields(
-        anatomical_site=_extract_anatomical_sites(xml),
-        fixation_type=fixation_type,
-        fixation_type_other=fixation_type_text,
-        specimen_type=_extract_code_attribute_value(
-            xml, "specimen_type", SNOMED_ONTOLOGY_ID
+    return _Extracted(
+        ids=_object_ids(xml),
+        fields=BigpictureSampleSpecimenFields(
+            anatomical_site=_extract_anatomical_sites(xml, logs),
+            fixation_type=fixation_type,
+            fixation_type_other=fixation_type_text,
+            specimen_type=_extract_code_attribute_value(
+                xml, "specimen_type", SNOMED_ONTOLOGY_ID, logs
+            ),
+            age_at_extraction=_extract_age_at_extraction_range(xml, logs),
         ),
-        age_at_extraction=_extract_age_at_extraction_range(xml),
+        logs=logs,
     )
 
 
-def _extract_staining_fields(xml: ElementTree) -> list[BigpictureStainingFields]:
+def _extract_staining_fields(
+    xml: Element,
+) -> _Extracted[list[BigpictureStainingFields]]:
+    logs: list[ExtractLog] = []
     for procedure_xml in xml.xpath("PROCEDURE_INFORMATION"):
         # PROCEDURE_INFORMATION and STAIN(S) are mutually exclusive.
-        return [
-            BigpictureStainingFields(
-                staining_procedure=_extract_code_attribute_value(
-                    procedure_xml,
-                    "staining_procedure",
-                    SNOMED_ONTOLOGY_ID,
-                    is_attributes=False,
-                ),
-                staining_procedure_other=_extract_string_attribute_value(
-                    procedure_xml, "staining_procedure", is_attributes=False
-                ),
-            )
-        ]
+        return _Extracted(
+            ids=_object_ids(xml),
+            fields=[
+                BigpictureStainingFields(
+                    staining_procedure=_extract_code_attribute_value(
+                        procedure_xml,
+                        "staining_procedure",
+                        SNOMED_ONTOLOGY_ID,
+                        logs,
+                        is_attributes=False,
+                    ),
+                    staining_procedure_other=_extract_string_attribute_value(
+                        procedure_xml, "staining_procedure", is_attributes=False
+                    ),
+                )
+            ],
+            logs=logs,
+        )
 
     fields = []
 
@@ -907,7 +951,7 @@ def _extract_staining_fields(xml: ElementTree) -> list[BigpictureStainingFields]
         if not is_chemical_stain:
             # staining_target is stored as free text regardless of ontology.
             staining_target = _extract_code_attribute_value(
-                stain_xml, "staining_target", None, is_attributes=False
+                stain_xml, "staining_target", None, logs, is_attributes=False
             )
             if staining_target:
                 staining_target_text = staining_target.meaning
@@ -922,6 +966,7 @@ def _extract_staining_fields(xml: ElementTree) -> list[BigpictureStainingFields]
                     stain_xml,
                     "staining_procedure",
                     SNOMED_ONTOLOGY_ID,
+                    logs,
                     is_attributes=False,
                 ),
                 staining_procedure_other=_extract_string_attribute_value(
@@ -929,8 +974,9 @@ def _extract_staining_fields(xml: ElementTree) -> list[BigpictureStainingFields]
                 ),
                 staining_substance=_extract_code_attribute_value(
                     stain_xml,
-                    "staining_compound",
+                    "staining_substance",
                     SNOMED_ONTOLOGY_ID,
+                    logs,
                     is_attributes=False,
                 )
                 if is_chemical_stain
@@ -944,7 +990,7 @@ def _extract_staining_fields(xml: ElementTree) -> list[BigpictureStainingFields]
             )
         )
 
-    return fields
+    return _Extracted(ids=_object_ids(xml), fields=fields, logs=logs)
 
 
 _XSI_NIL = "{http://www.w3.org/2001/XMLSchema-instance}nil"
@@ -954,7 +1000,7 @@ def _is_nil(elem: Any) -> bool:
     return elem.get(_XSI_NIL) == "true"
 
 
-def _code_attribute_value(value: ElementTree) -> BigpictureCodeAttributeValue:
+def _code_attribute_value(value: Element) -> BigpictureCodeAttributeValue:
     return BigpictureCodeAttributeValue(
         code=value.findtext("CODE"),
         scheme=value.findtext("SCHEME"),
@@ -964,56 +1010,62 @@ def _code_attribute_value(value: ElementTree) -> BigpictureCodeAttributeValue:
 
 
 def _extract_code_attribute_value(
-    elem: ElementTree, tag: str, ontology_id: str | None, *, is_attributes: bool = True
+    elem: Element,
+    field_id: str,
+    ontology_id: str | None,
+    logs: list[ExtractLog],
+    *,
+    is_attributes: bool = True,
 ) -> BigpictureCodeAttributeValue | None:
     """Extract the CODE_ATTRIBUTE value, requiring its scheme to match the provided ontology."""
+    xml_tag = _xml_tag(field_id)
     if is_attributes:
-        values = elem.xpath(f"ATTRIBUTES/CODE_ATTRIBUTE[TAG='{tag}']/VALUE")
+        values = elem.xpath(f"ATTRIBUTES/CODE_ATTRIBUTE[TAG='{xml_tag}']/VALUE")
     else:
-        values = elem.xpath(f"CODE_ATTRIBUTE[TAG='{tag}']/VALUE")
+        values = elem.xpath(f"CODE_ATTRIBUTE[TAG='{xml_tag}']/VALUE")
 
     if not values or _is_nil(values[0]):
         return None
 
-    return _require_scheme(_code_attribute_value(values[0]), ontology_id)
+    return _require_scheme(
+        _code_attribute_value(values[0]), ontology_id, field_id, logs
+    )
 
 
 def _extract_code_attribute_values(
-    elem: ElementTree, tag: str, ontology_id: str | None, *, is_attributes: bool = True
+    elem: Element,
+    field_id: str,
+    ontology_id: str | None,
+    logs: list[ExtractLog],
+    *,
+    is_attributes: bool = True,
 ) -> frozenset[BigpictureCodeAttributeValue]:
     """Extract CODE_ATTRIBUTE values, requiring their scheme to match the provided ontology."""
+    xml_tag = _xml_tag(field_id)
     if is_attributes:
-        values = elem.xpath(f"ATTRIBUTES/CODE_ATTRIBUTE[TAG='{tag}']/VALUE")
+        values = elem.xpath(f"ATTRIBUTES/CODE_ATTRIBUTE[TAG='{xml_tag}']/VALUE")
     else:
-        values = elem.xpath(f"CODE_ATTRIBUTE[TAG='{tag}']/VALUE")
+        values = elem.xpath(f"CODE_ATTRIBUTE[TAG='{xml_tag}']/VALUE")
 
     codes = (_code_attribute_value(v) for v in values if not _is_nil(v))
-    return _filter_by_scheme(codes, ontology_id)
+    return _filter_by_scheme(codes, ontology_id, field_id, logs)
 
 
 def _extract_diagnoses(
-    statement: ElementTree,
+    statement: Element, logs: list[ExtractLog]
 ) -> set[BigpictureCodeAttributeValue]:
     codes = {
         _code_attribute_value(v)
         for v in statement.xpath("CODE_ATTRIBUTES/CODE_ATTRIBUTE/VALUE")
         if not _is_nil(v)
     }
-    return set(_filter_by_scheme(codes, SNOMED_ONTOLOGY_ID))
-
-
-# SEND CODE_ATTRIBUTE tag for each finding field.
-_FINDING_TAGS = (
-    ("finding", "MISTRESC"),
-    ("finding_severity", "MISEV"),
-    ("finding_chronicity", "MICHRON"),
-    ("finding_distribution", "MIDISTR"),
-    ("finding_result_category", "MIRESCAT"),
-)
+    return set(_filter_by_scheme(codes, SNOMED_ONTOLOGY_ID, "diagnosis", logs))
 
 
 def _extract_finding(
-    statement: ElementTree, qualifiers: frozenset[tuple[str, str]]
+    statement: Element,
+    logs: list[ExtractLog],
+    qualifiers: frozenset[tuple[str, str]],
 ) -> BigpictureFindingFields | None:
     """Build one finding from a ``Finding`` statement, or None if it holds none.
 
@@ -1023,10 +1075,10 @@ def _extract_finding(
     if not code_attributes:
         return None
     values = {
-        field_name: _extract_code_attribute_value(
-            code_attributes[0], tag, SEND_ONTOLOGY_ID, is_attributes=False
+        field_id: _extract_code_attribute_value(
+            code_attributes[0], field_id, SEND_ONTOLOGY_ID, logs, is_attributes=False
         )
-        for field_name, tag in _FINDING_TAGS
+        for field_id in _FINDING_FIELD_IDS
     }
     if not any(value is not None for value in values.values()):
         return None
@@ -1034,34 +1086,40 @@ def _extract_finding(
 
 
 def _extract_anatomical_sites(
-    elem: ElementTree,
+    elem: Element, logs: list[ExtractLog]
 ) -> frozenset[BigpictureCodeAttributeValue]:
-    direct = _extract_code_attribute_values(elem, "anatomical_site", SNOMED_ONTOLOGY_ID)
+    direct = _extract_code_attribute_values(
+        elem, "anatomical_site", SNOMED_ONTOLOGY_ID, logs
+    )
 
     set_nodes = elem.xpath("ATTRIBUTES/SET_ATTRIBUTE[TAG='anatomical_site_list']/VALUE")
     from_set: frozenset[BigpictureCodeAttributeValue] = frozenset()
     if set_nodes:
         from_set = _extract_code_attribute_values(
-            set_nodes[0], "anatomical_site", SNOMED_ONTOLOGY_ID, is_attributes=False
+            set_nodes[0],
+            "anatomical_site",
+            SNOMED_ONTOLOGY_ID,
+            logs,
+            is_attributes=False,
         )
 
     return direct | from_set
 
 
 def _extract_fixation_type(
-    xml: ElementTree,
+    xml: Element, logs: list[ExtractLog]
 ) -> tuple[BigpictureCodeAttributeValue | None, str | None]:
     # If schema is "Other" then no ontology is used. Otherwise, require Snomed.
-    value = _extract_code_attribute_value(xml, "fixation_type", None)
+    value = _extract_code_attribute_value(xml, "fixation_type", None, logs)
 
     if value and value.scheme == _UNCODED_SCHEME:
         return None, value.meaning or value.code
 
-    return _require_scheme(value, SNOMED_ONTOLOGY_ID), None
+    return _require_scheme(value, SNOMED_ONTOLOGY_ID, "fixation_type", logs), None
 
 
 def _extract_string_attribute_value(
-    elem: ElementTree, tag: str, *, is_attributes=True
+    elem: Element, tag: str, *, is_attributes=True
 ) -> str | None:
     if is_attributes:
         values = elem.xpath(f"ATTRIBUTES/STRING_ATTRIBUTE[TAG='{tag}']/VALUE/text()")
@@ -1088,7 +1146,9 @@ def _add_iso8601_durations(start: str, length: str) -> str:
     return isodate.duration_isoformat(result)
 
 
-def _extract_age_at_extraction_range(elem: ElementTree) -> tuple[str, str] | None:
+def _extract_age_at_extraction_range(
+    elem: Element, logs: list[ExtractLog]
+) -> tuple[str, str] | None:
     nodes = elem.xpath("ATTRIBUTES/SET_ATTRIBUTE[TAG/text()='age_at_extraction']/VALUE")
     if not nodes:
         return None
@@ -1107,11 +1167,7 @@ def _extract_age_at_extraction_range(elem: ElementTree) -> tuple[str, str] | Non
     try:
         end = _add_iso8601_durations(start, length_value[0])
     except isodate.ISO8601Error:
-        logging.error(
-            "Invalid ISO-8601 duration in age_at_extraction (start=%r, length=%r); skipping field.",
-            start,
-            length_value[0],
-        )
+        logs.append(invalid_duration_log("age_at_extraction", (start, length_value[0])))
         return None
 
     return start, end

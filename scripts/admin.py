@@ -16,10 +16,13 @@ from search_api.api.domain import Domain
 from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorService
 from search_api.api.opensearch.services import create_index, create_search
 from search_api.exceptions import SystemException
-from search_api.services.load import LoadService
+from search_api.services.load import LoadService, extraction_logs
 from search_api.services.sync import SyncService
 from search_api.database.document import count_documents, reset_synced_at
-from search_api.database.document_log import delete_all_document_logs
+from search_api.database.document_log import (
+    delete_all_document_logs,
+    log_document_log,
+)
 from search_api.database.repository import get_cursor
 from search_api.database.terms_cache import delete_all_terms
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
@@ -72,6 +75,9 @@ async def _load(domain: Domain, args: argparse.Namespace) -> None:
         count = 0
         for doc in docs_iter:
             logging.info("Would load document %s.", doc.id)
+            # Log extraction messages.
+            for log in extraction_logs(doc):
+                log_document_log(log)
             count += 1
         logging.info("%d document(s) extracted without loading them.", count)
         return

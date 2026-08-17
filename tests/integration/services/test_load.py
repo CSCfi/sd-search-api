@@ -6,6 +6,7 @@ import pytest
 import pytest_asyncio
 
 from search_api.api.beacon.models import BeaconFilteringOntology
+from search_api.api.extract_logs import ExtractLog
 from search_api.api.opensearch.models import (
     ExtractedDocument,
     OpenSearchFieldType,
@@ -374,4 +375,33 @@ async def test_resolve_retired_concept_id_from_meaning(ontology_id, document_id)
             f"Provided concept id '{_RETIRED_CONCEPT_ID}' was replaced by "
             f"'{_REPLACEMENT_CONCEPT_ID}' for field '{_FIELD_ID}'.",
         ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_load_writes_extraction_messages(ontology_id, document_id):
+    field = _ontology_field(ontology_id)
+    document = ExtractedDocument(
+        id=document_id,
+        values=[OpenSearchFieldValue(field=field, value=(_CONCEPT_ID, None))],
+        logs=[
+            ExtractLog(severity="WARNING", message="Something looked odd."),
+            ExtractLog(
+                severity="ERROR",
+                field_id=_FIELD_ID,
+                message="Something was ignored.",
+            ),
+        ],
+    )
+
+    await LoadService(create_term_caches({ontology_id}), [field]).store_documents(
+        iter([document])
+    )
+
+    async with get_cursor() as cur:
+        logs = await read_document_logs(cur, document_id)
+    # The field id travels with the message, NULL for a log about the whole document.
+    assert [(log.severity, log.message, log.field_id) for log in logs] == [
+        ("WARNING", "Something looked odd.", None),
+        ("ERROR", "Something was ignored.", _FIELD_ID),
     ]

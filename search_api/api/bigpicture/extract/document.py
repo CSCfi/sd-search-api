@@ -1,196 +1,66 @@
-"""Bigpicture XML extraction service."""
+"""Bigpicture document XML extraction."""
 
 import logging
-import re
-from collections.abc import Callable, Iterable, Sequence, Set
-from dataclasses import dataclass, field
+from collections.abc import Iterable, Iterator, Set
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Generic, Iterator, Literal, TypeVar, cast, get_args
-from lxml.etree import _Element as Element, _ElementTree as ElementTree  # noqa
+from typing import Any, Generic, Literal, TypeVar, cast
 
 import fsspec  # type: ignore
-import isodate  # type: ignore[import-untyped]
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from lxml.etree import _Element as Element, _ElementTree as ElementTree  # noqa
+from pydantic import BaseModel
 
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
 from search_api.api.bigpicture.models import BP_DOCUMENT_FIELDS
-from search_api.api.extract_logs import (
-    ExtractLog,
-    invalid_duration_log,
-    invalid_scheme_log,
+from search_api.api.bigpicture.extract.attributes import (
+    _FINDING_FIELD_IDS,
+    _code_attribute_value,
+    _extract_age_at_extraction,
+    _extract_anatomical_sites,
+    _extract_code_attribute_value,
+    _extract_fixation_type,
+    _extract_string_attribute_value,
+    _filter_values_by_scheme,
+    _is_nil,
 )
-from search_api.api.qualifiers import QUALIFIERS_FIELD
-from search_api.exceptions import SystemException, UserException
-from search_api.services.ontology.send import SEND_ONTOLOGY_ID
+from search_api.api.bigpicture.extract.models import (
+    OBSERVATION_CANDIDATE,
+    OBSERVATION_CONFIRMED,
+    OBSERVATION_QUALIFIER,
+    BigpictureCodeAttributeValue,
+    BigpictureDiagnosisFields,
+    BigpictureFields,
+    BigpictureFindingFields,
+    BigpictureSampleBiologicalBeingFields,
+    BigpictureSampleBlockFields,
+    BigpictureSampleSpecimenFields,
+    BigpictureSpecimenFields,
+    BigpictureStainingFields,
+    ObjectIds,
+    _NESTED_GROUPS,
+)
+from search_api.api.bigpicture.extract.refs import (
+    _OBSERVATION_IMAGE_REF,
+    _OBSERVATION_REFS,
+    _References,
+    _map_ref,
+    _object_ids,
+    _object_keys,
+    _related_ids,
+)
+from search_api.api.extract_logs import ExtractLog
 from search_api.api.opensearch.models import (
     ExtractedDocument,
     OpenSearchFieldValue,
     OpenSearchGroup,
 )
+from search_api.api.qualifiers import QUALIFIERS_FIELD
+from search_api.exceptions import SystemException, UserException
+from search_api.services.ontology.send import SEND_ONTOLOGY_ID
 from search_api.utils.crypt import load_c4gh_keys, read_file, resolve_path
 from search_api.utils.dir import list_directories
-from search_api.utils.xml import parse_xml, validate_xml, get_xml_value
-
-
-# Parsing models for Bigpicture XML, converted by to_opensearch_values.
-
-
-_UNCODED_SCHEME = "Other"
-
-# Finding tag values keyed to fields ids.
-_FINDING_XML_TAGS = (
-    ("finding", "MISTRESC"),
-    ("finding_severity", "MISEV"),
-    ("finding_chronicity", "MICHRON"),
-    ("finding_distribution", "MIDISTR"),
-    ("finding_result_category", "MIRESCAT"),
-)
-
-
-_FINDING_FIELD_IDS = tuple(dict(_FINDING_XML_TAGS))
-
-_XML_TAGS: dict[str, str] = {
-    **dict(_FINDING_XML_TAGS),
-    "staining_substance": "staining_compound",
-}
-
-
-def _xml_tag(field_id: str) -> str:
-    """Return the XML tag a field's value is read from."""
-    return _XML_TAGS.get(field_id, field_id)
-
-
-class BigpictureCodeAttributeValue(BaseModel):
-    """Bigpicture code attribute value."""
-
-    model_config = ConfigDict(frozen=True)
-
-    code: str
-    scheme: str | None = None
-    meaning: str
-    scheme_version: str | None = None
-
-
-class BigpictureSampleBiologicalBeingFields(BaseModel):
-    """Bigpicture biological being search fields."""
-
-    animal_species: BigpictureCodeAttributeValue | None = None
-    sex: Literal["Male", "Female", "Not-known", "Other"] | None = None
-
-
-class BigpictureSampleSpecimenFields(BaseModel):
-    """Bigpicture specimen search fields."""
-
-    anatomical_site: frozenset[BigpictureCodeAttributeValue] = Field(
-        default_factory=frozenset
-    )
-    fixation_type: BigpictureCodeAttributeValue | None = None
-    fixation_type_other: str | None = None  # Free text alternative
-    specimen_type: BigpictureCodeAttributeValue | None = None
-    age_at_extraction: tuple[str, str] | None = None
-
-    @field_serializer("anatomical_site")
-    def _serialize_anatomical_site(
-        self, v: frozenset[BigpictureCodeAttributeValue]
-    ) -> list[dict]:
-        # Set elements must be hashable; Pydantic serialises frozenset[BaseModel] as
-        # set[dict], but dict is unhashable, so serialise as list[dict].
-        return [item.model_dump() for item in v]
-
-
-class BigpictureSampleBlockFields(BaseModel):
-    """Bigpicture block search fields."""
-
-    block_preparation: BigpictureCodeAttributeValue | None = None
-
-
-class BigpictureSpecimenFields(
-    BigpictureSampleBiologicalBeingFields,
-    BigpictureSampleSpecimenFields,
-    BigpictureSampleBlockFields,
-    BaseModel,
-):
-    """Bigpicture specimen search fields (see grouping rationale in fields.yaml)."""
-
-    model_config = ConfigDict(frozen=True)
-
-
-class BigpictureStainingFields(BaseModel):
-    """Bigpicture staining search field."""
-
-    model_config = ConfigDict(frozen=True)
-
-    staining_procedure: BigpictureCodeAttributeValue | None = None
-    staining_procedure_other: str | None = None  # Free text alternative
-    staining_substance: BigpictureCodeAttributeValue | None = None
-    staining_substance_other: str | None = None  # Free text alternative
-    staining_target: str | None = None
-
-
-OBSERVATION_QUALIFIER = "observation"
-OBSERVATION_CONFIRMED = "confirmed"
-OBSERVATION_CANDIDATE = "candidate"
-
-
-class BigpictureDiagnosisFields(BaseModel):
-    """Bigpicture clinical diagnosis search fields.
-
-    One instance per distinct diagnosis.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    diagnosis: BigpictureCodeAttributeValue | None = None
-    qualifiers: frozenset[tuple[str, str]] = frozenset()
-
-
-class BigpictureFindingFields(BaseModel):
-    """Bigpicture non-clinical finding search fields.
-
-    One instance per ``Finding`` statement.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    finding: BigpictureCodeAttributeValue | None = None
-    finding_severity: BigpictureCodeAttributeValue | None = None
-    finding_chronicity: BigpictureCodeAttributeValue | None = None
-    finding_distribution: BigpictureCodeAttributeValue | None = None
-    finding_result_category: BigpictureCodeAttributeValue | None = None
-    qualifiers: frozenset[tuple[str, str]] = frozenset()
-
-
-class BigpictureFields(BaseModel):
-    """Bigpicture IDs and search fields."""
-
-    image_id: str
-    dataset_id: str
-    dataset_image_cnt: int
-    scope: Literal["clinical", "non_clinical"]
-    dataset_short_name: str | None = None
-    dataset_title: str | None = None
-    dataset_description: str | None = None
-    specimen: set[BigpictureSpecimenFields] = Field(default_factory=set)
-    staining: set[BigpictureStainingFields] = Field(default_factory=set)
-    diagnosis: set[BigpictureDiagnosisFields] = Field(default_factory=set)
-    finding: set[BigpictureFindingFields] = Field(default_factory=set)
-    # Newest file modification date in the dataset.
-    dataset_modified_at: datetime | None = None
-
-
-def _nested_groups() -> tuple[str, ...]:
-    """Return the Bigpicture nested group names."""
-    return tuple(
-        name
-        for name, info in BigpictureFields.model_fields.items()
-        if (args := get_args(info.annotation))
-        and isinstance(args[0], type)
-        and issubclass(args[0], BaseModel)
-    )
-
-
-_NESTED_GROUPS = _nested_groups()
+from search_api.utils.xml import get_xml_value, parse_xml, validate_xml
 
 
 def _has_value(value: Any) -> bool:
@@ -267,7 +137,7 @@ SAMPLE_XML_FILE = "METADATA/sample.xml"
 STAINING_XML_FILE = "METADATA/staining.xml"
 OBSERVATION_XML_FILE = "METADATA/observation.xml"
 
-XML_SCHEMA_DIR = Path(__file__).resolve().parent / "schemas"
+XML_SCHEMA_DIR = Path(__file__).resolve().parent.parent / "schemas"
 
 DATASET_XML_SCHEMA_FILE = "BP.dataset.xsd"
 IMAGE_XML_SCHEMA_FILE = "BP.image.xsd"
@@ -275,97 +145,6 @@ POLICY_XML_SCHEMA_FILE = "BP.policy.xsd"
 SAMPLE_XML_SCHEMA_FILE = "BP.sample.xsd"
 STAINING_XML_SCHEMA_FILE = "BP.staining.xsd"
 OBSERVATION_XML_SCHEMA_FILE = "BP.observation.xsd"
-
-# XML <SCHEME> value(s) for each supported ontology scheme.
-_SCHEME_ALIASES: dict[str, frozenset[str]] = {
-    SNOMED_ONTOLOGY_ID: frozenset({"snomedct", "snomed", "sct"}),
-    SEND_ONTOLOGY_ID: frozenset({"send"}),
-}
-
-
-def _matches_scheme(scheme: str | None, ontology_id: str) -> bool:
-    if scheme is None:
-        return False
-    # Case- and punctuation-insensitive matching (e.g. "SNOMED CT", "SNOMED-CT", "snomedct").
-    normalized = re.sub(r"[^a-z0-9]", "", scheme.lower())
-    return normalized in _SCHEME_ALIASES.get(ontology_id, frozenset())
-
-
-def _require_scheme(
-    value: BigpictureCodeAttributeValue | None,
-    ontology_id: str | None,
-    field_id: str,
-    logs: list[ExtractLog],
-) -> BigpictureCodeAttributeValue | None:
-    """Return the code value only if the schema matches the required ontology."""
-    if (
-        value is None
-        or ontology_id is None
-        or _matches_scheme(value.scheme, ontology_id)
-    ):
-        return value
-    logs.append(
-        invalid_scheme_log(
-            field_id, value.code, value.meaning, value.scheme, ontology_id
-        )
-    )
-    return None
-
-
-def _filter_by_scheme(
-    values: Iterable[BigpictureCodeAttributeValue],
-    ontology_id: str | None,
-    field_id: str,
-    logs: list[ExtractLog],
-) -> frozenset[BigpictureCodeAttributeValue]:
-    """Return the code values for mathing ontology schemas."""
-    values = frozenset(values)
-    if ontology_id is None:
-        return values
-    return frozenset(
-        required
-        for value in values
-        if (required := _require_scheme(value, ontology_id, field_id, logs)) is not None
-    )
-
-
-_OBSERVATION_IMAGE_REF = "IMAGE_REF"
-_OBSERVATION_SLIDE_REF = "SLIDE_REF"
-_OBSERVATION_BLOCK_REF = "BLOCK_REF"
-_OBSERVATION_SPECIMEN_REF = "SPECIMEN_REF"
-_OBSERVATION_BIOLOGICAL_BEING_REF = "BIOLOGICAL_BEING_REF"
-_OBSERVATION_CASE_REF = "CASE_REF"
-
-
-class ObjectKey(BaseModel):
-    """Object alias or optional accession."""
-
-    model_config = ConfigDict(frozen=True)
-
-    kind: Literal["accession", "alias"]
-    value: str
-
-
-class ObjectIds(BaseModel):
-    """Object alias and, if present, its accession."""
-
-    model_config = ConfigDict(frozen=True)
-
-    alias: str
-    accession: str | None = None
-
-    @property
-    def id(self) -> str:
-        """The accession if present, else the alias."""
-        return self.accession or self.alias
-
-    @property
-    def keys(self) -> list[ObjectKey]:
-        keys = [ObjectKey(kind="alias", value=self.alias)]
-        if self.accession is not None:
-            keys.append(ObjectKey(kind="accession", value=self.accession))
-        return keys
-
 
 FieldsT = TypeVar("FieldsT")
 
@@ -380,100 +159,6 @@ class _Extracted(Generic[FieldsT]):
     ids: ObjectIds
     fields: FieldsT
     logs: list[ExtractLog]
-
-
-# Maps object's key to the ids of each related object.
-type IdMap = dict[ObjectKey, set[ObjectIds]]
-# Maps object's key to image accessions if present, else the image aliases.
-type ImageIdMap = dict[ObjectKey, set[str]]
-
-RelatedIdType = TypeVar("RelatedIdType", ObjectIds, str)
-
-
-def _related_ids(
-    keys: Iterable[ObjectKey], key_to_ids: dict[ObjectKey, set[RelatedIdType]]
-) -> set[RelatedIdType]:
-    return {related_id for key in keys for related_id in key_to_ids.get(key, set())}
-
-
-def _related_keys(keys: Iterable[ObjectKey], key_to_ids: IdMap) -> Sequence[ObjectKey]:
-    return _object_keys(_related_ids(keys, key_to_ids))
-
-
-def _object_keys(source: Element | Iterable[ObjectIds]) -> Sequence[ObjectKey]:
-    if isinstance(source, Element):
-        return [
-            ObjectKey(kind=attribute, value=value)
-            for attribute in ("accession", "alias")
-            if (value := source.get(attribute)) is not None
-        ]
-    return [key for ids in source for key in ids.keys]
-
-
-def _object_ids(elem: Element) -> ObjectIds:
-    """Return an object's alias and optional accession."""
-    return ObjectIds(
-        alias=cast(str, elem.get("alias")), accession=elem.get("accession")
-    )
-
-
-def _map_ref(
-    elem: Element,
-    ref_tag: str,
-    key_to_ids: dict[ObjectKey, set[RelatedIdType]],
-    value: RelatedIdType,
-) -> None:
-    """Map reference aliases and optional accessions to the provided value."""
-    for ref in elem.xpath(f"./{ref_tag}"):
-        for key in _object_keys(ref):
-            key_to_ids.setdefault(key, set()).add(value)
-
-
-@dataclass(frozen=True)
-class _References:
-    image_key_to_image_ids: ImageIdMap = field(default_factory=dict)
-    slide_key_to_image_ids: ImageIdMap = field(default_factory=dict)
-    block_key_to_slide_ids: IdMap = field(default_factory=dict)
-    staining_key_to_slide_ids: IdMap = field(default_factory=dict)
-    specimen_key_to_block_ids: IdMap = field(default_factory=dict)
-    being_key_to_specimen_ids: IdMap = field(default_factory=dict)
-    case_key_to_specimen_ids: IdMap = field(default_factory=dict)
-
-    def image_ids_from_images(self, image_keys: Iterable[ObjectKey]) -> set[str]:
-        return _related_ids(image_keys, self.image_key_to_image_ids)
-
-    def image_ids_from_slides(self, slide_keys: Iterable[ObjectKey]) -> set[str]:
-        return _related_ids(slide_keys, self.slide_key_to_image_ids)
-
-    def image_ids_from_blocks(self, block_keys: Iterable[ObjectKey]) -> set[str]:
-        slide_keys = _related_keys(block_keys, self.block_key_to_slide_ids)
-        return self.image_ids_from_slides(slide_keys)
-
-    def image_ids_from_stainings(self, staining_keys: Iterable[ObjectKey]) -> set[str]:
-        slide_keys = _related_keys(staining_keys, self.staining_key_to_slide_ids)
-        return self.image_ids_from_slides(slide_keys)
-
-    def image_ids_from_specimens(self, specimen_keys: Iterable[ObjectKey]) -> set[str]:
-        block_keys = _related_keys(specimen_keys, self.specimen_key_to_block_ids)
-        return self.image_ids_from_blocks(block_keys)
-
-    def image_ids_from_beings(self, being_keys: Iterable[ObjectKey]) -> set[str]:
-        specimen_keys = _related_keys(being_keys, self.being_key_to_specimen_ids)
-        return self.image_ids_from_specimens(specimen_keys)
-
-    def image_ids_from_cases(self, case_keys: Iterable[ObjectKey]) -> set[str]:
-        specimen_keys = _related_keys(case_keys, self.case_key_to_specimen_ids)
-        return self.image_ids_from_specimens(specimen_keys)
-
-
-_OBSERVATION_REFS: dict[str, Callable[[_References, Sequence[ObjectKey]], set[str]]] = {
-    _OBSERVATION_IMAGE_REF: _References.image_ids_from_images,
-    _OBSERVATION_SLIDE_REF: _References.image_ids_from_slides,
-    _OBSERVATION_BLOCK_REF: _References.image_ids_from_blocks,
-    _OBSERVATION_SPECIMEN_REF: _References.image_ids_from_specimens,
-    _OBSERVATION_BIOLOGICAL_BEING_REF: _References.image_ids_from_beings,
-    _OBSERVATION_CASE_REF: _References.image_ids_from_cases,
-}
 
 
 def _get_last_modification_time(
@@ -505,6 +190,7 @@ def _get_last_modification_time(
 
 
 _TYPE_OF_DATASET_TAG = "type_of_dataset"
+
 
 # Scope by lower-cased part of 'type_of_dataset' string attribute before the "/".
 _SCOPE_BY_DATASET_TYPE: dict[str, Literal["clinical", "non_clinical"]] = {
@@ -909,7 +595,7 @@ def _extract_sample_specimen_fields(
             specimen_type=_extract_code_attribute_value(
                 xml, "specimen_type", SNOMED_ONTOLOGY_ID, logs
             ),
-            age_at_extraction=_extract_age_at_extraction_range(xml, logs),
+            age_at_extraction=_extract_age_at_extraction(xml, logs),
         ),
         logs=logs,
     )
@@ -993,64 +679,6 @@ def _extract_staining_fields(
     return _Extracted(ids=_object_ids(xml), fields=fields, logs=logs)
 
 
-_XSI_NIL = "{http://www.w3.org/2001/XMLSchema-instance}nil"
-
-
-def _is_nil(elem: Any) -> bool:
-    return elem.get(_XSI_NIL) == "true"
-
-
-def _code_attribute_value(value: Element) -> BigpictureCodeAttributeValue:
-    return BigpictureCodeAttributeValue(
-        code=value.findtext("CODE"),
-        scheme=value.findtext("SCHEME"),
-        meaning=value.findtext("MEANING"),
-        scheme_version=value.findtext("SCHEME_VERSION"),
-    )
-
-
-def _extract_code_attribute_value(
-    elem: Element,
-    field_id: str,
-    ontology_id: str | None,
-    logs: list[ExtractLog],
-    *,
-    is_attributes: bool = True,
-) -> BigpictureCodeAttributeValue | None:
-    """Extract the CODE_ATTRIBUTE value, requiring its scheme to match the provided ontology."""
-    xml_tag = _xml_tag(field_id)
-    if is_attributes:
-        values = elem.xpath(f"ATTRIBUTES/CODE_ATTRIBUTE[TAG='{xml_tag}']/VALUE")
-    else:
-        values = elem.xpath(f"CODE_ATTRIBUTE[TAG='{xml_tag}']/VALUE")
-
-    if not values or _is_nil(values[0]):
-        return None
-
-    return _require_scheme(
-        _code_attribute_value(values[0]), ontology_id, field_id, logs
-    )
-
-
-def _extract_code_attribute_values(
-    elem: Element,
-    field_id: str,
-    ontology_id: str | None,
-    logs: list[ExtractLog],
-    *,
-    is_attributes: bool = True,
-) -> frozenset[BigpictureCodeAttributeValue]:
-    """Extract CODE_ATTRIBUTE values, requiring their scheme to match the provided ontology."""
-    xml_tag = _xml_tag(field_id)
-    if is_attributes:
-        values = elem.xpath(f"ATTRIBUTES/CODE_ATTRIBUTE[TAG='{xml_tag}']/VALUE")
-    else:
-        values = elem.xpath(f"CODE_ATTRIBUTE[TAG='{xml_tag}']/VALUE")
-
-    codes = (_code_attribute_value(v) for v in values if not _is_nil(v))
-    return _filter_by_scheme(codes, ontology_id, field_id, logs)
-
-
 def _extract_diagnoses(
     statement: Element, logs: list[ExtractLog]
 ) -> set[BigpictureCodeAttributeValue]:
@@ -1059,7 +687,7 @@ def _extract_diagnoses(
         for v in statement.xpath("CODE_ATTRIBUTES/CODE_ATTRIBUTE/VALUE")
         if not _is_nil(v)
     }
-    return set(_filter_by_scheme(codes, SNOMED_ONTOLOGY_ID, "diagnosis", logs))
+    return set(_filter_values_by_scheme(codes, SNOMED_ONTOLOGY_ID, "diagnosis", logs))
 
 
 def _extract_finding(
@@ -1083,91 +711,3 @@ def _extract_finding(
     if not any(value is not None for value in values.values()):
         return None
     return BigpictureFindingFields(**values, qualifiers=qualifiers)
-
-
-def _extract_anatomical_sites(
-    elem: Element, logs: list[ExtractLog]
-) -> frozenset[BigpictureCodeAttributeValue]:
-    direct = _extract_code_attribute_values(
-        elem, "anatomical_site", SNOMED_ONTOLOGY_ID, logs
-    )
-
-    set_nodes = elem.xpath("ATTRIBUTES/SET_ATTRIBUTE[TAG='anatomical_site_list']/VALUE")
-    from_set: frozenset[BigpictureCodeAttributeValue] = frozenset()
-    if set_nodes:
-        from_set = _extract_code_attribute_values(
-            set_nodes[0],
-            "anatomical_site",
-            SNOMED_ONTOLOGY_ID,
-            logs,
-            is_attributes=False,
-        )
-
-    return direct | from_set
-
-
-def _extract_fixation_type(
-    xml: Element, logs: list[ExtractLog]
-) -> tuple[BigpictureCodeAttributeValue | None, str | None]:
-    # If schema is "Other" then no ontology is used. Otherwise, require Snomed.
-    value = _extract_code_attribute_value(xml, "fixation_type", None, logs)
-
-    if value and value.scheme == _UNCODED_SCHEME:
-        return None, value.meaning or value.code
-
-    return _require_scheme(value, SNOMED_ONTOLOGY_ID, "fixation_type", logs), None
-
-
-def _extract_string_attribute_value(
-    elem: Element, tag: str, *, is_attributes=True
-) -> str | None:
-    if is_attributes:
-        values = elem.xpath(f"ATTRIBUTES/STRING_ATTRIBUTE[TAG='{tag}']/VALUE/text()")
-    else:
-        values = elem.xpath(f"STRING_ATTRIBUTE[TAG='{tag}']/VALUE/text()")
-
-    if not values:
-        return None
-
-    return values[0]
-
-
-def _add_iso8601_durations(start: str, length: str) -> str:
-    """Add an ISO-8601 duration ``length`` to ``start`` and return the ISO-8601 result."""
-
-    result = isodate.parse_duration(start) + isodate.parse_duration(length)
-
-    if isinstance(result, isodate.Duration):
-        # isodate does not normalise month overflow; do it explicitly.
-        extra_years, months = divmod(int(result.months), 12)
-        years = int(result.years) + extra_years
-        result = isodate.Duration(years=years, months=months) + result.tdelta
-
-    return isodate.duration_isoformat(result)
-
-
-def _extract_age_at_extraction_range(
-    elem: Element, logs: list[ExtractLog]
-) -> tuple[str, str] | None:
-    nodes = elem.xpath("ATTRIBUTES/SET_ATTRIBUTE[TAG/text()='age_at_extraction']/VALUE")
-    if not nodes:
-        return None
-
-    node = nodes[0]
-    start_value = node.xpath(
-        "STRING_ATTRIBUTE[TAG/text()='interval_start']/VALUE/text()"
-    )
-    length_value = node.xpath(
-        "STRING_ATTRIBUTE[TAG/text()='interval_length']/VALUE/text()"
-    )
-    if not start_value or not length_value:
-        return None
-
-    start = start_value[0]
-    try:
-        end = _add_iso8601_durations(start, length_value[0])
-    except isodate.ISO8601Error:
-        logs.append(invalid_duration_log("age_at_extraction", (start, length_value[0])))
-        return None
-
-    return start, end

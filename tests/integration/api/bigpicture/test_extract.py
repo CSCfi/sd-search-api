@@ -10,7 +10,14 @@ from crypt4gh.keys.c4gh import generate as c4gh_generate
 from crypt4gh.lib import encrypt as c4gh_encrypt
 from nacl.public import PrivateKey
 
+from search_api.api.beacon.models import BeaconFilteringTerm
 from search_api.api.bigpicture.domain import BP_DOMAIN
+from search_api.services.ontology.service import (
+    OntologyService,
+    get_ontology_service,
+    register_ontology_service,
+)
+from search_api.services.ontology.term_cache import OntologyTermCache
 from search_api.api.bigpicture.extract import extract_documents
 from search_api.database.document import DOCUMENT_TABLE, get_document
 from search_api.database.repository import get_connection
@@ -49,18 +56,52 @@ _EXPECTED_DOCUMENTS = {
 }
 
 
-def _mock_term_caches() -> dict:
+def _mock_term_caches() -> dict[str, OntologyTermCache]:
     """One mock term cache per ontology.
 
-    Reports every concept id as known.
+    Reports every concept id as known, and no term as cached, so a value that is not
+    a concept id is resolved against the ontology rather than out of the cache.
     """
     return {
         ontology_id: MagicMock(
+            spec=OntologyTermCache,
             load=AsyncMock(),
             cache_preferred_terms=AsyncMock(return_value=set()),
+            get_concept_ids_by_term=AsyncMock(return_value=set()),
         )
         for ontology_id in BP_DOMAIN.ontology_ids
     }
+
+
+class _MockOntologyService(OntologyService):
+    """An ontology that accepts every concept id and resolves nothing."""
+
+    def is_concept_id(self, value: str) -> bool:
+        return True
+
+    async def get_preferred_terms(self, concept_ids: set[str]) -> dict[str, str]:
+        return {}
+
+    async def _find_concept_ids(
+        self, value: str, filtering_term: BeaconFilteringTerm
+    ) -> set[str]:
+        return set()
+
+    async def _find_descendant_ids(self, concept_ids: set[str]) -> set[str]:
+        return set()
+
+
+@pytest.fixture(autouse=True)
+def mock_ontologies():
+    originals = {
+        ontology_id: get_ontology_service(ontology_id)
+        for ontology_id in BP_DOMAIN.ontology_ids
+    }
+    for ontology_id in originals:
+        register_ontology_service(ontology_id, _MockOntologyService())
+    yield
+    for ontology_id, service in originals.items():
+        register_ontology_service(ontology_id, service)
 
 
 @pytest_asyncio.fixture(autouse=True)

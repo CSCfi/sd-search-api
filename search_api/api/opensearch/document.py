@@ -2,7 +2,6 @@ from typing import Any
 
 from search_api.api.opensearch.models import (
     ExtractedDocument,
-    OpenSearchFieldType,
     OpenSearchFieldValue,
     OpenSearchGroup,
 )
@@ -11,12 +10,17 @@ from search_api.api.qualifiers import QUALIFIERS_FIELD, encode_qualifier_value
 from search_api.api.scopes import SCOPE_FIELD
 
 
-def _encode_value(field_type: OpenSearchFieldType, value: Any) -> Any:
+def _encode_value(field_value: OpenSearchFieldValue) -> Any:
+    field_type = field_value.field.type
+    value: Any = field_value.value
     if field_type == "iso8601Range":
         return {
             "gte": iso8601_duration_to_days(value[0]),
             "lte": iso8601_duration_to_days(value[1]),
         }
+    if field_type in ("ontology", "ontologyOrValue"):
+        # The concept id the load resolved the ontology value to.
+        return field_value.resolved_concept_id or value[0]
     return value
 
 
@@ -33,7 +37,15 @@ def _add_field_value(target: dict[str, Any], value: OpenSearchFieldValue) -> Non
 
         anatomical_site=80248007,368209003  ->  {"anatomical_site": ["80248007", "368209003"]}
     """
-    encoded = _encode_value(value.field.type, value.value)
+    encoded = _encode_value(value)
+    if encoded is None:
+        # Only an ontology value encodes to None: no ontology the field accepts coded
+        # it, and the load's fallback to its meaning named no concept either, so there
+        # is no concept id to index. Writing it would put a null in a keyword field —
+        # or [null] in a multivalued one. A load has already dropped such a value
+        # (LoadService._drop_unresolved_ontology_values); this is what keeps the rule
+        # for callers that build a document without loading it.
+        return
     if value.field.multivalued:
         target.setdefault(value.field.id, []).append(encoded)
     else:
@@ -79,8 +91,11 @@ def build_document(document: ExtractedDocument) -> dict[str, Any]:
     for value in document.values:
         _add_field_value(result, value)
 
-    # Nested groups.
+    # A nested group is skipped if it holds nothing but its qualifiers,
+    # which _build_group_item always write.
     for group in document.groups:
-        result.setdefault(group.group, []).append(_build_group_item(group))
+        item = _build_group_item(group)
+        if any(key != QUALIFIERS_FIELD for key in item):
+            result.setdefault(group.group, []).append(item)
 
     return result

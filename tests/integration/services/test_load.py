@@ -8,6 +8,7 @@ import pytest_asyncio
 from search_api.api.beacon.models import BeaconFilteringOntology
 from search_api.api.opensearch.models import (
     ExtractedDocument,
+    OpenSearchFieldType,
     OpenSearchBeaconFilteringTerm,
     OpenSearchFieldValue,
 )
@@ -33,8 +34,12 @@ from search_api.services.ontology.term_cache import create_term_caches
 os.environ.setdefault("POSTGRES_DB", os.environ["BP_POSTGRES_DB"])
 os.environ.setdefault("POSTGRES_PORT", os.environ["BP_POSTGRES_PORT"])
 
+# The one ontology field these tests load a document for.
+_FIELD_ID = "test_field"
+
 _CONCEPT_ID = "C1"
 _PREFERRED_TERM = "P1"
+_SHARED_SYNONYM = "shared"
 
 # A concept the ontology has retired, and the active one replacing it. Retiring a
 # concept does not remove it — SNOMED CT resolves a retired id to its preferred term
@@ -53,11 +58,14 @@ class _Source(OntologySource):
             sha256="test",
             concepts=[
                 CachedOntologyConcept(
-                    concept_id=_CONCEPT_ID, preferred_term=_PREFERRED_TERM
+                    concept_id=_CONCEPT_ID,
+                    preferred_term=_PREFERRED_TERM,
+                    synonyms=frozenset({_SHARED_SYNONYM}),
                 ),
                 CachedOntologyConcept(
                     concept_id=_RETIRED_CONCEPT_ID,
                     preferred_term=_RETIRED_PREFERRED_TERM,
+                    synonyms=frozenset({_SHARED_SYNONYM}),
                 ),
             ],
         )
@@ -111,10 +119,12 @@ async def document_id():
         )
 
 
-def _ontology_field(ontology_id: str) -> OpenSearchBeaconFilteringTerm:
+def _ontology_field(
+    ontology_id: str, field_type: OpenSearchFieldType = "ontology"
+) -> OpenSearchBeaconFilteringTerm:
     return OpenSearchBeaconFilteringTerm(
-        id="test_field",
-        type="ontology",
+        id=_FIELD_ID,
+        type=field_type,
         scopes=[],
         label="Test field",
         description="A field resolving against the test ontology.",
@@ -127,7 +137,7 @@ async def test_load_caches_preferred_term(ontology_id, document_id):
     field = _ontology_field(ontology_id)
     document = ExtractedDocument(
         id=document_id,
-        values=[OpenSearchFieldValue(field=field, value=_CONCEPT_ID)],
+        values=[OpenSearchFieldValue(field=field, value=(_CONCEPT_ID, None))],
     )
     service = LoadService(create_term_caches({ontology_id}), [field])
 
@@ -140,13 +150,19 @@ async def test_load_caches_preferred_term(ontology_id, document_id):
 
 
 async def _load_document_with_ontology_value(
-    ontology_id: str, document_id: str, value: str, replace_concepts: bool = True
+    ontology_id: str,
+    document_id: str,
+    concept_id: str,
+    meaning: str | None = None,
+    *,
+    field_type: OpenSearchFieldType = "ontology",
+    replace_concepts: bool = True,
 ) -> None:
-    """Load a document whose one ontology field carries this value."""
-    field = _ontology_field(ontology_id)
+    """Load a document whose one ontology field has the concept id and meaning."""
+    field = _ontology_field(ontology_id, field_type)
     document = ExtractedDocument(
         id=document_id,
-        values=[OpenSearchFieldValue(field=field, value=value)],
+        values=[OpenSearchFieldValue(field=field, value=(concept_id, meaning))],
     )
     await LoadService(
         create_term_caches({ontology_id}),
@@ -162,15 +178,21 @@ async def test_load_logs_no_concept_id(ontology_id, document_id):
     await _load_document_with_ontology_value(ontology_id, document_id, unknown_value)
 
     async with get_cursor() as cur:
+        assert _FIELD_ID not in await get_document(cur, document_id)
         logs = await read_document_logs(cur, document_id)
-    assert len(logs) == 1
-    entry = logs[0]
-    assert entry.severity == "ERROR"
-    assert entry.field_id == "test_field"
-    assert entry.message == (
-        f"Value '{unknown_value}' is no concept id of ontology '{ontology_id}'."
-    )
-    assert entry.created_at is not None
+    assert [(log.severity, log.message) for log in logs] == [
+        (
+            "WARNING",
+            f"The provided concept id '{unknown_value}' is invalid for "
+            f"field '{_FIELD_ID}' of ontology '{ontology_id}'.",
+        ),
+        (
+            "ERROR",
+            f"Concept id could not be resolved for ontology field '{_FIELD_ID}'.",
+        ),
+    ]
+    assert all(log.field_id == _FIELD_ID for log in logs)
+    assert all(log.created_at is not None for log in logs)
 
 
 @pytest.mark.asyncio
@@ -198,7 +220,7 @@ async def test_load_logs_nothing_for_valid_concept_id(ontology_id, document_id):
     field = _ontology_field(ontology_id)
     document = ExtractedDocument(
         id=document_id,
-        values=[OpenSearchFieldValue(field=field, value=_CONCEPT_ID)],
+        values=[OpenSearchFieldValue(field=field, value=(_CONCEPT_ID, None))],
     )
     service = LoadService(create_term_caches({ontology_id}), [field])
 
@@ -209,12 +231,8 @@ async def test_load_logs_nothing_for_valid_concept_id(ontology_id, document_id):
 
 
 @pytest.mark.asyncio
-async def test_load_substitutes_a_replaced_concept(ontology_id, document_id):
-    """A retired concept is stored as its replacement, and the swap is logged.
-
-    The document is stored with the replacement, so its facet entry and any subtree
-    search reach it, while the log keeps what the source said.
-    """
+async def test_replace_concept_true(ontology_id, document_id):
+    """Test replace_concepts=True."""
     register_ontology_service(
         ontology_id,
         _ReplacingService(OntologyCacheStore(ontology_id), _Source()),
@@ -225,14 +243,14 @@ async def test_load_substitutes_a_replaced_concept(ontology_id, document_id):
     )
 
     async with get_cursor() as cur:
-        payload = await get_document(cur, document_id)
+        document = await get_document(cur, document_id)
         logs = await read_document_logs(cur, document_id)
-    assert payload["test_field"] == _REPLACEMENT_CONCEPT_ID
+    assert document[_FIELD_ID] == _REPLACEMENT_CONCEPT_ID
     assert [(log.severity, log.message) for log in logs] == [
         (
             "WARNING",
-            f"Value '{_RETIRED_CONCEPT_ID}' is replaced by "
-            f"'{_REPLACEMENT_CONCEPT_ID}' in ontology '{ontology_id}'.",
+            f"Provided concept id '{_RETIRED_CONCEPT_ID}' was replaced by "
+            f"'{_REPLACEMENT_CONCEPT_ID}' for field '{_FIELD_ID}'.",
         )
     ]
     # The replacement is what a preferred term is cached for.
@@ -242,16 +260,8 @@ async def test_load_substitutes_a_replaced_concept(ontology_id, document_id):
 
 
 @pytest.mark.asyncio
-async def test_load_keeps_a_replaced_concept_when_substitution_is_off(
-    ontology_id, document_id
-):
-    """``replace_concepts=False`` indexes what the source said, unchanged.
-
-    The ontology still names a replacement, so only the flag stands between this
-    and the substitution the previous test asserts. The retired concept keeps its
-    own preferred term, so the value is still named in the field's values and
-    nothing is logged against the document.
-    """
+async def test_replace_concept_false(ontology_id, document_id):
+    """Test replace_concepts=False."""
     register_ontology_service(
         ontology_id,
         _ReplacingService(OntologyCacheStore(ontology_id), _Source()),
@@ -262,12 +272,106 @@ async def test_load_keeps_a_replaced_concept_when_substitution_is_off(
     )
 
     async with get_cursor() as cur:
-        payload = await get_document(cur, document_id)
+        document = await get_document(cur, document_id)
         logs = await read_document_logs(cur, document_id)
-    assert payload["test_field"] == _RETIRED_CONCEPT_ID
+    assert document[_FIELD_ID] == _RETIRED_CONCEPT_ID
     assert logs == []
     # The retired concept is what a preferred term is cached for, so the value is
     # named in the field's values rather than missing from them.
     assert {
         (term.concept_id, term.preferred_term) for term in await read_terms(ontology_id)
     } == {(_RETIRED_CONCEPT_ID, _RETIRED_PREFERRED_TERM)}
+
+
+@pytest.mark.asyncio
+async def test_resolve_concept_id_from_meaning(ontology_id, document_id):
+    """Test invalid concept id with a meaning that resolves to a valid concept id."""
+    await _load_document_with_ontology_value(
+        ontology_id, document_id, "C404", _PREFERRED_TERM.lower()
+    )
+
+    async with get_cursor() as cur:
+        document = await get_document(cur, document_id)
+        logs = await read_document_logs(cur, document_id)
+    assert document[_FIELD_ID] == _CONCEPT_ID
+    assert [(log.severity, log.message) for log in logs] == [
+        (
+            "WARNING",
+            f"The provided concept id 'C404' is invalid for field '{_FIELD_ID}' "
+            f"of ontology '{ontology_id}'.",
+        ),
+        (
+            "WARNING",
+            f"Concept id '{_CONCEPT_ID}' was resolved from the provided textual "
+            f"concept value '{_PREFERRED_TERM.lower()}' for field '{_FIELD_ID}'.",
+        ),
+    ]
+    # Test cached preferred term.
+    assert {
+        (term.concept_id, term.preferred_term) for term in await read_terms(ontology_id)
+    } == {(_CONCEPT_ID, _PREFERRED_TERM)}
+
+
+@pytest.mark.asyncio
+async def test_resolve_multiple_concepts_id_from_meaning(ontology_id, document_id):
+    """Test invalid concept id with a meaning that resolves to multiple valid concept id."""
+    await _load_document_with_ontology_value(
+        ontology_id, document_id, "C404", _SHARED_SYNONYM
+    )
+
+    async with get_cursor() as cur:
+        document = await get_document(cur, document_id)
+        logs = await read_document_logs(cur, document_id)
+    assert _FIELD_ID not in document
+    assert [(log.severity, log.message) for log in logs] == [
+        (
+            "WARNING",
+            f"The provided concept id 'C404' is invalid for field '{_FIELD_ID}' "
+            f"of ontology '{ontology_id}'.",
+        ),
+        (
+            "WARNING",
+            f"Textual concept value '{_SHARED_SYNONYM}' resolves to several concept "
+            f"ids for field '{_FIELD_ID}': {_CONCEPT_ID}, {_RETIRED_CONCEPT_ID}.",
+        ),
+        (
+            "ERROR",
+            f"Concept id could not be resolved for ontology field '{_FIELD_ID}'.",
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_resolve_retired_concept_id_from_meaning(ontology_id, document_id):
+    """Test invalid concept id with a meaning that resolves to retired concept id."""
+    register_ontology_service(
+        ontology_id,
+        _ReplacingService(OntologyCacheStore(ontology_id), _Source()),
+    )
+
+    await _load_document_with_ontology_value(
+        ontology_id, document_id, "C404", _RETIRED_PREFERRED_TERM
+    )
+
+    async with get_cursor() as cur:
+        document = await get_document(cur, document_id)
+        logs = await read_document_logs(cur, document_id)
+    assert document[_FIELD_ID] == _REPLACEMENT_CONCEPT_ID
+    assert [(log.severity, log.message) for log in logs] == [
+        (
+            "WARNING",
+            f"The provided concept id 'C404' is invalid for field '{_FIELD_ID}' "
+            f"of ontology '{ontology_id}'.",
+        ),
+        (
+            "WARNING",
+            f"Concept id '{_RETIRED_CONCEPT_ID}' was resolved from the provided "
+            f"textual concept value '{_RETIRED_PREFERRED_TERM}' "
+            f"for field '{_FIELD_ID}'.",
+        ),
+        (
+            "WARNING",
+            f"Provided concept id '{_RETIRED_CONCEPT_ID}' was replaced by "
+            f"'{_REPLACEMENT_CONCEPT_ID}' for field '{_FIELD_ID}'.",
+        ),
+    ]

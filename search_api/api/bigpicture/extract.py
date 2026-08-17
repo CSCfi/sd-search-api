@@ -30,6 +30,9 @@ from search_api.utils.xml import parse_xml, validate_xml, get_xml_value
 # Parsing models for Bigpicture XML, converted by to_opensearch_values.
 
 
+_UNCODED_SCHEME = "Other"
+
+
 class BigpictureCodeAttributeValue(BaseModel):
     """Bigpicture code attribute value."""
 
@@ -185,11 +188,16 @@ def to_opensearch_values(
                 f"Field {field_name!r} is not registered in BP_DOCUMENT_FIELDS"
             )
         if isinstance(value, BigpictureCodeAttributeValue):
-            return [OpenSearchFieldValue(field=field, value=value.code)]
-        if isinstance(value, Set):
-            # A multivalued field.
             return [
-                OpenSearchFieldValue(field=field, value=code.code) for code in value
+                OpenSearchFieldValue(field=field, value=(value.code, value.meaning))
+            ]
+        if isinstance(value, Set) and all(
+            isinstance(code, BigpictureCodeAttributeValue) for code in value
+        ):
+            # A multivalued field of code attributes.
+            return [
+                OpenSearchFieldValue(field=field, value=(code.code, code.meaning))
+                for code in value
             ]
         if isinstance(value, (tuple, int, str)):
             return [OpenSearchFieldValue(field=field, value=value)]
@@ -265,6 +273,7 @@ def _require_scheme(
         or _matches_scheme(value.scheme, ontology_id)
     ):
         return value
+    # TODO: change to error and log to database
     logging.warning(
         "Ignored code %r with scheme %r; expected %r.",
         value.code,
@@ -277,21 +286,15 @@ def _require_scheme(
 def _filter_by_scheme(
     values: Iterable[BigpictureCodeAttributeValue], ontology_id: str | None
 ) -> frozenset[BigpictureCodeAttributeValue]:
-    """Return the codes values if the schema matches the required ontology."""
+    """Return the code values for mathing ontology schemas."""
     values = frozenset(values)
     if ontology_id is None:
         return values
-    matched = frozenset(
-        value for value in values if _matches_scheme(value.scheme, ontology_id)
+    return frozenset(
+        required
+        for value in values
+        if (required := _require_scheme(value, ontology_id)) is not None
     )
-    for value in values - matched:
-        logging.warning(
-            "Ignored code %r with scheme %r; expected %r.",
-            value.code,
-            value.scheme,
-            ontology_id,
-        )
-    return matched
 
 
 _OBSERVATION_IMAGE_REF = "IMAGE_REF"
@@ -1051,7 +1054,7 @@ def _extract_fixation_type(
     # If schema is "Other" then no ontology is used. Otherwise, require Snomed.
     value = _extract_code_attribute_value(xml, "fixation_type", None)
 
-    if value and value.scheme == "Other":
+    if value and value.scheme == _UNCODED_SCHEME:
         return None, value.meaning or value.code
 
     return _require_scheme(value, SNOMED_ONTOLOGY_ID), None

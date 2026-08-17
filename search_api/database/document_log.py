@@ -1,13 +1,29 @@
 """The document_log table."""
 
+import logging
+
 from psycopg import AsyncCursor
 
-from search_api.database.models import StoredDocumentLog
+from search_api.database.models import LogSeverity, StoredDocumentLog
+
+logger = logging.getLogger(__name__)
 
 DOCUMENT_LOG_TABLE = "document_log"
 
+_LOG_LEVELS: dict[LogSeverity, int] = {
+    "ERROR": logging.ERROR,
+    "WARNING": logging.WARNING,
+}
 
-async def insert_document_log(cur: AsyncCursor, log: StoredDocumentLog) -> None:
+
+async def write_document_log(cur: AsyncCursor, log: StoredDocumentLog) -> None:
+    logger.log(
+        _LOG_LEVELS[log.severity],
+        "%s (document %s, field %s)",
+        log.message,
+        log.document_id,
+        log.field_id,
+    )
     await cur.execute(
         f"INSERT INTO {DOCUMENT_LOG_TABLE} (document_id, field_id, severity, message) "
         f"VALUES (%(document_id)s, %(field_id)s, %(severity)s, %(message)s)",

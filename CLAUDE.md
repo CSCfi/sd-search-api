@@ -72,6 +72,7 @@ search_api/
 │       └── schemas/    # XSDs used to validate the ingested XML
 ├── services/           # generic services
 │   ├── ontology/       # service.py registrations.py snomed.py send.py term_cache.py
+│   │                   # values.py — a document's coded values, made into concept ids
 │   │   └── cache/      # one whole small ontology in memory:
 │   │                   # models.py source.py store.py service.py
 │   ├── auth.py session.py
@@ -209,6 +210,11 @@ retiring a concept strips its relationships: a retired concept descends from not
 query reaches a document citing one, whatever `activeFilter` is set to (measured: an ECL descendant
 count is identical either way).
 
+A value whose code is no concept id is resolved through its meaning before the document is stored (see
+*Ontology providers*): one concept is a `WARNING` naming the meaning and the id indexed for it, while
+several is an `ERROR` naming the candidates, and none — or no meaning at all — an `ERROR` saying which.
+After an `ERROR` a strict `ontology` field drops the value, so the row is the only record of it.
+
 What it currently records: every value of a strict `ontology` field that reached no preferred term.
 Such a value **is** indexed, but `/filtering_terms/{field_id}/values` builds its response from the
 resolved terms, so the value is missing from the facet and nothing can search for it by name — the
@@ -253,6 +259,14 @@ and dropped. `.c4gh`-encrypted XML is decrypted on the fly (`utils/crypt.py`).
 The parsing models are also in `extract.py`; `BigpictureFields` is the per-image root, holding the
 ids, `scope`, the dataset fields, and the `specimen`, `staining`, `diagnosis` and `finding` sets. `BigpictureSpecimenFields` flattens the biological being, specimen and block
 fields into one model (see the grouping rationale in `fields.yaml`).
+
+Every `CODE_ATTRIBUTE` contributes the pair `(CODE, MEANING)` as its value, the meaning being what the
+load falls back to when the code is no concept id (see *Ontology providers*). `_require_scheme` /
+`_filter_by_scheme` drop a value whose scheme is not the field's ontology, warning as they do, since its
+code is no concept id of the one required however much it may look like one. A scheme of `Other`
+(`_UNCODED_SCHEME`) declares the value uncoded and is read by `_extract_fixation_type` alone, which
+routes such a value's text to `fixation_type_other` — an `ontologyOrValue` field has that field to put it
+in.
 
 `scope` is not in `fields.yaml` — it is `ExtractedDocument.scope`, produced by `_extract_scope`.
 
@@ -445,7 +459,7 @@ provider only implements two hooks: `_find_concept_ids(value, filtering_term)` (
 its concept ID(s), possibly more than one if a term isn't unique) and
 `_find_descendant_ids(concept_ids)` (a set of concept IDs -> all of their descendants).
 
-Each value is resolved by `_resolve_concept_ids`, cheapest source first:
+Each value is resolved by `resolve_concept_ids`, cheapest source first:
 
 1. **A concept id is taken as given** — an id absent from the ontology is absent from the index
    too, so looking it up would cost a round trip without changing the result.
@@ -455,7 +469,32 @@ Each value is resolved by `_resolve_concept_ids`, cheapest source first:
 3. Otherwise the provider's `_find_concept_ids` hook consults the ontology itself.
 
 Unresolved values are only kept in the prepared filter for `ontologyOrValue` fields (which have a
-free-text fallback field downstream); for strict `ontology` fields they're dropped. A registry maps
+free-text fallback field downstream); for strict `ontology` fields they're dropped.
+
+**A load resolves its values through the same cascade** (`services/ontology/values.py`,
+`resolve_document`),
+so a value indexed and a value searched for reach the same concept. The code the source coded is tried
+first: it is kept as it is when it is a concept id, and only when it is not does the **meaning**
+carried beside it get resolved — the term is then the only thing left that can name the concept. That
+the code was unusable is a `WARNING` when the meaning names one concept, and an `ERROR` when nothing
+does: several matches are a judgement rather than a resolution, and a value with no meaning has
+nothing to fall back to. This runs before the retired-concept substitution, so a meaning naming a
+retired concept is resolved and then replaced.
+
+An ontology value is therefore the pair `(concept id, meaning)`, which `_VALUE_TYPES` requires of the
+`ontology` and `ontologyOrValue` types just as it requires a pair of `iso8601Range`. The concept id is
+`None` when no ontology the field accepts coded the value, leaving the meaning all there is to resolve.
+`OpenSearchFieldValue` is **frozen**, so nothing rewrites what a source said: resolving records the
+concept id reached on a copy's `resolved_concept_id`, and `_encode_value` indexes that.
+
+**A value that resolves to no concept id is dropped, whichever of the two types its field is.** Both
+hold concept ids, so an unresolvable one is no more indexable in one than in the other, and a term left
+in either would be searchable by nothing and would name nothing in the field's values; the
+`document_log` rows are what keep what the source said. The difference between the types is elsewhere
+entirely: an `ontologyOrValue` term has a second field of its own (`<id>_other`), which extraction
+fills with the free text the source gave — `values.py` never touches it. `SnomedService` will not send Snowstorm a term under
+`_MIN_SEARCH_TERM_LENGTH` (3) characters, which it answers with a `400`; `_fetch_concepts` is cached
+for 30 days like the rest, so a load searches once per distinct term rather than once per document. A registry maps
 an **ontology id** (e.g. `SCTID`) to its provider via `register_ontology_service` /
 `get_ontology_service`, keeping `ontology.py` unaware of concrete providers. A filtering term
 selects its provider by `ontology.id`.

@@ -159,3 +159,13 @@ async def test_describes_false_for_a_partial_term():
 @pytest.mark.asyncio
 async def test_describes_false_for_an_unrelated_value():
     assert await SnomedService._describes("337915000", "zzz nonsense") is False
+
+
+@pytest.mark.requires_snowstorm
+@pytest.mark.asyncio
+async def test_find_concept_short_term():
+    service = SnomedService()
+
+    # A term under three characters resolves to nothing.
+    assert await service.find_concept("5", ecl=None) is None
+    assert await service.find_concept("ab", ecl=None) is None

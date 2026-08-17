@@ -23,7 +23,7 @@ from search_api.services.load import LoadService
 from search_api.database.document import DOCUMENT_TABLE, get_document
 from search_api.database.document_log import (
     DOCUMENT_LOG_TABLE,
-    insert_document_log,
+    write_document_log,
     read_document_logs,
 )
 from search_api.database.models import StoredDocumentLog
@@ -385,7 +385,7 @@ async def _store_sentinel_log() -> None:
     """Log a row for the sentinel document, to check later if it exists."""
     async with get_connection() as conn:
         async with conn.cursor() as cur:
-            await insert_document_log(
+            await write_document_log(
                 cur,
                 StoredDocumentLog(
                     document_id=_SENTINEL_DOCUMENT_ID,

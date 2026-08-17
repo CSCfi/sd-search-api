@@ -4,7 +4,6 @@ import logging
 from collections.abc import Iterator, Sequence
 
 from psycopg import AsyncCursor
-from pydantic import BaseModel, Field
 
 from search_api.api.beacon.models import (
     BeaconFilteringQualifier,
@@ -12,89 +11,20 @@ from search_api.api.beacon.models import (
     BeaconFilteringTerm,
 )
 from search_api.api.opensearch.document import build_document
-from search_api.api.opensearch.models import ExtractedDocument, OpenSearchFieldValue
+from search_api.api.opensearch.models import ExtractedDocument
 from search_api.api.qualifiers import validate_requested_qualifiers
 from search_api.api.scopes import validate_document_scope
 from search_api.database.document import get_modified_at, upsert_document
-from search_api.database.document_log import insert_document_log
-from search_api.database.models import LogSeverity, StoredDocumentLog
 from search_api.database.repository import get_cursor
-from search_api.services.ontology.service import (
-    OntologyService,
-    get_ontology_id_by_field,
-    get_ontology_service,
-)
 from search_api.exceptions import UserException
 from search_api.services.ontology.term_cache import OntologyTermCache
+from search_api.services.ontology.values import (
+    cache_concept_terms,
+    get_ontology_bindings,
+    resolve_concepts,
+)
 
 logger = logging.getLogger(__name__)
-
-# The logging levels in the document_log table.
-_LOG_LEVELS: dict[str, int] = {
-    "ERROR": logging.ERROR,
-    "WARNING": logging.WARNING,
-}
-
-
-def ontology_services_by_field(
-    filtering_terms: Sequence[BeaconFilteringTerm],
-) -> dict[str, OntologyService]:
-    """Map each ontology field id to its provider, selected by ``ontology.id``."""
-    return {
-        field_id: get_ontology_service(ontology_id)
-        for field_id, ontology_id in get_ontology_id_by_field(filtering_terms).items()
-    }
-
-
-class OntologyFieldValues(BaseModel):
-    """One ontology field's values, split by if the value passes is_concept_id check."""
-
-    concept_ids: set[str] = Field(default_factory=set)
-    non_concept_ids: set[str] = Field(default_factory=set)
-
-
-def ontology_field_values(
-    values: list[OpenSearchFieldValue],
-    ontology_by_field: dict[str, OntologyService],
-) -> dict[str, OntologyFieldValues]:
-    """Return every ontology field's values, split by if the value passes is_concept_id, grouped by field id."""
-    result: dict[str, OntologyFieldValues] = {}
-    for fv in values:
-        provider = ontology_by_field.get(fv.field.id)
-        if provider is None or not isinstance(fv.value, str):
-            continue
-        split = result.setdefault(fv.field.id, OntologyFieldValues())
-        if provider.is_concept_id(fv.value):
-            split.concept_ids.add(fv.value)
-        else:
-            split.non_concept_ids.add(fv.value)
-    return result
-
-
-async def _store_log_entry(
-    cur: AsyncCursor,
-    document_id: str,
-    field_id: str,
-    severity: LogSeverity,
-    message: str,
-) -> None:
-    """Store a document log entry, and log it at the level matching its severity."""
-    logger.log(
-        _LOG_LEVELS[severity],
-        "%s (document %s, field %s)",
-        message,
-        document_id,
-        field_id,
-    )
-    await insert_document_log(
-        cur,
-        StoredDocumentLog(
-            document_id=document_id,
-            field_id=field_id,
-            severity=severity,
-            message=message,
-        ),
-    )
 
 
 class LoadService:
@@ -109,8 +39,7 @@ class LoadService:
         replace_concepts: bool = True,
     ) -> None:
         self._term_caches = term_caches
-        self._ontology_id_by_field = get_ontology_id_by_field(filtering_terms)
-        self._ontology_by_field = ontology_services_by_field(filtering_terms)
+        self._ontology_bindings = get_ontology_bindings(filtering_terms, term_caches)
         self._filtering_scopes = filtering_scopes
         self._filtering_qualifiers = filtering_qualifiers
         self._replace_concepts = replace_concepts
@@ -144,38 +73,6 @@ class LoadService:
         self.validate_document(doc)
         await upsert_document(cur, doc.id, build_document(doc), doc.modified_at)
 
-    async def _substitute_retired_concepts(
-        self, cur: AsyncCursor, doc: ExtractedDocument
-    ) -> None:
-        """Substitute retired concept id in the document with active ones.
-
-        Does nothing when the deployment turns substitution off
-        (``Domain.replace_concepts``).
-        """
-        if not self._replace_concepts:
-            return
-
-        for value in doc.all_values:
-            ontology = self._ontology_by_field.get(value.field.id)
-            if (
-                ontology is None
-                or not isinstance(value.value, str)
-                or not ontology.is_concept_id(value.value)
-            ):
-                continue
-            replacement = await ontology.replacement_concept_id(value.value)
-            if replacement is None:
-                continue
-            await _store_log_entry(
-                cur,
-                doc.id,
-                value.field.id,
-                "WARNING",
-                f"Value '{value.value}' is replaced by '{replacement}' in "
-                f"ontology '{self._ontology_id_by_field[value.field.id]}'.",
-            )
-            value.value = replacement
-
     async def store_documents(self, docs_iter: Iterator[ExtractedDocument]) -> None:
         """
         Store extracted documents to the database.
@@ -191,7 +88,9 @@ class LoadService:
 
         # The ontologies must be initialised before load to
         # resolve preferred terms for the terms cache.
-        for ontology in set(self._ontology_by_field.values()):
+        for ontology in {
+            binding.ontology for binding in self._ontology_bindings.values()
+        }:
             await ontology.init()
 
         loaded = 0
@@ -211,39 +110,15 @@ class LoadService:
                     skipped += 1
                     continue
 
-                await self._substitute_retired_concepts(cur, doc)
+                # The document's ontology values are resolved to concept
+                # ids before the document is stored. Values that could not
+                # be resolved are logged.
+                await resolve_concepts(
+                    cur, doc, self._ontology_bindings, self._replace_concepts
+                )
                 await self.store_document(cur, doc)
+                await cache_concept_terms(cur, doc, self._ontology_bindings)
                 loaded += 1
                 logger.debug("Loaded document %s.", doc.id)
-
-                for field_id, split in ontology_field_values(
-                    doc.all_values, self._ontology_by_field
-                ).items():
-                    ontology_id = self._ontology_id_by_field[field_id]
-                    unresolved = await self._term_caches[
-                        ontology_id
-                    ].cache_preferred_terms(
-                        field_id, split.concept_ids, self._ontology_by_field[field_id]
-                    )
-                    # Log error where value failed is_concept_id check.
-                    for value in sorted(split.non_concept_ids):
-                        await _store_log_entry(
-                            cur,
-                            doc.id,
-                            field_id,
-                            "ERROR",
-                            f"Value '{value}' is no concept id of "
-                            f"ontology '{ontology_id}'.",
-                        )
-                    # Log error where concept id was not found in the ontology.
-                    for value in sorted(unresolved):
-                        await _store_log_entry(
-                            cur,
-                            doc.id,
-                            field_id,
-                            "ERROR",
-                            f"Value '{value}' was not found in "
-                            f"ontology '{ontology_id}'.",
-                        )
 
         logger.info("Done — loaded %d, skipped %d document(s).", loaded, skipped)

@@ -836,8 +836,7 @@ def test_get_last_modification_time_no_files():
     fs.info.assert_not_called()
 
 
-# Scope from the policy's type_of_dataset attribute. The two scopes themselves are
-# covered by test_extract_fields and test_extract_fields_non_clinical above.
+# Test scope
 #
 
 
@@ -880,8 +879,8 @@ def test_extract_scope_unsupported_dataset_types(tmp_path, value):
 @pytest.mark.parametrize(
     "old,new",
     [
-        ("type_of_dataset", "other_tag"),  # attribute absent
-        ("Clinical/Anonymized", ""),  # present but empty, so nothing to read
+        ("type_of_dataset", "other_tag"),  # Missing scope attribute
+        ("Clinical/Anonymized", ""),  # Empty scope attribute
     ],
 )
 def test_extract_scope_requires_attribute_and_value(tmp_path, old, new):
@@ -898,3 +897,26 @@ def test_extract_scope_requires_policy_file(tmp_path):
 
     with pytest.raises(ValueError, match="Missing file: .*policy.xml"):
         list(extract_dataset_documents(str(root)))
+
+
+def test_extract_code_attribute_value():
+    xml = """
+    <ROOT>
+        <ATTRIBUTES>
+            <CODE_ATTRIBUTE>
+                <TAG>specimen_type</TAG>
+                <VALUE>
+                    <CODE>5</CODE>
+                    <SCHEME>SNOMED CT</SCHEME>
+                    <MEANING>Tissue specimen</MEANING>
+                </VALUE>
+            </CODE_ATTRIBUTE>
+        </ATTRIBUTES>
+    </ROOT>
+    """
+    value = _extract_code_attribute_value(
+        etree.fromstring(xml), "specimen_type", SNOMED_ONTOLOGY_ID
+    )
+
+    assert value is not None
+    assert (value.code, value.meaning) == ("5", "Tissue specimen")

@@ -47,13 +47,13 @@ class OntologyService(ABC):
     async def _find_descendant_ids(self, concept_ids: set[str]) -> set[str]:
         """Query the ontology for concept id(s)' descendant concept id(s)."""
 
-    async def _resolve_concept_ids(
+    async def resolve_concept_ids(
         self,
         value: str,
         filtering_term: BeaconFilteringTerm,
         term_cache: TermCache | None,
     ) -> set[str]:
-        """Resolve one filter value to concept id(s) in the following order:
+        """Resolve one value to concept id(s) in the following order:
 
         1. If the value is a concept id then it is returned as given
         2. If the value is cached for the field then all associated concept id(s)
@@ -98,7 +98,7 @@ class OntologyService(ABC):
         )
 
         resolved_ids = await asyncio.gather(
-            *(self._resolve_concept_ids(v, filtering_term, term_cache) for v in values)
+            *(self.resolve_concept_ids(v, filtering_term, term_cache) for v in values)
         )
         unresolved = [v for v, ids in zip(values, resolved_ids) if not ids]
 

@@ -101,8 +101,8 @@ _VALUE_TYPES: dict[str, type | tuple[type, ...]] = {
     "text": str,
     "keyword": str,
     "controlledValue": str,
-    "ontology": str,
-    "ontologyOrValue": str,
+    "ontology": tuple,  # (concept id, meaning)
+    "ontologyOrValue": tuple,  # (concept id, meaning)
     "iso8601Range": tuple,
     "integer": int,
 }
@@ -111,8 +111,12 @@ _VALUE_TYPES: dict[str, type | tuple[type, ...]] = {
 class OpenSearchFieldValue(BaseModel):
     """An OpenSearch field value."""
 
+    model_config = ConfigDict(frozen=True)
+
     field: OpenSearchField
-    value: str | int | tuple[str, str]
+    value: str | int | tuple[str | None, str | None]
+    # The concept id an ontology field value was resolved to.
+    resolved_concept_id: str | None = None
 
     @model_validator(mode="after")
     def validate_value(self) -> "OpenSearchFieldValue":
@@ -158,5 +162,4 @@ class ExtractedDocument(BaseModel):
 
     @property
     def all_values(self) -> list[OpenSearchFieldValue]:
-        """Every value in the document, top-level and in a group."""
         return [*self.values, *(v for group in self.groups for v in group.values)]

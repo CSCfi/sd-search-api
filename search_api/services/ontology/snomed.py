@@ -17,6 +17,9 @@ from search_api.services.ontology.service import OntologyService, normalise_term
 _PAGE_SIZE = 1000
 _CACHE_TTL = 60 * 60 * 24 * 30  # 30 days
 _CONCEPT_ID_BATCH_SIZE = 50  # limit conceptIds to keep the request URL within limits
+# Snowstorm answers a shorter term with 400 "Search term must have at least 3
+# characters", so one is not sent rather than raising on the whole load or query.
+_MIN_SEARCH_TERM_LENGTH = 3
 _IMPORT_POLL_INTERVAL = 60.0  # seconds; an import can take hours to complete
 
 
@@ -59,6 +62,7 @@ def is_concept_id(value: str) -> bool:
     return bool(verhoeff.is_valid(value))
 
 
+@cached(ttl=_CACHE_TTL)
 async def _fetch_concepts(
     term: str,
     ecl: str | None,
@@ -80,6 +84,9 @@ async def _fetch_concepts(
     Returns:
         Active concepts matching term.
     """
+    if len(term.strip()) < _MIN_SEARCH_TERM_LENGTH:
+        return []
+
     url = f"{_snowstorm_url()}/{branch}/concepts"
 
     async with _client() as client:

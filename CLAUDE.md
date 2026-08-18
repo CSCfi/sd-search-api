@@ -66,7 +66,9 @@ search_api/
 ├── api/                # HTTP layer + per-deployment packages
 │   ├── {admin,auth,beacon,opensearch}/      # generic routers and services
 │   └── bigpicture/     # everything Bigpicture-specific lives here, nowhere else:
-│       ├── domain.py models.py ai.py opensearch.py extract.py
+│       ├── domain.py models.py ai.py opensearch.py
+│       ├── extract/    # XML in, one document per image out:
+│       │               # models.py refs.py values.py document.py
 │       ├── config/     # hand-edited fields/groups/scopes YAML
 │       ├── index/      # GENERATED OpenSearch mapping (`index generate` writes it)
 │       └── schemas/    # XSDs used to validate the ingested XML
@@ -250,7 +252,27 @@ well-formed id and fails to resolve it later.
 
 The rows are about documents, so `admin.py <deployment> clear` deletes them with the documents.
 
-### XML ingestion (`search_api/api/bigpicture/extract.py`)
+### XML ingestion (`search_api/api/bigpicture/extract/`)
+
+Four modules, each a step of the same job:
+
+- **`models.py`** — the parsing models every other module is built on (`Bigpicture*Fields`,
+  `BigpictureCodeAttributeValue`), an object's `ObjectIds`, and `BigpictureExtractedObject`, which
+  carries one parsed XML object: its `ids`, its `fields`, and the `logs` of what was dropped from it.
+- **`refs.py`** — the ref graph of one dataset. Every `map_ref` writes into a `BigpictureReferences`,
+  whose `image_ids_from_*` methods follow the maps from an object to the images it reaches, which are
+  the documents anything read from it belongs to.
+- **`values.py`** — reading one element's values, and dropping those no ontology accepts.
+- **`document.py`** — the orchestration: read the files, add every object to the images it reaches,
+  and `to_opensearch_values` per document.
+
+`tests/unit/api/bigpicture/extract/` mirrors the four, one test module each.
+
+**A name is public exactly when another module in the package uses it.** `values.py` exposes its seven
+`extract_*` functions and keeps its 21 readers and tables private; `refs.py` exposes
+`BigpictureReferences`, `related_ids`, `object_ids`, `object_keys`, `map_ref` and the observation refs.
+An underscore therefore means *module*-local, and `__init__.py`'s `__all__` is what says which of the
+public names callers outside the package get.
 
 `extract_documents(root, fs, single_dir, c4gh_private_key_file, c4gh_passphrase) → Iterator[ExtractedDocument]`
 walks a directory tree and reads six XML files per dataset:
@@ -277,27 +299,31 @@ Bigpicture models below, then `to_opensearch_values(fields)` converts them to th
 top-level `OpenSearchFieldValue`s and one `OpenSearchGroup` per nested item, keyed by the fields
 declared in `BP_DOCUMENT_FIELDS`. An item contributing no indexable value is not indexed at all. `age_at_extraction`
 is an ISO-8601 duration tuple `(start, end)` — e.g. `("P40Y", "P41Y")` — computed by
-`_add_iso8601_durations` (uses `isodate`, normalises month overflow); an invalid duration is dropped and
+`_extract_iso8601_duration` (uses `isodate`, normalises month overflow); an invalid duration is dropped and
 recorded as an error against the document. `.c4gh`-encrypted XML is decrypted on the fly (`utils/crypt.py`).
 
-The parsing models are also in `extract.py`; `BigpictureFields` is the per-image root, holding the
+The parsing models are in `extract/models.py`; `BigpictureFields` is the per-image root, holding the
 ids, `scope`, the dataset fields, and the `specimen`, `staining`, `diagnosis` and `finding` sets. `BigpictureSpecimenFields` flattens the biological being, specimen and block
 fields into one model (see the grouping rationale in `fields.yaml`).
 
 Every `CODE_ATTRIBUTE` contributes the pair `(CODE, MEANING)` as its value, the meaning being what the
-load falls back to when the code is no concept id (see *Ontology providers*). `_require_scheme` /
-`_filter_by_scheme` drop a value whose scheme is not the field's ontology — recording an error against
-the document, since nothing downstream can see what was dropped — because its code is no concept id of
-the one required however much it may look like one. A scheme of `Other`
-(`_UNCODED_SCHEME`) declares the value uncoded and is read by `_extract_fixation_type` alone, which
-routes such a value's text to `fixation_type_other` — an `ontologyOrValue` field has that field to put it
-in.
+load falls back to when the code is no concept id (see *Ontology providers*).
+`_filter_value_by_scheme` / `_filter_values_by_scheme` drop a value whose scheme is not the field's
+ontology — recording an error against the document, since nothing downstream can see what was dropped
+— because its code is no concept id of the one required however much it may look like one.
 
-`scope` is not in `fields.yaml` — it is `ExtractedDocument.scope`, produced by `_extract_scope`.
+An **`ontologyOrValue`** field takes its coded value in precedence over free text: `<id>_other` is
+filled only when no code was read, since free text is what a source gives for a value it has no code
+for, rather than a label for one it has. `_extract_ontology_or_value` is that rule for
+`staining_procedure` and `staining_substance`; `_extract_fixation_type` reaches the same end by its own
+route, because a scheme of `Other` (`_UNCODED_SCHEME`) declares the coded value itself uncoded and
+routes its text to `fixation_type_other`.
+
+`scope` is not in `fields.yaml` — it is `ExtractedDocument.scope`, produced by `extract_scope`.
 
 An observation statement contributes to the `diagnosis` or `finding` set depending on its
 `STATEMENT_TYPE`; the parsing is otherwise identical, including how statements reach images. Both
-carry the `observation` qualifier (`confirmed` / `candidate`, constants in `extract.py`): a statement
+carry the `observation` qualifier (`confirmed` / `candidate`, constants in `extract/models.py`): a statement
 linked by `IMAGE_REF`, or whose `STATEMENT_STATUS` is `Distinct`, is `confirmed` for the image, and
 anything reaching several images through another ref is a `candidate` for each. Each statement yields
 **one nested item**, carrying the single qualifier value that statement was made under; items are not

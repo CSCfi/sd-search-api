@@ -7,12 +7,12 @@ from lxml.etree import _Element as Element  # noqa
 from search_api.api.bigpicture.extract.models import ObjectIds, ObjectKey
 
 
-_OBSERVATION_IMAGE_REF = "IMAGE_REF"
-_OBSERVATION_SLIDE_REF = "SLIDE_REF"
-_OBSERVATION_BLOCK_REF = "BLOCK_REF"
-_OBSERVATION_SPECIMEN_REF = "SPECIMEN_REF"
-_OBSERVATION_BIOLOGICAL_BEING_REF = "BIOLOGICAL_BEING_REF"
-_OBSERVATION_CASE_REF = "CASE_REF"
+OBSERVATION_IMAGE_REF = "IMAGE_REF"
+OBSERVATION_SLIDE_REF = "SLIDE_REF"
+OBSERVATION_BLOCK_REF = "BLOCK_REF"
+OBSERVATION_SPECIMEN_REF = "SPECIMEN_REF"
+OBSERVATION_BIOLOGICAL_BEING_REF = "BIOLOGICAL_BEING_REF"
+OBSERVATION_CASE_REF = "CASE_REF"
 
 
 # Maps object's key to the ids of each related object.
@@ -27,7 +27,7 @@ RelatedIdType = TypeVar("RelatedIdType", ObjectIds, str)
 
 
 @dataclass(frozen=True)
-class _References:
+class BigpictureReferences:
     image_key_to_image_ids: ImageIdMap = field(default_factory=dict)
     slide_key_to_image_ids: ImageIdMap = field(default_factory=dict)
     block_key_to_slide_ids: IdMap = field(default_factory=dict)
@@ -37,10 +37,10 @@ class _References:
     case_key_to_specimen_ids: IdMap = field(default_factory=dict)
 
     def image_ids_from_images(self, image_keys: Iterable[ObjectKey]) -> set[str]:
-        return _related_ids(image_keys, self.image_key_to_image_ids)
+        return related_ids(image_keys, self.image_key_to_image_ids)
 
     def image_ids_from_slides(self, slide_keys: Iterable[ObjectKey]) -> set[str]:
-        return _related_ids(slide_keys, self.slide_key_to_image_ids)
+        return related_ids(slide_keys, self.slide_key_to_image_ids)
 
     def image_ids_from_blocks(self, block_keys: Iterable[ObjectKey]) -> set[str]:
         slide_keys = _related_keys(block_keys, self.block_key_to_slide_ids)
@@ -63,17 +63,17 @@ class _References:
         return self.image_ids_from_specimens(specimen_keys)
 
 
-def _related_ids(
+def related_ids(
     keys: Iterable[ObjectKey], key_to_ids: dict[ObjectKey, set[RelatedIdType]]
 ) -> set[RelatedIdType]:
     return {related_id for key in keys for related_id in key_to_ids.get(key, set())}
 
 
 def _related_keys(keys: Iterable[ObjectKey], key_to_ids: IdMap) -> Sequence[ObjectKey]:
-    return _object_keys(_related_ids(keys, key_to_ids))
+    return object_keys(related_ids(keys, key_to_ids))
 
 
-def _object_keys(source: Element | Iterable[ObjectIds]) -> Sequence[ObjectKey]:
+def object_keys(source: Element | Iterable[ObjectIds]) -> Sequence[ObjectKey]:
     if isinstance(source, Element):
         return [
             ObjectKey(kind=attribute, value=value)
@@ -83,14 +83,14 @@ def _object_keys(source: Element | Iterable[ObjectIds]) -> Sequence[ObjectKey]:
     return [key for ids in source for key in ids.keys]
 
 
-def _object_ids(elem: Element) -> ObjectIds:
+def object_ids(elem: Element) -> ObjectIds:
     """Return an object's alias and optional accession."""
     return ObjectIds(
         alias=cast(str, elem.get("alias")), accession=elem.get("accession")
     )
 
 
-def _map_ref(
+def map_ref(
     elem: Element,
     ref_tag: str,
     key_to_ids: dict[ObjectKey, set[RelatedIdType]],
@@ -98,15 +98,17 @@ def _map_ref(
 ) -> None:
     """Map reference aliases and optional accessions to the provided value."""
     for ref in elem.xpath(f"./{ref_tag}"):
-        for key in _object_keys(ref):
+        for key in object_keys(ref):
             key_to_ids.setdefault(key, set()).add(value)
 
 
-_OBSERVATION_REFS: dict[str, Callable[[_References, Sequence[ObjectKey]], set[str]]] = {
-    _OBSERVATION_IMAGE_REF: _References.image_ids_from_images,
-    _OBSERVATION_SLIDE_REF: _References.image_ids_from_slides,
-    _OBSERVATION_BLOCK_REF: _References.image_ids_from_blocks,
-    _OBSERVATION_SPECIMEN_REF: _References.image_ids_from_specimens,
-    _OBSERVATION_BIOLOGICAL_BEING_REF: _References.image_ids_from_beings,
-    _OBSERVATION_CASE_REF: _References.image_ids_from_cases,
+OBSERVATION_REFS: dict[
+    str, Callable[[BigpictureReferences, Sequence[ObjectKey]], set[str]]
+] = {
+    OBSERVATION_IMAGE_REF: BigpictureReferences.image_ids_from_images,
+    OBSERVATION_SLIDE_REF: BigpictureReferences.image_ids_from_slides,
+    OBSERVATION_BLOCK_REF: BigpictureReferences.image_ids_from_blocks,
+    OBSERVATION_SPECIMEN_REF: BigpictureReferences.image_ids_from_specimens,
+    OBSERVATION_BIOLOGICAL_BEING_REF: BigpictureReferences.image_ids_from_beings,
+    OBSERVATION_CASE_REF: BigpictureReferences.image_ids_from_cases,
 }

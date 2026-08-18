@@ -1,7 +1,10 @@
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
+
+from search_api.api.extract_logs import ExtractLog
 
 
 OBSERVATION_QUALIFIER = "observation"
@@ -133,7 +136,7 @@ def _nested_groups() -> tuple[str, ...]:
     )
 
 
-_NESTED_GROUPS = _nested_groups()
+NESTED_GROUPS = _nested_groups()
 
 
 class ObjectKey(BaseModel):
@@ -164,3 +167,15 @@ class ObjectIds(BaseModel):
         if self.accession is not None:
             keys.append(ObjectKey(kind="accession", value=self.accession))
         return keys
+
+
+@dataclass(frozen=True)
+class BigpictureExtractedObject[FieldsT]:
+    """One extracted XML object.
+
+    A dataclass rather than a pydantic model to avoid copying the logs.
+    """
+
+    ids: ObjectIds
+    fields: FieldsT
+    logs: list[ExtractLog]

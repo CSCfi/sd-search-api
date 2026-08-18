@@ -60,13 +60,15 @@ def test_extract_fields_clinical():
 
     stain = payload["staining"][0]
     assert stain["staining_procedure"] == "6"
-    assert stain["staining_procedure_other"] == "test6"
+    # The fixture has both a code and free text (the code takes precedence).
+    assert "staining_procedure_other" not in stain
     assert "staining_target" not in stain
 
     payload2 = build_document(docs[CLINICAL_IMAGE_2])
     stain2 = payload2["staining"][0]
     assert stain2["staining_procedure"] == "7"
-    assert stain2["staining_procedure_other"] == "test7"
+    # The fixture has both a code and free text (the code takes precedence).
+    assert "staining_procedure_other" not in stain2
     assert stain2["staining_target"] == "pan Cytokeratin"
 
 
@@ -108,13 +110,15 @@ def test_extract_fields_non_clinical():
 
     stain = payload["staining"][0]
     assert stain["staining_procedure"] == "6"
-    assert stain["staining_procedure_other"] == "test6"
+    # The fixture has both a code and free text (the code takes precedence).
+    assert "staining_procedure_other" not in stain
     assert "staining_target" not in stain
 
     payload2 = build_document(docs[NON_CLINICAL_IMAGE_2])
     stain2 = payload2["staining"][0]
     assert stain2["staining_procedure"] == "7"
-    assert stain2["staining_procedure_other"] == "test7"
+    # The fixture has both a code and free text (the code takes precedence).
+    assert "staining_procedure_other" not in stain2
     assert stain2["staining_target"] == "pan Cytokeratin"
 
     # Each image gets only the finding of the observation referencing it.

@@ -1,7 +1,7 @@
 from lxml import etree
 
 from search_api.api.bigpicture.extract.models import ObjectIds, ObjectKey
-from search_api.api.bigpicture.extract.refs import _object_keys
+from search_api.api.bigpicture.extract.refs import object_keys
 
 
 def test_object_ids_id():
@@ -21,21 +21,21 @@ def test_object_ids_keys():
 
 
 def test_object_keys_from_element():
-    assert _object_keys(etree.fromstring('<SLIDE alias="1" accession="slide_1"/>')) == [
+    assert object_keys(etree.fromstring('<SLIDE alias="1" accession="slide_1"/>')) == [
         ObjectKey(kind="accession", value="slide_1"),
         ObjectKey(kind="alias", value="1"),
     ]
-    assert _object_keys(etree.fromstring('<SLIDE alias="1"/>')) == [
+    assert object_keys(etree.fromstring('<SLIDE alias="1"/>')) == [
         ObjectKey(kind="alias", value="1"),
     ]
-    assert _object_keys(etree.fromstring('<SLIDE accession="slide_1"/>')) == [
+    assert object_keys(etree.fromstring('<SLIDE accession="slide_1"/>')) == [
         ObjectKey(kind="accession", value="slide_1"),
     ]
 
 
 def test_object_keys_from_object_ids():
     objects = [ObjectIds(alias="1", accession="slide_1"), ObjectIds(alias="2")]
-    assert _object_keys(objects) == [
+    assert object_keys(objects) == [
         ObjectKey(kind="alias", value="1"),
         ObjectKey(kind="accession", value="slide_1"),
         ObjectKey(kind="alias", value="2"),

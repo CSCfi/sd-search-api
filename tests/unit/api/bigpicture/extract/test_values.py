@@ -1,8 +1,20 @@
+import pytest
 from lxml import etree
+from lxml.etree import (
+    _Element as Element,
+    _ElementTree as ElementTree,
+)
 
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
-from search_api.api.bigpicture.extract.attributes import (
-    _iso8601_duration,
+from search_api.api.bigpicture.extract.values import (
+    extract_sample_biological_being_fields,
+    extract_sample_block_fields,
+    extract_sample_specimen_fields,
+    extract_diagnoses,
+    extract_finding,
+    extract_scope,
+    extract_staining_fields,
+    _extract_iso8601_duration,
     _extract_age_at_extraction,
     _extract_anatomical_sites,
     _extract_code_attribute_value,
@@ -13,7 +25,15 @@ from search_api.api.bigpicture.extract.attributes import (
     _matches_scheme,
     _filter_value_by_scheme,
 )
-from search_api.api.bigpicture.extract.models import BigpictureCodeAttributeValue
+from search_api.api.bigpicture.extract.models import (
+    BigpictureCodeAttributeValue,
+    BigpictureSampleBiologicalBeingFields,
+    BigpictureSampleBlockFields,
+    BigpictureSampleSpecimenFields,
+    ObjectIds,
+)
+from search_api.exceptions import UserException
+from search_api.services.ontology.send import SEND_ONTOLOGY_ID
 from search_api.api.extract_logs import (
     ExtractLog,
     invalid_duration_log,
@@ -287,14 +307,14 @@ def test_extract_age_at_extraction_error(caplog):
     assert logs == [invalid_duration_log("age_at_extraction", ("NOT_VALID", "P1Y"))]
 
 
-def test_iso8601_duration():
-    assert _iso8601_duration("P40Y", "P1Y") == "P41Y"
-    assert _iso8601_duration("P40Y", "PT0S") == "P40Y"
-    assert _iso8601_duration("P40Y", "P6M") == "P40Y6M"
-    assert _iso8601_duration("P40Y6M", "P6M") == "P41Y"
-    assert _iso8601_duration("P1Y", "P11M") == "P1Y11M"
-    assert _iso8601_duration("P1Y", "P12M") == "P2Y"
-    assert _iso8601_duration("PT0S", "P1Y") == "P1Y"
+def test_extract_iso8601_duration():
+    assert _extract_iso8601_duration("P40Y", "P1Y") == "P41Y"
+    assert _extract_iso8601_duration("P40Y", "PT0S") == "P40Y"
+    assert _extract_iso8601_duration("P40Y", "P6M") == "P40Y6M"
+    assert _extract_iso8601_duration("P40Y6M", "P6M") == "P41Y"
+    assert _extract_iso8601_duration("P1Y", "P11M") == "P1Y11M"
+    assert _extract_iso8601_duration("P1Y", "P12M") == "P2Y"
+    assert _extract_iso8601_duration("PT0S", "P1Y") == "P1Y"
 
 
 def test_extract_age_at_extraction_range():
@@ -585,3 +605,386 @@ def test_extract_fixation_type_other_scheme():
 
     assert fixation_type is None
     assert fixation_type_text == "Test7"
+
+
+_STAINING_ALIAS = "stain-1"
+
+
+def _staining(children: str) -> Element:
+    return etree.fromstring(
+        f'<STAINING alias="{_STAINING_ALIAS}">{children}</STAINING>'
+    )
+
+
+def test_extract_staining_fields_from_procedure_information():
+    staining = _staining("""
+        <PROCEDURE_INFORMATION>
+            <CODE_ATTRIBUTE>
+                <TAG>staining_procedure</TAG>
+                <VALUE>
+                    <CODE>6</CODE>
+                    <SCHEME>SNOMED CT</SCHEME>
+                    <MEANING>H and E stain</MEANING>
+                </VALUE>
+            </CODE_ATTRIBUTE>
+        </PROCEDURE_INFORMATION>
+        <STAIN>
+            <STRING_ATTRIBUTE>
+                <TAG>staining_procedure</TAG>
+                <VALUE>ignored</VALUE>
+            </STRING_ATTRIBUTE>
+        </STAIN>
+    """)
+
+    extracted = extract_staining_fields(staining)
+
+    assert extracted.ids.alias == _STAINING_ALIAS
+    assert extracted.logs == []
+    # PROCEDURE_INFORMATION and STAIN are mutually exclusive.
+    assert len(extracted.fields) == 1
+    fields = extracted.fields[0]
+    assert fields.staining_procedure is not None
+    assert fields.staining_procedure.code == "6"
+    assert fields.staining_procedure_other is None
+    assert fields.staining_substance is None
+    assert fields.staining_target is None
+
+
+def test_extract_staining_fields_staining_substance():
+    staining = _staining("""
+        <STAIN>
+            <STRING_ATTRIBUTE>
+                <TAG>staining_method</TAG>
+                <VALUE>chemical</VALUE>
+            </STRING_ATTRIBUTE>
+            <CODE_ATTRIBUTE>
+                <TAG>staining_compound</TAG>
+                <VALUE>
+                    <CODE>7</CODE>
+                    <SCHEME>SNOMED CT</SCHEME>
+                    <MEANING>Eosin</MEANING>
+                </VALUE>
+            </CODE_ATTRIBUTE>
+            <STRING_ATTRIBUTE>
+                <TAG>staining_compound</TAG>
+                <VALUE>eosin Y</VALUE>
+            </STRING_ATTRIBUTE>
+            <CODE_ATTRIBUTE>
+                <TAG>staining_target</TAG>
+                <VALUE>
+                    <CODE>8</CODE>
+                    <MEANING>not read for a chemical stain</MEANING>
+                </VALUE>
+            </CODE_ATTRIBUTE>
+        </STAIN>
+    """)
+
+    (fields,) = extract_staining_fields(staining).fields
+
+    assert fields.staining_substance is not None
+    assert fields.staining_substance.code == "7"
+    # The code takes precedence, so its free text is not kept beside it.
+    assert fields.staining_substance_other is None
+
+
+def test_extract_staining_fields_staining_target():
+    staining = _staining("""
+        <STAIN>
+            <CODE_ATTRIBUTE>
+                <TAG>staining_target</TAG>
+                <VALUE>
+                    <CODE>9</CODE>
+                    <SCHEME>SNOMED CT</SCHEME>
+                    <MEANING>pan Cytokeratin</MEANING>
+                </VALUE>
+            </CODE_ATTRIBUTE>
+        </STAIN>
+        <STAIN>
+            <STRING_ATTRIBUTE>
+                <TAG>staining_target</TAG>
+                <VALUE>Ki-67</VALUE>
+            </STRING_ATTRIBUTE>
+        </STAIN>
+    """)
+
+    extracted = extract_staining_fields(staining)
+
+    assert [fields.staining_target for fields in extracted.fields] == [
+        "pan Cytokeratin",
+        "Ki-67",
+    ]
+
+
+_QUALIFIER = frozenset({("observation", "confirmed")})
+
+
+def _statement(children: str) -> Element:
+    return etree.fromstring(f"<STATEMENT>{children}</STATEMENT>")
+
+
+def _send_code(tag: str, code: str, meaning: str, scheme: str = "SEND") -> str:
+    return f"""
+        <CODE_ATTRIBUTE>
+            <TAG>{tag}</TAG>
+            <VALUE>
+                <CODE>{code}</CODE>
+                <SCHEME>{scheme}</SCHEME>
+                <MEANING>{meaning}</MEANING>
+            </VALUE>
+        </CODE_ATTRIBUTE>
+    """
+
+
+def test_extract_finding():
+    statement = _statement(f"""
+        <CODE_ATTRIBUTES>
+            {_send_code("MISTRESC", "C3137", "Inflammation")}
+            {_send_code("MISEV", "C147501", "Mild")}
+            {_send_code("MICHRON", "C14141", "Chronic")}
+            {_send_code("MIDISTR", "C25253", "Multifocal")}
+            {_send_code("MIRESCAT", "C53529", "Present")}
+        </CODE_ATTRIBUTES>
+    """)
+    logs: list[ExtractLog] = []
+
+    finding = extract_finding(statement, logs, _QUALIFIER)
+
+    assert finding is not None
+    assert finding.finding is not None and finding.finding.code == "C3137"
+    assert finding.finding_severity is not None
+    assert finding.finding_severity.code == "C147501"
+    assert finding.finding_chronicity is not None
+    assert finding.finding_chronicity.code == "C14141"
+    assert finding.finding_distribution is not None
+    assert finding.finding_distribution.code == "C25253"
+    assert finding.finding_result_category is not None
+    assert finding.finding_result_category.code == "C53529"
+    assert finding.qualifiers == _QUALIFIER
+    assert logs == []
+
+
+def test_extract_finding_invalid_ontology():
+    """A code with invalid ontology is dropped, leaving the statement with no finding."""
+    statement = _statement(f"""
+        <CODE_ATTRIBUTES>
+            {_send_code("MISTRESC", "73211009", "Inflammation", scheme="SNOMED CT")}
+        </CODE_ATTRIBUTES>
+    """)
+    logs: list[ExtractLog] = []
+
+    assert extract_finding(statement, logs, _QUALIFIER) is None
+    assert logs == [
+        invalid_scheme_log(
+            "finding", "73211009", "Inflammation", "SNOMED CT", SEND_ONTOLOGY_ID
+        )
+    ]
+
+
+def test_extract_diagnoses():
+    statement = _statement(f"""
+        <CODE_ATTRIBUTES>
+            {_send_code("diagnosis", "73211009", "Diabetes", scheme="SNOMED CT")}
+            {_send_code("diagnosis", "38341003", "Hypertension", scheme="SCT")}
+            {_send_code("diagnosis", "8500/3", "Duct carcinoma", scheme="ICDO")}
+        </CODE_ATTRIBUTES>
+    """)
+    logs: list[ExtractLog] = []
+
+    diagnoses = extract_diagnoses(statement, logs)
+
+    assert {diagnosis.code for diagnosis in diagnoses} == {"73211009", "38341003"}
+    assert logs == [
+        invalid_scheme_log(
+            "diagnosis", "8500/3", "Duct carcinoma", "ICDO", SNOMED_ONTOLOGY_ID
+        )
+    ]
+
+
+def _policy(type_of_dataset: str | None) -> ElementTree:
+    attribute = (
+        ""
+        if type_of_dataset is None
+        else f"""
+        <STRING_ATTRIBUTE>
+            <TAG>type_of_dataset</TAG>
+            <VALUE>{type_of_dataset}</VALUE>
+        </STRING_ATTRIBUTE>
+        """
+    )
+    return etree.ElementTree(
+        etree.fromstring(f"<POLICY><ATTRIBUTES>{attribute}</ATTRIBUTES></POLICY>")
+    )
+
+
+def test_extract_sample_block_fields():
+    xml = etree.fromstring("""
+    <BLOCK alias="block-1" accession="bb-block-1">
+        <ATTRIBUTES>
+            <CODE_ATTRIBUTE>
+                <TAG>block_preparation</TAG>
+                <VALUE>
+                    <CODE>5</CODE>
+                    <SCHEME>SNOMED CT</SCHEME>
+                    <MEANING>Paraffin embedding</MEANING>
+                </VALUE>
+            </CODE_ATTRIBUTE>
+        </ATTRIBUTES>
+    </BLOCK>
+    """)
+
+    extracted = extract_sample_block_fields(xml)
+
+    assert extracted.ids == ObjectIds(alias="block-1", accession="bb-block-1")
+    assert extracted.fields == BigpictureSampleBlockFields(
+        block_preparation=BigpictureCodeAttributeValue(
+            code="5", scheme="SNOMED CT", meaning="Paraffin embedding"
+        )
+    )
+    assert extracted.logs == []
+
+
+def test_extract_sample_biological_being_fields():
+    xml = etree.fromstring("""
+    <BIOLOGICAL_BEING alias="being-1">
+        <ATTRIBUTES>
+            <CODE_ATTRIBUTE>
+                <TAG>animal_species</TAG>
+                <VALUE>
+                    <CODE>1</CODE>
+                    <SCHEME>SNOMED CT</SCHEME>
+                    <MEANING>Cat</MEANING>
+                </VALUE>
+            </CODE_ATTRIBUTE>
+            <STRING_ATTRIBUTE>
+                <TAG>sex</TAG>
+                <VALUE>Male</VALUE>
+            </STRING_ATTRIBUTE>
+        </ATTRIBUTES>
+    </BIOLOGICAL_BEING>
+    """)
+
+    extracted = extract_sample_biological_being_fields(xml)
+
+    assert extracted.ids == ObjectIds(alias="being-1")
+    assert extracted.fields == BigpictureSampleBiologicalBeingFields(
+        animal_species=BigpictureCodeAttributeValue(
+            code="1", scheme="SNOMED CT", meaning="Cat"
+        ),
+        sex="Male",
+    )
+    assert extracted.logs == []
+
+
+def test_extract_sample_specimen_fields():
+    xml = etree.fromstring("""
+    <SPECIMEN alias="specimen-1">
+        <ATTRIBUTES>
+            <CODE_ATTRIBUTE>
+                <TAG>anatomical_site</TAG>
+                <VALUE>
+                    <CODE>2</CODE>
+                    <SCHEME>SNOMED CT</SCHEME>
+                    <MEANING>Breast</MEANING>
+                </VALUE>
+            </CODE_ATTRIBUTE>
+            <SET_ATTRIBUTE>
+                <TAG>anatomical_site_list</TAG>
+                <VALUE>
+                    <CODE_ATTRIBUTE>
+                        <TAG>anatomical_site</TAG>
+                        <VALUE>
+                            <CODE>3</CODE>
+                            <SCHEME>SNOMED CT</SCHEME>
+                            <MEANING>Skin</MEANING>
+                        </VALUE>
+                    </CODE_ATTRIBUTE>
+                </VALUE>
+            </SET_ATTRIBUTE>
+            <CODE_ATTRIBUTE>
+                <TAG>specimen_type</TAG>
+                <VALUE>
+                    <CODE>4</CODE>
+                    <SCHEME>SNOMED CT</SCHEME>
+                    <MEANING>Tissue specimen</MEANING>
+                </VALUE>
+            </CODE_ATTRIBUTE>
+            <CODE_ATTRIBUTE>
+                <TAG>fixation_type</TAG>
+                <VALUE>
+                    <CODE>10</CODE>
+                    <SCHEME>Other</SCHEME>
+                    <MEANING>Home-made fixative</MEANING>
+                </VALUE>
+            </CODE_ATTRIBUTE>
+            <SET_ATTRIBUTE>
+                <TAG>age_at_extraction</TAG>
+                <VALUE>
+                    <STRING_ATTRIBUTE>
+                        <TAG>interval_start</TAG>
+                        <VALUE>P40Y</VALUE>
+                    </STRING_ATTRIBUTE>
+                    <STRING_ATTRIBUTE>
+                        <TAG>interval_length</TAG>
+                        <VALUE>P1Y</VALUE>
+                    </STRING_ATTRIBUTE>
+                </VALUE>
+            </SET_ATTRIBUTE>
+        </ATTRIBUTES>
+    </SPECIMEN>
+    """)
+
+    extracted = extract_sample_specimen_fields(xml)
+
+    assert extracted.ids == ObjectIds(alias="specimen-1")
+    assert extracted.fields == BigpictureSampleSpecimenFields(
+        # Sites are read both from the field itself and from the list beside it.
+        anatomical_site=frozenset(
+            {
+                BigpictureCodeAttributeValue(
+                    code="2", scheme="SNOMED CT", meaning="Breast"
+                ),
+                BigpictureCodeAttributeValue(
+                    code="3", scheme="SNOMED CT", meaning="Skin"
+                ),
+            }
+        ),
+        # A scheme of Other declares the value uncoded, so it becomes free text.
+        fixation_type=None,
+        fixation_type_other="Home-made fixative",
+        specimen_type=BigpictureCodeAttributeValue(
+            code="4", scheme="SNOMED CT", meaning="Tissue specimen"
+        ),
+        age_at_extraction=("P40Y", "P41Y"),
+    )
+    assert extracted.logs == []
+
+
+# Test scope
+#
+
+
+@pytest.mark.parametrize(
+    "type_of_dataset,expected",
+    [
+        ("Clinical/Anonymized", "clinical"),
+        ("Clinical/Pseudonymized", "clinical"),
+        ("Non-Clinical/Obscured", "non_clinical"),
+        ("Non-Clinical/Cryptonymized", "non_clinical"),
+        # The scope is read case-insensitively, and only up to the "/", so a new
+        # de-identification method needs no change here.
+        ("non-clinical/whatever", "non_clinical"),
+        (" CLINICAL /Anonymized", "clinical"),
+    ],
+)
+def test_extract_scope(type_of_dataset, expected):
+    assert extract_scope(_policy(type_of_dataset), "policy.xml") == expected
+
+
+def test_extract_scope_of_an_unsupported_dataset_type():
+    with pytest.raises(UserException, match="Unsupported 'type_of_dataset'"):
+        extract_scope(_policy("Preclinical/Anonymized"), "policy.xml")
+
+
+def test_extract_scope_without_the_attribute():
+    with pytest.raises(UserException, match="Missing 'type_of_dataset'"):
+        extract_scope(_policy(None), "policy.xml")

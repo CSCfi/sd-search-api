@@ -462,16 +462,16 @@ def extract_dataset_documents(
                         {(OBSERVATION_QUALIFIER, qualifier_value)}
                     )
                 }
-                statement_logs: list[ExtractLog] = []
                 if statement_type == "Diagnosis":
                     group = "diagnosis"
+                    diagnoses, statement_logs = extract_diagnoses(statement)
                     items: list[BaseModel] = [
                         BigpictureDiagnosisFields(diagnosis=code, **qualifier)
-                        for code in extract_diagnoses(statement, statement_logs)
+                        for code in diagnoses
                     ]
                 else:
                     group = "finding"
-                    finding = extract_finding(statement, statement_logs, **qualifier)
+                    finding, statement_logs = extract_finding(statement, **qualifier)
                     items = [finding] if finding is not None else []
                 for ref_image_id in ref_image_ids:
                     getattr(fields[ref_image_id], group).update(items)

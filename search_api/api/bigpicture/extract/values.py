@@ -427,28 +427,33 @@ def extract_staining_fields(
 
 
 def extract_diagnoses(
-    statement: Element, logs: list[ExtractLog]
-) -> set[BigpictureCodeAttributeValue]:
+    statement: Element,
+) -> tuple[set[BigpictureCodeAttributeValue], list[ExtractLog]]:
+    """Return a ``Diagnosis`` statement's codes, and what was dropped from it."""
+    logs: list[ExtractLog] = []
     codes = {
         _code_attribute_value(v)
         for v in statement.xpath("CODE_ATTRIBUTES/CODE_ATTRIBUTE/VALUE")
         if not _is_nil(v)
     }
-    return set(_filter_values_by_scheme(codes, SNOMED_ONTOLOGY_ID, "diagnosis", logs))
+    return set(
+        _filter_values_by_scheme(codes, SNOMED_ONTOLOGY_ID, "diagnosis", logs)
+    ), logs
 
 
 def extract_finding(
     statement: Element,
-    logs: list[ExtractLog],
     qualifiers: frozenset[tuple[str, str]],
-) -> BigpictureFindingFields | None:
-    """Build one finding from a ``Finding`` statement, or None if it holds none.
+) -> tuple[BigpictureFindingFields | None, list[ExtractLog]]:
+    """Return one finding from a ``Finding`` statement, and what was dropped from it.
 
-    If a tag repeats within a statement the first value is used.
+    The finding is None if the statement holds none. If a tag repeats within a statement
+    the first value is used.
     """
+    logs: list[ExtractLog] = []
     code_attributes = statement.xpath("CODE_ATTRIBUTES")
     if not code_attributes:
-        return None
+        return None, logs
     values = {
         field_id: _extract_code_attribute_value(
             code_attributes[0], field_id, SEND_ONTOLOGY_ID, logs, is_attributes=False
@@ -456,8 +461,8 @@ def extract_finding(
         for field_id in _FINDING_FIELD_IDS
     }
     if not any(value is not None for value in values.values()):
-        return None
-    return BigpictureFindingFields(**values, qualifiers=qualifiers)
+        return None, logs
+    return BigpictureFindingFields(**values, qualifiers=qualifiers), logs
 
 
 # Extract scope.

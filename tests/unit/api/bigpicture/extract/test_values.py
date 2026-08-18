@@ -745,9 +745,7 @@ def test_extract_finding():
             {_send_code("MIRESCAT", "C53529", "Present")}
         </CODE_ATTRIBUTES>
     """)
-    logs: list[ExtractLog] = []
-
-    finding = extract_finding(statement, logs, _QUALIFIER)
+    finding, logs = extract_finding(statement, _QUALIFIER)
 
     assert finding is not None
     assert finding.finding is not None and finding.finding.code == "C3137"
@@ -770,9 +768,9 @@ def test_extract_finding_invalid_ontology():
             {_send_code("MISTRESC", "73211009", "Inflammation", scheme="SNOMED CT")}
         </CODE_ATTRIBUTES>
     """)
-    logs: list[ExtractLog] = []
+    finding, logs = extract_finding(statement, _QUALIFIER)
 
-    assert extract_finding(statement, logs, _QUALIFIER) is None
+    assert finding is None
     assert logs == [
         invalid_scheme_log(
             "finding", "73211009", "Inflammation", "SNOMED CT", SEND_ONTOLOGY_ID
@@ -788,9 +786,7 @@ def test_extract_diagnoses():
             {_send_code("diagnosis", "8500/3", "Duct carcinoma", scheme="ICDO")}
         </CODE_ATTRIBUTES>
     """)
-    logs: list[ExtractLog] = []
-
-    diagnoses = extract_diagnoses(statement, logs)
+    diagnoses, logs = extract_diagnoses(statement)
 
     assert {diagnosis.code for diagnosis in diagnoses} == {"73211009", "38341003"}
     assert logs == [

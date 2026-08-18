@@ -7,6 +7,10 @@ from lxml.etree import (
 
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
 from search_api.api.bigpicture.extract.values import (
+    _FIELD_ID_BY_XML_TAG,
+    _XML_TAG_BY_FIELD_ID,
+    _field_id,
+    _xml_tag,
     extract_sample_biological_being_fields,
     extract_sample_block_fields,
     extract_sample_specimen_fields,
@@ -38,6 +42,7 @@ from search_api.api.extract_logs import (
     ExtractLog,
     invalid_duration_log,
     invalid_scheme_log,
+    repeated_value_log,
 )
 
 
@@ -984,3 +989,80 @@ def test_extract_scope_of_an_unsupported_dataset_type():
 def test_extract_scope_without_the_attribute():
     with pytest.raises(UserException, match="Missing 'type_of_dataset'"):
         extract_scope(_policy(None), "policy.xml")
+
+
+def test_extract_finding_repeated_finding():
+    statement = _statement(f"""
+        <CODE_ATTRIBUTES>
+            {_send_code("MISEV", "C147501", "Mild")}
+            {_send_code("MISEV", "C147502", "Moderate")}
+            {_send_code("MISEV", "C147503", "Severe")}
+        </CODE_ATTRIBUTES>
+    """)
+
+    finding, logs = extract_finding(statement, _QUALIFIER)
+
+    assert finding is not None
+    # The first value given is used.
+    assert finding.finding_severity is not None
+    assert finding.finding_severity.code == "C147501"
+    assert logs == [
+        repeated_value_log(
+            "finding_severity", [("C147502", "Moderate"), ("C147503", "Severe")]
+        )
+    ]
+
+
+def test_extract_staining_fields_repeated_target():
+    staining = _staining("""
+        <STAIN>
+            <STRING_ATTRIBUTE>
+                <TAG>staining_target</TAG>
+                <VALUE>Ki-67</VALUE>
+            </STRING_ATTRIBUTE>
+            <STRING_ATTRIBUTE>
+                <TAG>staining_target</TAG>
+                <VALUE>p53</VALUE>
+            </STRING_ATTRIBUTE>
+        </STAIN>
+    """)
+
+    extracted = extract_staining_fields(staining)
+
+    (fields,) = extracted.fields
+    assert fields.staining_target == "Ki-67"
+    assert extracted.logs == [repeated_value_log("staining_target", ["p53"])]
+
+
+def test_extract_sample_biological_being_fields_repeated_sex():
+    xml = etree.fromstring("""
+    <BIOLOGICAL_BEING alias="being-1">
+        <ATTRIBUTES>
+            <STRING_ATTRIBUTE>
+                <TAG>sex</TAG>
+                <VALUE>Male</VALUE>
+            </STRING_ATTRIBUTE>
+            <STRING_ATTRIBUTE>
+                <TAG>sex</TAG>
+                <VALUE>Female</VALUE>
+            </STRING_ATTRIBUTE>
+        </ATTRIBUTES>
+    </BIOLOGICAL_BEING>
+    """)
+
+    extracted = extract_sample_biological_being_fields(xml)
+
+    assert extracted.fields.sex == "Male"
+    assert extracted.logs == [repeated_value_log("sex", ["Female"])]
+
+
+def test_xml_tag_maps_are_inverses():
+    assert len(_FIELD_ID_BY_XML_TAG) == len(_XML_TAG_BY_FIELD_ID), (
+        "two fields share an XML tag, so the inverse map dropped one"
+    )
+    for field_id, xml_tag in _XML_TAG_BY_FIELD_ID.items():
+        assert _field_id(xml_tag) == field_id
+        assert _xml_tag(field_id) == xml_tag
+    # A field the XML calls by its own name is in neither map.
+    assert _xml_tag("sex") == "sex"
+    assert _field_id("sex") == "sex"

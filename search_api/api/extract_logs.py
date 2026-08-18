@@ -1,3 +1,5 @@
+from collections.abc import Sequence
+
 from pydantic import BaseModel, ConfigDict
 
 from search_api.severity import LogSeverity
@@ -33,4 +35,14 @@ def invalid_duration_log(field_id: str, value: tuple[str, str]) -> ExtractLog:
         severity="ERROR",
         field_id=field_id,
         message=f"Value {value} is ignored: not a valid ISO-8601 duration.",
+    )
+
+
+def repeated_value_log(field_id: str, ignored: Sequence[object]) -> ExtractLog:
+    """More values than a field holds. The first given is used and the rest ignored."""
+    return ExtractLog(
+        severity="ERROR",
+        field_id=field_id,
+        message=f"Values {', '.join(repr(value) for value in ignored)} are ignored: "
+        f"the field holds one value and the first one is used.",
     )

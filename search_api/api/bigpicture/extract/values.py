@@ -22,6 +22,7 @@ from search_api.api.extract_logs import (
     ExtractLog,
     invalid_duration_log,
     invalid_scheme_log,
+    repeated_value_log,
 )
 
 
@@ -40,14 +41,24 @@ _FINDING_XML_TAGS = (
 _FINDING_FIELD_IDS = tuple(dict(_FINDING_XML_TAGS))
 
 
-_XML_TAGS: dict[str, str] = {
+# Fields that have different XML tag and field id.
+_XML_TAG_BY_FIELD_ID: dict[str, str] = {
     **dict(_FINDING_XML_TAGS),
     "staining_substance": "staining_compound",
 }
 
 
+_FIELD_ID_BY_XML_TAG: dict[str, str] = {
+    xml_tag: field_id for field_id, xml_tag in _XML_TAG_BY_FIELD_ID.items()
+}
+
+
 def _xml_tag(field_id: str) -> str:
-    return _XML_TAGS.get(field_id, field_id)
+    return _XML_TAG_BY_FIELD_ID.get(field_id, field_id)
+
+
+def _field_id(xml_tag: str) -> str:
+    return _FIELD_ID_BY_XML_TAG.get(xml_tag, xml_tag)
 
 
 _XSI_NIL = "{http://www.w3.org/2001/XMLSchema-instance}nil"
@@ -145,6 +156,14 @@ def _extract_code_attribute_value(
     if not values or _is_nil(values[0]):
         return None
 
+    repeated = [_code_attribute_value(v) for v in values[1:] if not _is_nil(v)]
+    if repeated:
+        logs.append(
+            repeated_value_log(
+                field_id, [(value.code, value.meaning) for value in repeated]
+            )
+        )
+
     return _filter_value_by_scheme(
         _code_attribute_value(values[0]), ontology_id, field_id, logs
     )
@@ -174,8 +193,13 @@ def _extract_code_attribute_values(
 
 
 def _extract_string_attribute_value(
-    elem: Element, tag: str, *, is_attributes=True
+    elem: Element,
+    tag: str,
+    *,
+    is_attributes=True,
+    logs: list[ExtractLog] | None = None,
 ) -> str | None:
+    """Extract a STRING_ATTRIBUTE value."""
     if is_attributes:
         values = elem.xpath(f"ATTRIBUTES/STRING_ATTRIBUTE[TAG='{tag}']/VALUE/text()")
     else:
@@ -183,6 +207,10 @@ def _extract_string_attribute_value(
 
     if not values:
         return None
+
+    # Repeated value errors are reported only when field_id and logs are provided.
+    if len(values) > 1 and logs is not None:
+        logs.append(repeated_value_log(_field_id(tag), values[1:]))
 
     return values[0]
 
@@ -209,7 +237,7 @@ def _extract_ontology_or_value(
     if value is not None:
         return value, None
     return None, _extract_string_attribute_value(
-        elem, _xml_tag(field_id), is_attributes=is_attributes
+        elem, _xml_tag(field_id), is_attributes=is_attributes, logs=logs
     )
 
 
@@ -322,7 +350,7 @@ def extract_sample_biological_being_fields(
             ),
             sex=cast(
                 Literal["Male", "Female", "Not-known", "Other"] | None,
-                _extract_string_attribute_value(xml, "sex"),
+                _extract_string_attribute_value(xml, "sex", logs=logs),
             ),
         ),
         logs=logs,
@@ -391,7 +419,7 @@ def extract_staining_fields(
                 staining_target_text = staining_target.meaning
             else:
                 staining_target_text = _extract_string_attribute_value(
-                    stain_xml, "staining_target", is_attributes=False
+                    stain_xml, "staining_target", is_attributes=False, logs=logs
                 )
 
         procedure, procedure_other = _extract_ontology_or_value(

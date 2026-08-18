@@ -86,22 +86,20 @@ async def test_the_cache_follows_what_has_been_synced(monkeypatch):
     """Nothing is counted before a load lands, and nothing is recounted after it."""
     synced_at: datetime | None = None
     service, beacon = _service(refresh_interval=0.01)
-    monkeypatch.setattr(
-        service, "_max_document_synced_at", lambda: _resolved(synced_at)
-    )
+    monkeypatch.setattr(service, "_max_synced_at", lambda: _resolved(synced_at))
 
-    # Nothing to refresh yet (_max_document_synced_at is None).
+    # Nothing to refresh yet (_max_synced_at is None).
     await service.start()
     try:
         await asyncio.sleep(0.05)
         assert beacon.calls == [], "counted an index no load has reached"
 
-        # Changes to refresh (_max_document_synced_at is not None).
+        # Changes to refresh (_max_synced_at is not None).
         synced_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
         await asyncio.sleep(0.05)
         assert beacon.calls, "did not fill after documents were synced"
 
-        # Nothing new to refresh (_max_document_synced_at is unchanged).
+        # Nothing new to refresh (_max_synced_at is unchanged).
         beacon.calls.clear()
         await asyncio.sleep(0.05)
         assert beacon.calls == [], "refilled while nothing was synced"

@@ -72,15 +72,19 @@ def bp_opensearch_docs() -> list[dict[str, Any]]:
     return _DOCS
 
 
-@pytest.fixture
-def service(bp_opensearch_index_name: str) -> BigpictureOpenSearchBeaconService:
+def _service(index_name: str) -> BigpictureOpenSearchBeaconService:
     return BigpictureOpenSearchBeaconService(
         client=bp_search,
-        index_name=bp_opensearch_index_name,
+        index_name=index_name,
         filtering_terms=BP_FILTERING_TERMS,
         filtering_scopes=BP_FILTERING_SCOPES,
         filtering_qualifiers=BP_FILTERING_QUALIFIERS,
     )
+
+
+@pytest.fixture
+def service(bp_opensearch_index_name: str) -> BigpictureOpenSearchBeaconService:
+    return _service(bp_opensearch_index_name)
 
 
 async def _counts(service, field_id, scope=None, qualifiers=None) -> dict[str, int]:
@@ -172,6 +176,20 @@ async def test_group_item_filter_is_rejected_for_a_field_without_a_group(
             "dataset_id",
             group_item_filter={"terms": {"diagnosis.qualifiers": [_CONFIRMED]}},
         )
+
+
+@pytest.mark.asyncio
+async def test_count_indexed(bp_opensearch_index, service):
+    assert await service.count_indexed() == len(_DOCS)
+    assert await service.count_indexed("clinical") == 2
+    assert await service.count_indexed("non_clinical") == 1
+
+
+@pytest.mark.asyncio
+async def test_count_indexed_not_exist():
+    missing = _service(f"bp-image-index-missing-{uuid.uuid4()}")
+    assert await missing.count_indexed() == 0
+    assert await missing.count_indexed("clinical") == 0
 
 
 #

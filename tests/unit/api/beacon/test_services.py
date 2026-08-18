@@ -102,10 +102,12 @@ def test_build_filtering_term_query_ontology_or_value_concept_ids_only():
     term = get_term(
         "fixation_type"
     )  # maps to specimen.fixation_type + specimen.fixation_type_other
-    result = build_filtering_term_query(term, ["123", "456"])
+    result = build_filtering_term_query(term, ["337915000", "80248007"])
     assert result == {
         "bool": {
-            "should": [{"terms": {"specimen.fixation_type": ["123", "456"]}}],
+            "should": [
+                {"terms": {"specimen.fixation_type": ["337915000", "80248007"]}}
+            ],
             "minimum_should_match": 1,
         }
     }
@@ -116,11 +118,11 @@ def test_build_filtering_term_query_ontology_or_value_mixed_values():
     term = get_term(
         "fixation_type"
     )  # maps to specimen.fixation_type + specimen.fixation_type_other
-    result = build_filtering_term_query(term, ["123", "Formalin"])
+    result = build_filtering_term_query(term, ["337915000", "Formalin"])
     assert result == {
         "bool": {
             "should": [
-                {"terms": {"specimen.fixation_type": ["123"]}},
+                {"terms": {"specimen.fixation_type": ["337915000"]}},
                 {
                     "terms": {
                         f"specimen.fixation_type{ONTOLOGY_OTHER_VALUE_FIELD_SUFFIX}": [

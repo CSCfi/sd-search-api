@@ -11,11 +11,12 @@ from search_api.api.opensearch.models import (
 )
 from search_api.exceptions import UserException
 from search_api.services.load import LoadService
+from search_api.services.ontology.term_cache import create_term_caches
 
 
 def _load_service(**overrides) -> LoadService:
     kwargs = {
-        "term_caches": {},
+        "term_caches": create_term_caches(BP_DOMAIN.ontology_ids),
         "filtering_terms": BP_DOMAIN.filtering_terms,
         "filtering_scopes": BP_DOMAIN.filtering_scopes,
         "filtering_qualifiers": BP_DOMAIN.filtering_qualifiers,
@@ -38,7 +39,7 @@ def _document(scope="clinical", qualifiers=None) -> ExtractedDocument:
                             type="ontology",
                             nested_group="diagnosis",
                         ),
-                        value="73211009",
+                        value=("73211009", None),
                     )
                 ],
                 qualifiers=qualifiers or {},

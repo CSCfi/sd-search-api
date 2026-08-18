@@ -9,6 +9,7 @@ from search_api.services.ontology import snomed as snomed_module
 from search_api.services.ontology.snomed import (
     SnomedConcept,
     SnomedService,
+    _fetch_descriptions,
     import_snomed_release,
 )
 
@@ -58,9 +59,24 @@ def service() -> SnomedService:
 @pytest.mark.parametrize(
     "value,expected",
     [
+        # Real concept ids, core and extension partitions.
         ("410607006", True),
+        ("337915000", True),
+        ("35917007", True),
+        # Not digits, or nothing at all.
         ("Homo sapiens", False),
         ("", False),
+        # Invalid leading zeros.
+        ("0410607006", False),
+        # Invalid length (must be 6 to 18 digits long).
+        ("41006", False),
+        ("4106070060410607006", False),
+        # Non-concept partition (two digits before last).
+        ("410607016", False),
+        ("12710026", False),
+        # Invalid Verhoeff digit (last digit).
+        ("410607007", False),
+        ("337915001", False),
     ],
 )
 def test_is_concept_id(service, value, expected):
@@ -197,3 +213,104 @@ async def test_import_snomed_release(tmp_path):
     ):
         with pytest.raises(SystemException):
             await import_snomed_release(release_file)
+
+
+def _mock_fetch_concept(concept_id: str, active: bool, **associations) -> dict:
+    """A concept returned by the browser view, with its historical associations."""
+    return {
+        "conceptId": concept_id,
+        "active": active,
+        "associationTargets": {kind: list(ids) for kind, ids in associations.items()},
+    }
+
+
+@pytest.mark.parametrize(
+    "concept_id,expected",
+    [
+        ("35917007", "1187332001"),
+        ("84499006", "409777003"),
+        ("410607006", None),  # active, so nothing to replace
+        ("11111111000", None),  # POSSIBLY_EQUIVALENT_TO is not an equivalence
+        ("22222222000", None),  # several replacements, so a human decides
+        ("33333333000", None),  # the replacement is retired in its turn
+        ("55555555000", None),  # retired, naming no replacement
+        ("999999006", None),  # no such concept
+    ],
+)
+@pytest.mark.asyncio
+async def test_replacement_concept_id(service, monkeypatch, concept_id, expected):
+    """Test concept id replacement with mock _fetch_concept."""
+
+    _mock_fetch_concept_values = {
+        "410607006": _mock_fetch_concept("410607006", active=True),
+        # Retired with active replacement.
+        "35917007": _mock_fetch_concept("35917007", False, REPLACED_BY=["1187332001"]),
+        "1187332001": _mock_fetch_concept("1187332001", active=True),
+        "84499006": _mock_fetch_concept("84499006", False, SAME_AS=["409777003"]),
+        "409777003": _mock_fetch_concept("409777003", active=True),
+        # Retired with no active replacement.
+        "11111111000": _mock_fetch_concept(
+            "11111111000", False, POSSIBLY_EQUIVALENT_TO=["410607006"]
+        ),
+        "22222222000": _mock_fetch_concept(
+            "22222222000", False, REPLACED_BY=["410607006", "409777003"]
+        ),
+        "33333333000": _mock_fetch_concept(
+            "33333333000", False, REPLACED_BY=["44444444000"]
+        ),
+        # Retired with a retired replacement.
+        "44444444000": _mock_fetch_concept("44444444000", active=False),
+        "55555555000": _mock_fetch_concept("55555555000", active=False),
+    }
+
+    async def mock_fetch_concept(_concept_id: str, _: str) -> dict | None:
+        return _mock_fetch_concept_values.get(_concept_id)
+
+    monkeypatch.setattr(
+        "search_api.services.ontology.snomed._fetch_concept", mock_fetch_concept
+    )
+
+    assert await service.replacement_concept_id(concept_id) == expected
+
+
+@pytest.mark.asyncio
+async def test_describes(service, monkeypatch):
+    """Test concept description with mock _fetch_concept."""
+
+    calls: list[str] = []
+
+    async def mock_fetch_concept(concept_id: str, _: str) -> dict | None:
+        calls.append(concept_id)
+        return {
+            "conceptId": concept_id,
+            "active": True,
+            "descriptions": [
+                {"term": "Homo sapiens", "active": True},
+                {"term": "  HUMAN  ", "active": True},
+                {"term": "Retired synonym", "active": False},
+            ],
+        }
+
+    monkeypatch.setattr(
+        "search_api.services.ontology.snomed._fetch_concept", mock_fetch_concept
+    )
+
+    assert await SnomedService._describes("337915000", "human") is True
+    assert await SnomedService._describes("337915000", "Retired synonym") is False
+    assert calls == ["337915000", "337915000"]
+
+
+@pytest.mark.asyncio
+async def test_describes_invalid_concept_id(service, monkeypatch):
+    """Test description for invalid concept id with mock _fetch_concept."""
+
+    async def mock_fetch_concept(concept_id: str, _: str) -> dict | None:
+        return None
+
+    monkeypatch.setattr(
+        "search_api.services.ontology.snomed._fetch_concept", mock_fetch_concept
+    )
+
+    assert await _fetch_descriptions("999999006", "MAIN") == frozenset()
+    assert await SnomedService._describes("999999006", "anything") is False
+    assert await SnomedService._describes("999999006", "999999006") is False

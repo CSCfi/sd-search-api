@@ -1,4 +1,6 @@
 import json
+from unittest.mock import AsyncMock
+from datetime import datetime, timezone
 from typing import override
 
 import pytest
@@ -66,6 +68,14 @@ def get_mock_query_result() -> BeaconResultSets[BigpictureBeaconResultSetResult]
     return results
 
 
+# Indexed document counts, keyed as None for every document and value per scope.
+_MOCK_INDEXED_COUNTS: dict[str | None, int] = {
+    None: 18,
+    "clinical": 10,
+    "non_clinical": 8,
+}
+
+
 class MockBeaconService(
     BeaconService[OpenSearchBeaconFilteringTerm, BigpictureBeaconResultSetResult]
 ):
@@ -74,6 +84,10 @@ class MockBeaconService(
         self, filters, granularity="record", scope=None, qualifiers=None
     ) -> BeaconResultSets[BigpictureBeaconResultSetResult]:
         return get_mock_query_result()
+
+    @override
+    async def count_indexed(self, scope: str | None = None) -> int:
+        return _MOCK_INDEXED_COUNTS[scope]
 
     @override
     async def is_healthy(self) -> bool:
@@ -91,7 +105,7 @@ class MockBeaconService(
 
 SUGGESTIONS_AND_VALUES_INDEXED_COUNTS: dict[str, ValueCounts] = {
     "sex": ValueCounts(counts={"Male": 10, "Female": 8}),
-    "animal_species": ValueCounts(counts={"410607006": 5, "388480002": 3}),
+    "animal_species": ValueCounts(counts={"410607006": 5, "78678003": 3}),
     "fixation_type": ValueCounts(
         counts={"1388477003": 4}, other_counts={"Formalin": 2, "Custom fix": 1}
     ),
@@ -99,7 +113,7 @@ SUGGESTIONS_AND_VALUES_INDEXED_COUNTS: dict[str, ValueCounts] = {
 
 PREFERRED_TERMS: dict[str, str] = {
     "410607006": "Homo sapiens",
-    "388480002": "Sus scrofa",
+    "78678003": "Sus scrofa",
     "1388477003": "Tissue fixative",
 }
 
@@ -137,6 +151,7 @@ class MockSuggestionsAndValuesBeaconService(MockBeaconService):
 
 @pytest.fixture()
 def client():
+    """Creates the test client and sets up mock services."""
     saved = dict(app.dependency_overrides)
     app.dependency_overrides[get_beacon_service] = lambda: MockBeaconService(
         BP_FILTERING_TERMS
@@ -552,6 +567,50 @@ def test_filtering_term_rejects_a_scope_the_field_is_not_in(
     assert (
         client.get(f"/filtering_terms/diagnosis/{path}", params=ok).status_code == 200
     )
+
+
+_MOCK_LAST_INDEXED = datetime(2026, 8, 12, 9, 15, 22, tzinfo=timezone.utc)
+
+
+def _mock_status_database_calls(monkeypatch, pending_by_scope: dict[str, int]) -> None:
+    for name, value in (
+        ("pending_by_scope", AsyncMock(return_value=pending_by_scope)),
+        ("max_synced_at", AsyncMock(return_value=_MOCK_LAST_INDEXED)),
+    ):
+        monkeypatch.setattr(f"search_api.api.beacon.routes.{name}", value)
+
+
+def test_status(client: TestClient, monkeypatch):
+    """The indexed counts come from the index: ``MockBeaconService.count_indexed``
+    serves them from ``_MOCK_INDEXED_COUNTS``, installed for the whole module by
+    the ``client`` fixture. The pending counts and the last indexed time come from
+    the database: ``_mock_status_database_calls`` mocks the two queries the route
+    makes, so no database is needed.
+
+    Every pending document carries a declared scope, since a load rejects one that
+    does not, so the scopes account for all of ``documents.pending``.
+    """
+    _mock_status_database_calls(monkeypatch, {"clinical": 2})
+
+    resp = client.get("/status")
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "deployment": "Bigpicture",
+        "documents": {"indexed": _MOCK_INDEXED_COUNTS[None], "pending": 2},
+        "scopes": {
+            "clinical": {
+                "documents": {"indexed": _MOCK_INDEXED_COUNTS["clinical"], "pending": 2}
+            },
+            "non_clinical": {
+                "documents": {
+                    "indexed": _MOCK_INDEXED_COUNTS["non_clinical"],
+                    "pending": 0,
+                }
+            },
+        },
+        "last_indexed": _MOCK_LAST_INDEXED.isoformat().replace("+00:00", "Z"),
+    }
 
 
 def _database_health(monkeypatch, healthy: bool) -> None:

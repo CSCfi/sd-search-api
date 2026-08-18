@@ -1,6 +1,9 @@
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
+
+from search_api.severity import LogSeverity
 
 
 class StoredTerm(BaseModel):
@@ -19,3 +22,15 @@ class StoredOntology(BaseModel):
     version: str
     sha256: str
     concepts: list[dict[str, Any]]
+
+
+class StoredDocumentLog(BaseModel):
+    """A document_log table row."""
+
+    model_config = ConfigDict(frozen=True)
+
+    document_id: str
+    severity: LogSeverity
+    message: str
+    field_id: str | None = None
+    created_at: datetime | None = None

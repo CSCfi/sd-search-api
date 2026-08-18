@@ -1,3 +1,5 @@
+"""The terms_cache table."""
+
 from datetime import datetime
 from typing import Sequence
 
@@ -37,14 +39,10 @@ async def read_concept_ids_by_field(ontology_id: str) -> dict[str, set[str]]:
     return concept_ids_by_field
 
 
-async def delete_terms(ontology_id: str, field_ids: Sequence[str]) -> int:
-    """Delete the terms cached for these fields of an ontology, returning how many."""
+async def delete_all_terms() -> int:
+    """Delete every cached term and return how many were deleted."""
     async with get_cursor() as cur:
-        await cur.execute(
-            f"DELETE FROM {TERMS_CACHE_TABLE} "
-            f"WHERE ontology_id = %s AND field_id = ANY(%s)",
-            (ontology_id, list(field_ids)),
-        )
+        await cur.execute(f"DELETE FROM {TERMS_CACHE_TABLE}")
         return cur.rowcount
 
 

@@ -197,7 +197,7 @@ filtering_terms:
     description: "Microscopic finding (MISTRESC)."
     ontology:
       id: SEND
-    group: "finding"
+    group: "non_clinical"
 
   - id: finding_severity
     type: ontology
@@ -210,7 +210,7 @@ filtering_terms:
     ontologyRestriction:
       concept_ids: [ "C90000" ]  # SEND Severity (SEV)
       include_descendants: true
-    group: "finding"
+    group: "non_clinical"
 
   - id: finding_chronicity
     type: ontology
@@ -223,7 +223,7 @@ filtering_terms:
     ontologyRestriction:
       concept_ids: [ "C120529" ]  # Chronicity (CHRNCTY)
       include_descendants: true
-    group: "finding"
+    group: "non_clinical"
 
   - id: finding_distribution
     type: ontology
@@ -236,7 +236,7 @@ filtering_terms:
     ontologyRestriction:
       concept_ids: [ "C120530" ]  # Distribution (DSTRBN)
       include_descendants: true
-    group: "finding"
+    group: "non_clinical"
 
   - id: finding_result_category
     type: ontology
@@ -249,7 +249,7 @@ filtering_terms:
     ontologyRestriction:
       concept_ids: [ "C90017" ]  # Microscopic Histopathology Result Category (MIRESCAT)
       include_descendants: true
-    group: "finding"
+    group: "non_clinical"
 
 # Fields that are indexed in OpenSearch but are not filterable.
 # All are top-level (no group).

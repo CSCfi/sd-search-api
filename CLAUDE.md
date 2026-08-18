@@ -26,17 +26,27 @@ DEPLOYMENT_TYPE=Bigpicture sd_search_api
 # image and the server runs stale code.
 docker compose --env-file tests/integration/.env --profile dev up --build
 
-# Admin CLI (load data, generate index, refresh an ontology)
-# `<ontology> refresh` has two parts: update the ontology from its source, then
-# refresh the preferred terms cached for it in terms_cache.
-uv run python scripts/admin.py Bigpicture load <dir> --load --sync
-uv run python scripts/admin.py Bigpicture generate-index
-uv run python scripts/admin.py Bigpicture create-index   # once per environment
-# `recreate` drops and rebuilds both stores — needed after a mapping change, since
-# OpenSearch cannot alter an existing field's type. Refused when DEPLOYMENT_ENV=prod.
+# Admin CLI. The first positional is the deployment to act on: every command under it
+# acts on that deployment's own stores, its ontology caches included, since each
+# deployment has its own database. `snomed` sits beside the deployments instead, since
+# one Snowstorm is shared by all of them.
+uv run python scripts/admin.py Bigpicture load <dir> --sync   # --dry-run parses only
+uv run python scripts/admin.py Bigpicture sync                # only the documents pending sync
+uv run python scripts/admin.py Bigpicture index generate      # writes the mapping file, touches no cluster
+uv run python scripts/admin.py Bigpicture index create        # once per environment
+uv run python scripts/admin.py Bigpicture index recreate      # index only; marks documents pending, so follow with sync
+# A mapping change needs the index dropped, since OpenSearch cannot alter an existing
+# field's type: `index recreate` rebuilds the index alone, `recreate` both stores.
+# Refused when DEPLOYMENT_ENV=prod, as are `clear` and `index recreate`.
 uv run python scripts/admin.py Bigpicture recreate
-uv run python scripts/admin.py snomed refresh --release-file <path/to/SnomedCT_*.zip>
-uv run python scripts/admin.py send refresh
+# `<deployment> refresh <id>` refreshes the preferred terms that deployment caches,
+# updating the ontology from its source first if the database caches it whole
+# (SEND does, SNOMED does not — Snowstorm serves it).
+uv run python scripts/admin.py Bigpicture refresh snomed
+uv run python scripts/admin.py Bigpicture refresh send
+# Importing a SNOMED release writes to the shared Snowstorm and to no deployment. Takes
+# hours, so it is its own command rather than part of a refresh.
+uv run python scripts/admin.py snomed import --release-file <path/to/SnomedCT_*.zip>
 ```
 
 Dependencies are managed with `uv`. The virtualenv is at `.venv/`. Most config is supplied
@@ -56,19 +66,22 @@ search_api/
 ├── api/                # HTTP layer + per-deployment packages
 │   ├── {admin,auth,beacon,opensearch}/      # generic routers and services
 │   └── bigpicture/     # everything Bigpicture-specific lives here, nowhere else:
-│       ├── domain.py models.py ai.py opensearch.py extract.py
+│       ├── domain.py models.py ai.py opensearch.py
+│       ├── extract/    # XML in, one document per image out:
+│       │               # models.py refs.py values.py document.py
 │       ├── config/     # hand-edited fields/groups/scopes YAML
-│       ├── index/      # GENERATED OpenSearch mapping (generate-index writes it)
+│       ├── index/      # GENERATED OpenSearch mapping (`index generate` writes it)
 │       └── schemas/    # XSDs used to validate the ingested XML
 ├── services/           # generic services
 │   ├── ontology/       # service.py registrations.py snomed.py send.py term_cache.py
+│   │                   # values.py — a document's coded values, made into concept ids
 │   │   └── cache/      # one whole small ontology in memory:
 │   │                   # models.py source.py store.py service.py
 │   ├── auth.py session.py
-│   └── load.py sync.py poller.py value_counts.py
+│   └── load.py sync.py poller.py value_counts.py validate.py
 ├── database/           # every line of SQL, one module per table:
 │   │                   # repository.py (connection) models.py (rows)
-│   │                   # document.py terms_cache.py ontology_cache.py
+│   │                   # document.py document_log.py terms_cache.py ontology_cache.py
 │   └── schema/         # create.sql drop.sql
 ├── utils/              # stateless helpers: crypt.py dir.py xml.py
 ├── ai/  conf.py  exceptions.py  main.py
@@ -98,6 +111,7 @@ loader: Loader[…]                              # how source data is ingested
 beacon_service_factory                         # builds the BeaconService for a search client
 result_sets_response_model                     # deployment's Beacon resultSets shape
 ai_assistant_description, ai_result_model, ai_result_instructions   # AI search persona + output
+replace_concepts = True                        # substitute a retired concept at load
 ```
 
 - `Domain.ontology_ids` → distinct `ontology.id`s referenced by the filtering terms.
@@ -120,6 +134,36 @@ pattern: `BP_DOMAIN`, `BP_LOADER`).
 2. **OpenSearch** (`api/opensearch/services.py`) — the search index (`bp-image-index` for Bigpicture).
    `SyncService` (`services/sync.py`, constructed with the index name) reads unsynced rows, bulk-indexes
    via `index_documents`, then stamps `synced_at`.
+
+### Database connections (`database/repository.py`)
+
+`get_cursor()` / `get_connection()` are how everything reaches Postgres. **The server pools its
+connections; nothing else does.** `make_lifespan` calls `open_pool` before the caches that poll the
+database start, and `close_pool` after they stop; while no pool is open `get_connection` connects
+directly, which is what the admin CLI and the tests get. A load or sync holds one connection for its
+whole run, so a pool would save it nothing and leave background workers to shut down. Measured on
+localhost, a query costs ~6 ms unpooled against ~0.7 ms pooled, connecting being the difference.
+
+The pool is a `psycopg_pool.AsyncConnectionPool` sized by `POSTGRES_POOL_MIN_SIZE` /
+`POSTGRES_POOL_MAX_SIZE`, with three things set deliberately:
+
+- **`check=AsyncConnectionPool.check_connection`** — every connection is probed on the way out of
+  the pool, so one the server closed while it sat idle (a restart, an idle timeout, a dropped
+  network) is discarded and replaced instead of failing the query that got it. The probe is one
+  round trip, replacing the several that connecting costs. Without it a terminated backend surfaces
+  as `AdminShutdown` to whichever request is handed it.
+- **`timeout=POSTGRES_POOL_TIMEOUT`** (5 s, against psycopg_pool's 30) — how long a caller waits
+  when every connection is in use, after which it raises `PoolTimeout`. That bound is what
+  `tests/integration/database/test_repository.py` covers: hold `POSTGRES_POOL_MAX_SIZE` connections,
+  each answering a `SELECT 1`, and the next one times out rather than opening a connection the
+  database would eventually refuse.
+- **`await pool.open(wait=False)`** — a database that is not up must not stop the server from
+  starting, since `/health` is what reports that. The pool fills in the background and a query made
+  before it does raises exactly as it would with no pool.
+
+`POSTGRES_POOL_MAX_LIFETIME` replaces a connection once it reaches that age even while it is
+working, so a database restarted or reconfigured since is reconnected to rather than only after
+something breaks.
 
 The OpenSearch-shaped payload is produced at **load** time by `build_document(document)`
 (`api/opensearch/document.py`), which converts each `OpenSearchFieldValue`; `age_at_extraction`
@@ -149,7 +193,88 @@ indexed at the root under `SCOPE_FIELD` (`api/scopes.py`), and `Domain` contribu
 store: it checks `scope` against `filtering_scopes` and each group's qualifier ids/values against
 `filtering_qualifiers`, so each extractor does not restate the declared configuration.
 
-### XML ingestion (`search_api/api/bigpicture/extract.py`)
+### Document log (`search_api/database/document_log.py`)
+
+A load records what it could not make sense of in the `document_log` table (`document_id`,
+optional `field_id`, `severity`, `message`, `created_at`), keyed to the document it is about.
+`severity` is `WARNING` or `ERROR`, constrained in the schema and by `LogSeverity`
+(`severity.py`, its own module so `api/` and `database/` share the type without either importing
+the other), and `write_document_log` (`database/document_log.py`) both inserts the row and emits it
+through `logging` at the matching level, so a problem cannot be in one and not the other. The
+message names only what the columns do not — the value and the ontology — and reads the same for
+every occurrence, so rows group by it.
+
+**Loading a document again replaces its rows** (`delete_document_logs` before the first is written),
+so the table says what is wrong with the document as it stands rather than what was wrong with every
+version of it: a problem corrected in the source disappears on the next load instead of sitting
+there indistinguishable from a current one. A document skipped as not newer keeps the rows it has.
+
+**Extraction reaches no database**, so what it cannot make sense of rides out on
+`ExtractedDocument.logs` as `ExtractLog`s (`api/extract_logs.py`: `severity`, `field_id`, `message`)
+and `extraction_logs` (`services/load.py`) turns each into a `document_log` row. That keeps
+`load --dry-run` independent of the database, and it reports the same messages rather than writing
+them, which makes a dry run a validation pass. Every `ExtractLog` is built by a named function in
+`api/extract_logs.py` (`invalid_scheme_log`, `invalid_duration_log`) rather than by a deployment's
+extractor, so the same problem reads the same whichever deployment found it.
+
+A message names the **XML tag** only where the tag is not the field id, since the field id is
+already a column. Bigpicture declares those cases in one table, `_XML_TAGS` — the five SEND
+findings (`finding_severity` from `MISEV`) and `staining_substance` from `staining_compound` — so
+every extraction call passes the **field id alone** and `_xml_tag` supplies the tag for the xpath.
+Passing the tag instead is what made a log name a field that does not exist.
+
+A deployment attributes its logs itself: Bigpicture pairs each parsed XML object with its own logs
+(`_Extracted`) and extends the images that object is part of, so a statement's dropped code reaches
+those documents and no others.
+
+A retired concept is substituted before the document is stored: `LoadService._substitute_replaced_concepts`
+asks the ontology for a replacement, indexes that instead, and logs the swap as a `WARNING`.
+`Domain.replace_concepts` (default `True`) turns it off for a deployment that must index its source
+unchanged. Nothing is logged then, and nothing is lost from the facet: SNOMED resolves a retired
+concept to its own preferred term as readily as an active one, so what substitution buys is reach —
+the subtree searches a retired concept falls out of — not a name. Only a single still-active `SAME_AS` or `REPLACED_BY` target counts — `POSSIBLY_EQUIVALENT_TO` is explicitly
+uncertain, and several targets are a judgement rather than a substitution. This matters because
+retiring a concept strips its relationships: a retired concept descends from nothing, so no subtree
+query reaches a document citing one, whatever `activeFilter` is set to (measured: an ECL descendant
+count is identical either way).
+
+A value whose code is no concept id is resolved through its meaning before the document is stored (see
+*Ontology providers*): one concept is a `WARNING` naming the meaning and the id indexed for it, while
+several is an `ERROR` naming the candidates, and none — or no meaning at all — an `ERROR` saying which.
+After an `ERROR` a strict `ontology` field drops the value, so the row is the only record of it.
+
+What it currently records: every value of a strict `ontology` field that reached no preferred term.
+Such a value **is** indexed, but `/filtering_terms/{field_id}/values` builds its response from the
+resolved terms, so the value is missing from the facet and nothing can search for it by name — the
+silent failure the table exists to make visible. An `ontologyOrValue` field is exempt, since an
+unresolvable value there is indexed as free text by design. The check is against the term cache
+rather than the resolution call, because the two provider kinds fail differently: a cached ontology
+rejects an unknown id in `is_concept_id` before resolution is attempted, while SNOMED accepts any
+well-formed id and fails to resolve it later.
+
+The rows are about documents, so `admin.py <deployment> clear` deletes them with the documents.
+
+### XML ingestion (`search_api/api/bigpicture/extract/`)
+
+Four modules, each a step of the same job:
+
+- **`models.py`** — the parsing models every other module is built on (`Bigpicture*Fields`,
+  `BigpictureCodeAttributeValue`), an object's `ObjectIds`, and `BigpictureExtractedObject`, which
+  carries one parsed XML object: its `ids`, its `fields`, and the `logs` of what was dropped from it.
+- **`refs.py`** — the ref graph of one dataset. Every `map_ref` writes into a `BigpictureReferences`,
+  whose `image_ids_from_*` methods follow the maps from an object to the images it reaches, which are
+  the documents anything read from it belongs to.
+- **`values.py`** — reading one element's values, and dropping those no ontology accepts.
+- **`document.py`** — the orchestration: read the files, add every object to the images it reaches,
+  and `to_opensearch_values` per document.
+
+`tests/unit/api/bigpicture/extract/` mirrors the four, one test module each.
+
+**A name is public exactly when another module in the package uses it.** `values.py` exposes its seven
+`extract_*` functions and keeps its 21 readers and tables private; `refs.py` exposes
+`BigpictureReferences`, `related_ids`, `object_ids`, `object_keys`, `map_ref` and the observation refs.
+An underscore therefore means *module*-local, and `__init__.py`'s `__all__` is what says which of the
+public names callers outside the package get.
 
 `extract_documents(root, fs, single_dir, c4gh_private_key_file, c4gh_passphrase) → Iterator[ExtractedDocument]`
 walks a directory tree and reads six XML files per dataset:
@@ -176,18 +301,31 @@ Bigpicture models below, then `to_opensearch_values(fields)` converts them to th
 top-level `OpenSearchFieldValue`s and one `OpenSearchGroup` per nested item, keyed by the fields
 declared in `BP_DOCUMENT_FIELDS`. An item contributing no indexable value is not indexed at all. `age_at_extraction`
 is an ISO-8601 duration tuple `(start, end)` — e.g. `("P40Y", "P41Y")` — computed by
-`_add_iso8601_durations` (uses `isodate`, normalises month overflow); invalid durations are logged
-and dropped. `.c4gh`-encrypted XML is decrypted on the fly (`utils/crypt.py`).
+`_extract_iso8601_duration` (uses `isodate`, normalises month overflow); an invalid duration is dropped and
+recorded as an error against the document. `.c4gh`-encrypted XML is decrypted on the fly (`utils/crypt.py`).
 
-The parsing models are also in `extract.py`; `BigpictureFields` is the per-image root, holding the
+The parsing models are in `extract/models.py`; `BigpictureFields` is the per-image root, holding the
 ids, `scope`, the dataset fields, and the `specimen`, `staining`, `diagnosis` and `finding` sets. `BigpictureSpecimenFields` flattens the biological being, specimen and block
 fields into one model (see the grouping rationale in `fields.yaml`).
 
-`scope` is not in `fields.yaml` — it is `ExtractedDocument.scope`, produced by `_extract_scope`.
+Every `CODE_ATTRIBUTE` contributes the pair `(CODE, MEANING)` as its value, the meaning being what the
+load falls back to when the code is no concept id (see *Ontology providers*).
+`_filter_value_by_scheme` / `_filter_values_by_scheme` drop a value whose scheme is not the field's
+ontology — recording an error against the document, since nothing downstream can see what was dropped
+— because its code is no concept id of the one required however much it may look like one.
+
+An **`ontologyOrValue`** field takes its coded value in precedence over free text: `<id>_other` is
+filled only when no code was read, since free text is what a source gives for a value it has no code
+for, rather than a label for one it has. `_extract_ontology_or_value` is that rule for
+`staining_procedure` and `staining_substance`; `_extract_fixation_type` reaches the same end by its own
+route, because a scheme of `Other` (`_UNCODED_SCHEME`) declares the coded value itself uncoded and
+routes its text to `fixation_type_other`.
+
+`scope` is not in `fields.yaml` — it is `ExtractedDocument.scope`, produced by `extract_scope`.
 
 An observation statement contributes to the `diagnosis` or `finding` set depending on its
 `STATEMENT_TYPE`; the parsing is otherwise identical, including how statements reach images. Both
-carry the `observation` qualifier (`confirmed` / `candidate`, constants in `extract.py`): a statement
+carry the `observation` qualifier (`confirmed` / `candidate`, constants in `extract/models.py`): a statement
 linked by `IMAGE_REF`, or whose `STATEMENT_STATUS` is `Distinct`, is `confirmed` for the image, and
 anything reaching several images through another ref is a `candidate` for each. Each statement yields
 **one nested item**, carrying the single qualifier value that statement was made under; items are not
@@ -206,7 +344,7 @@ Indexed fields and filtering terms are declared in `api/bigpicture/config/fields
 `api/fields.py` (`load_fields_config`) into `BP_DOCUMENT_FIELDS` / `BP_FILTERING_TERMS`
 (`api/bigpicture/models.py`). The OpenSearch index mapping JSON is generated from these fields by
 `OpenSearchIndexGeneratorService` (`api/opensearch/index_generator.py`) via the
-`generate-index` admin command.
+`index generate` admin command.
 
 An `ontology` / `ontologyOrValue` field may declare an `ontologyRestriction` — the part of the
 ontology its values may resolve to. It is deployment configuration, excluded from both API
@@ -273,7 +411,19 @@ override them via `app.dependency_overrides`.
 | `POST /ai/query` | Natural-language search (gated by `FEATURE_AI`) |
 | `GET /filtering_terms/{field_id}/values` | Indexed values with counts; ontology fields resolve concept IDs to preferred terms |
 | `GET /filtering_terms/{field_id}/suggestions` | Autocomplete restricted to indexed values |
+| `GET /status` | What the deployment holds: documents indexed and pending, in total and per scope, and when a document was last synced |
 | `GET /health` | Both stores answer; a `503` names the one that did not |
+
+`AuthMiddleware` (`api/middlewares.py`) requires a session on every route outside `PUBLIC_PATHS`,
+which is why `/health` and `/info` answer anonymously while `/status` — the same kind of operational
+report, but one that says how much data a deployment holds — is a `401` without one. `/admin` is
+public to the middleware and gated by `ADMIN_KEY` instead.
+
+`/status` reads its pending counts and last-synced time from Postgres and its indexed counts from
+OpenSearch, one `count` per scope plus one for the total. An index that does not exist counts zero
+rather than erroring, so the endpoint still answers before `index create` has been run. Every count
+is a term lookup, so nothing here scales with the number of documents — except the pending
+counts, which read one row per document still awaiting sync.
 
 `values` and `suggestions` both accept `scope=<id>` and repeatable `qualifier=<id>:<value>`, and
 restrict their counts by both. Neither has a default: omitting one does not filter on it. A scope the
@@ -354,14 +504,15 @@ comes from `request.query.requestedGranularity`.
 ### Ontology providers (`search_api/services/ontology/service.py`)
 
 `OntologyService` (ABC) abstracts term resolution for one ontology: `is_concept_id`,
-`get_preferred_terms`, and `prepare_ontology_filter`. `prepare_ontology_filter` is a template
+`get_preferred_terms`, `prepare_ontology_filter`, and `replacement_concept_id` — the last one
+concrete, returning `None`, so an ontology that retires nothing need not answer it. `prepare_ontology_filter` is a template
 method implemented once on the ABC — filtering-term lookup, value normalisation, the
 resolved/unresolved split, and the final filter rebuild are identical across providers. Each
 provider only implements two hooks: `_find_concept_ids(value, filtering_term)` (one value ->
 its concept ID(s), possibly more than one if a term isn't unique) and
 `_find_descendant_ids(concept_ids)` (a set of concept IDs -> all of their descendants).
 
-Each value is resolved by `_resolve_concept_ids`, cheapest source first:
+Each value is resolved by `resolve_concept_ids`, cheapest source first:
 
 1. **A concept id is taken as given** — an id absent from the ontology is absent from the index
    too, so looking it up would cost a round trip without changing the result.
@@ -371,7 +522,32 @@ Each value is resolved by `_resolve_concept_ids`, cheapest source first:
 3. Otherwise the provider's `_find_concept_ids` hook consults the ontology itself.
 
 Unresolved values are only kept in the prepared filter for `ontologyOrValue` fields (which have a
-free-text fallback field downstream); for strict `ontology` fields they're dropped. A registry maps
+free-text fallback field downstream); for strict `ontology` fields they're dropped.
+
+**A load resolves its values through the same cascade** (`services/ontology/values.py`,
+`resolve_document`),
+so a value indexed and a value searched for reach the same concept. The code the source coded is tried
+first: it is kept as it is when it is a concept id, and only when it is not does the **meaning**
+carried beside it get resolved — the term is then the only thing left that can name the concept. That
+the code was unusable is a `WARNING` when the meaning names one concept, and an `ERROR` when nothing
+does: several matches are a judgement rather than a resolution, and a value with no meaning has
+nothing to fall back to. This runs before the retired-concept substitution, so a meaning naming a
+retired concept is resolved and then replaced.
+
+An ontology value is therefore the pair `(concept id, meaning)`, which `_VALUE_TYPES` requires of the
+`ontology` and `ontologyOrValue` types just as it requires a pair of `iso8601Range`. The concept id is
+`None` when no ontology the field accepts coded the value, leaving the meaning all there is to resolve.
+`OpenSearchFieldValue` is **frozen**, so nothing rewrites what a source said: resolving records the
+concept id reached on a copy's `resolved_concept_id`, and `_encode_value` indexes that.
+
+**A value that resolves to no concept id is dropped, whichever of the two types its field is.** Both
+hold concept ids, so an unresolvable one is no more indexable in one than in the other, and a term left
+in either would be searchable by nothing and would name nothing in the field's values; the
+`document_log` rows are what keep what the source said. The difference between the types is elsewhere
+entirely: an `ontologyOrValue` term has a second field of its own (`<id>_other`), which extraction
+fills with the free text the source gave — `values.py` never touches it. `SnomedService` will not send Snowstorm a term under
+`_MIN_SEARCH_TERM_LENGTH` (3) characters, which it answers with a `400`; `_fetch_concepts` is cached
+for 30 days like the rest, so a load searches once per distinct term rather than once per document. A registry maps
 an **ontology id** (e.g. `SCTID`) to its provider via `register_ontology_service` /
 `get_ontology_service`, keeping `ontology.py` unaware of concrete providers. A filtering term
 selects its provider by `ontology.id`.
@@ -395,14 +571,20 @@ ontology. Registering a new provider means adding it there, not adding an import
   rejected even though it appears in "Neutral buffered formalin 10% solution", because the concept
   a value resolved to is not reported back to the caller.
 
-`_fetch_all_concepts` and `_fetch_descriptions` are cached for 30 days. Set `SNOWSTORM_URL` to
+`_fetch_concept` is the one call for reading a single concept whole, cached for 30 days and shared by
+`replacement_concept_id` and `_describes`. It reads Snowstorm's **browser** view, because
+`/{branch}/concepts/{id}` returns the concept's own columns alone — no `associationTargets`, no
+`inactivationIndicator`, no `descriptions` (measured: the browser view costs 10.1 kB against the
+3.5 kB of the descriptions alone for `84499006`, and 68.7 kB against 65.1 kB for `138875005`, where
+the descriptions dominate either way). `_fetch_all_concepts` is cached for 30 days too. Set `SNOWSTORM_URL` to
 enable.
 
 `import_snomed_release(release_file, branch)` automates the README's "Import SNOMED release"
 procedure: creates a Snowstorm import job, uploads the release archive, then polls
 `/imports/{id}` until it reports `COMPLETED` (raising on `FAILED`; a `404` also means done, per
 Snowstorm's own behaviour of dropping completed jobs). Invoked by `scripts/admin.py`'s
-`snomed refresh --release-file <path>`, where `--release-file` is required.
+`snomed import --release-file <path>`, which writes to the shared Snowstorm alone; refreshing the
+terms a deployment caches against it is that deployment's own `refresh snomed`.
 
 ### Reloading a cache (`search_api/services/poller.py`)
 
@@ -439,7 +621,9 @@ an `UpdatedPoller` over `read_updated_at` every `TERM_CACHE_REFRESH` seconds. It
 — `read_terms`, `read_concept_ids_by_field`, `read_updated_at`, `insert_terms`, `update_terms`, over a
 `StoredTerm` model (`database/models.py`) rather than row tuples — so everything but the SQL is unit-testable without a
 database. All ontologies share the one `terms_cache` table
-(`ontology_id, concept_id, field_id, preferred_term, updated_at`).
+(`ontology_id, concept_id, field_id, preferred_term, updated_at`) — shared across ontologies, not
+across deployments: no table carries a deployment column, because each deployment has its own
+database (`POSTGRES_DB`), so a second deployment caches its own copy of everything.
 
 `create_term_caches(ontology_ids)` builds one cache per ontology id. There is no factory registry:
 every ontology's cache is constructed the same way, so `make_lifespan` and the admin CLI just call it.
@@ -462,7 +646,7 @@ terminology server. Orthogonal to the term cache above, which every ontology has
   `init` serves what the store holds, fetching from the source and storing it only when nothing is
   stored yet, then serves lookups from that in-memory table. `start()` polls
   `OntologyCacheStore.updated_at` through an `UpdatedPoller` every `ONTOLOGY_CACHE_REFRESH` seconds,
-  so a `send refresh` by the admin CLI reaches a running server without a restart. `updated_at` is
+  so a `refresh send` by the admin CLI reaches a running server without a restart. `updated_at` is
   read rather than the ontology itself, so an unchanged store costs one row. Its `_find_concept_ids` hook
   matches a concept id, preferred term or synonym via `normalise_term`, resolving to every concept
   carrying that value and then keeping only those permitted by the field's `ontologyRestriction`
@@ -473,7 +657,7 @@ terminology server. Orthogonal to the term cache above, which every ontology has
   `ontology_id`; `write` always replaces the entire stored snapshot (never per-concept updates). It
   maps rows to and from the models; the SQL is `database/ontology_cache.py`.
 - Nothing re-fetches on its own after that first store. Deliberate updates come from
-  `scripts/admin.py`'s `send refresh`, which fetches live, skips entirely if the new version isn't
+  `scripts/admin.py`'s `<deployment> refresh send`, which fetches live, skips entirely if the new version isn't
   newer than what's stored, and otherwise writes — bumping `version` even if `sha256` is unchanged
   (a republish with no real content change), or replacing the data too when `sha256` differs. A
   running server notices that write through the `updated_at` poll above.
@@ -510,7 +694,9 @@ constrains the LLM to emit JSON matching the model; `result.output` is the concr
 ### Configuration (`conf.py`)
 
 Settings come from the environment (pydantic-settings); most fields are **required** (no hardcoded
-host/db/password defaults). Defaults that exist: `POSTGRES_PORT=5432`, `OPENSEARCH_PORT=9200`,
+host/db/password defaults). Defaults that exist: `POSTGRES_PORT=5432`,
+`POSTGRES_POOL_MIN_SIZE=2`, `POSTGRES_POOL_MAX_SIZE=10`, `POSTGRES_POOL_MAX_LIFETIME=3600`,
+`POSTGRES_POOL_TIMEOUT=5`, `OPENSEARCH_PORT=9200`,
 `DEPLOYMENT_ENV=dev`, `TERM_CACHE_REFRESH=300`, `ONTOLOGY_CACHE_REFRESH=300`,
 `VALUE_COUNT_CACHE_REFRESH=300`, `FEATURE_AI=false`, `ADMIN_KEY=None` (admin
 endpoints unmounted when unset), plus `OIDC_SCOPE`, `OIDC_SECURE_COOKIE=true`, `JWT_ISSUER` and
@@ -524,17 +710,24 @@ A working set is in `tests/integration/.env`.
 tests/            # mirrors the search_api/ package layout
 ├── unit/          # run by tox; no external services needed
 │   ├── api/{admin,auth,beacon,bigpicture,opensearch}/
-│   ├── services/{ontology/,test_auth.py,test_session.py,test_validate.py}
+│   ├── services/{ontology/,test_auth.py,test_load.py,test_poller.py,
+│   │              test_session.py,test_validate.py,test_value_counts.py}
 │   └── utils/                 # crypt, dir, xml
 ├── integration/   # require Postgres/OpenSearch (route tests hit a running server)
 │   ├── api/bigpicture/        # endpoints incl. AI (test_routes_ai.py, @skip — needs Ollama),
 │   │                          # plus extract + load against Postgres
-│   ├── database/, scripts/bigpicture/
-│   └── services/{ontology/,test_sync.py}   # SNOMED hits a live Snowstorm
+│   ├── database/              # one module per table, plus test_repository.py (the pool)
+│   ├── scripts/               # test_admin.py (ontology updates) + bigpicture/test_admin.py
+│   └── services/{ontology/,test_load.py,test_poller.py,test_sync.py}
 ├── performance/   # locust load tests
 ├── utils/         # test helpers (generate_data.py)
 └── files/bigpicture/xml/dataset_{clinical,non_clinical}/METADATA/   # XML fixtures
 ```
+
+A test needing a reachable Snowstorm carries `@pytest.mark.requires_snowstorm`, and
+`SKIP_SNOWSTORM_TESTS=true` skips those — set in CI, which cannot reach the internal-only Snowstorm
+that `tests/integration/.env` points at. The marker is registered and the skip applied in
+`tests/integration/conftest.py`.
 
 Integration `conftest.py` loads `tests/integration/.env` and provides module-scoped fixtures:
 `bp_opensearch_docs` (override to supply inline documents), `bp_opensearch_index_name` (returns a

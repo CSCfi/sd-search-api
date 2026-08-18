@@ -12,6 +12,7 @@ from search_api.api.bigpicture.extract import (
     to_opensearch_values,
 )
 from search_api.api.bigpicture.domain import BP_DOMAIN
+from search_api.services.ontology.term_cache import create_term_caches
 from search_api.api.bigpicture.models import BP_OPENSEARCH_INDEX
 from search_api.services.sync import SyncService
 from search_api.database.document import get_document
@@ -69,7 +70,7 @@ async def test_load_and_sync_fields():
 
     sync_service = SyncService(BP_OPENSEARCH_INDEX)
     load_service = LoadService(
-        term_caches={},
+        term_caches=create_term_caches(BP_DOMAIN.ontology_ids),
         filtering_terms=BP_DOMAIN.filtering_terms,
         filtering_scopes=BP_DOMAIN.filtering_scopes,
         filtering_qualifiers=BP_DOMAIN.filtering_qualifiers,

@@ -6,7 +6,7 @@ from typing import Any
 
 import isodate  # type: ignore[import-untyped]
 
-from opensearchpy import AsyncOpenSearch, helpers
+from opensearchpy import AsyncOpenSearch, NotFoundError, helpers
 
 from search_api.conf import opensearch_config as _opensearch_config
 from search_api.exceptions import SystemException
@@ -121,6 +121,24 @@ async def index_documents(
 _DOCUMENTS_AGG_NAME = "documents"
 
 _MAX_KEYWORD_VALUES = 10000  # Upper bound on distinct values for one field.
+
+
+async def count_indexed_documents(
+    search: AsyncOpenSearch, index: str, query: dict[str, Any] | None = None
+) -> int:
+    """Return how many documents the index holds, all of them or for a query.
+
+    Counted rather than aggregated, so the cost is a term lookup instead of a pass
+    over the documents.
+
+    An index that does not exist has no documents, so it counts zero rather than
+    raising.
+    """
+    try:
+        resp = await search.count(index=index, body={"query": query} if query else None)
+    except NotFoundError:
+        return 0
+    return int(resp["count"])
 
 
 async def fetch_indexed_keywords(

@@ -3,3 +3,4 @@
 DROP TABLE IF EXISTS document;
 DROP TABLE IF EXISTS terms_cache;
 DROP TABLE IF EXISTS ontology_cache;
+DROP TABLE IF EXISTS document_log;

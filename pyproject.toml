@@ -20,7 +20,7 @@ dependencies = [
     "jsonschema>=4.26.0",
     "lxml>=6.0.2",
     "opensearch-py[async]>=3.1.0",
-    "psycopg[binary]>=3.3.3",
+    "psycopg[binary,pool]>=3.3.3",
     "pydantic>=2.12.5",
     "types-jsonschema>=4.26.0.20260508",
     "types-requests>=2.33.0.20260508",
@@ -34,6 +34,7 @@ dependencies = [
     "types-pyyaml>=6.0",
     "pyjwt>=2.13.0",
     "idpyoidc>=5.0.0",
+    "python-stdnum>=2.2",
 ]
 
 [dependency-groups]

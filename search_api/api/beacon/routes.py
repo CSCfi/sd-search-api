@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 
+from search_api.database.document import max_synced_at, pending_by_scope
 from search_api.database.repository import is_healthy as is_database_healthy
 from search_api.ai.models import AISearchResult
 from search_api.ai.services import AIService
@@ -29,7 +30,13 @@ from search_api.api.beacon.models import (
 )
 from search_api.api.beacon.services import BeaconService
 from search_api.api.domain import Domain
-from search_api.api.models import AIQueryRequest, FieldValue
+from search_api.api.models import (
+    AIQueryRequest,
+    DeploymentStatus,
+    DocumentCounts,
+    FieldValue,
+    ScopedCounts,
+)
 from search_api.api.qualifiers import (
     QUALIFIER_VALUE_SEPARATOR,
     validate_requested_qualifiers,
@@ -462,6 +469,41 @@ def make_beacon_router(domain: Domain) -> APIRouter:
             FieldValue(value=label, count=count, concept_id=concept_id)
             for label, count, concept_id in sorted_results
         ]
+
+    @router.get("/status", response_model=DeploymentStatus)
+    async def status(
+        service: BeaconService = Depends(get_beacon_service),
+    ) -> DeploymentStatus:
+        """Report what this deployment contains.
+
+        Only returns counts that can be retrieved cheaply.
+        """
+        pending = await pending_by_scope()
+        last_indexed = await max_synced_at()
+
+        scope_ids = [scope.id for scope in domain.filtering_scopes]
+        indexed_total, *indexed_by_scope = await asyncio.gather(
+            service.count_indexed(),
+            *(service.count_indexed(scope_id) for scope_id in scope_ids),
+        )
+
+        return DeploymentStatus(
+            deployment=domain.name,
+            documents=DocumentCounts(
+                indexed=indexed_total,
+                pending=sum(pending.values()),
+            ),
+            scopes={
+                scope_id: ScopedCounts(
+                    documents=DocumentCounts(
+                        indexed=indexed,
+                        pending=pending.get(scope_id, 0),
+                    )
+                )
+                for scope_id, indexed in zip(scope_ids, indexed_by_scope, strict=True)
+            },
+            last_indexed=last_indexed,
+        )
 
     @router.get("/health")
     async def health(service: BeaconService = Depends(get_beacon_service)):

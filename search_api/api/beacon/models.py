@@ -275,6 +275,10 @@ class BeaconFilteringGroup(BaseModel):
     id: str
     label: str
     description: str = ""
+    border: bool = Field(
+        default=False,
+        description="Whether the UI should draw a border around the group.",
+    )
 
 
 # Beacon V2 extension.

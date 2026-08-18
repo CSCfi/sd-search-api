@@ -40,7 +40,7 @@ KIDNEY_CONCEPT_ID = "64033007"
 
 # fixation_type
 FFPE_CONCEPT_ID = "431510009"
-FROZEN_FIX_CONCEPT_ID = "1286895009"
+FROZEN_FIX_CONCEPT_ID = "16214131000119104"  # frozen tissue section specimen
 
 # block_preparation
 PARAFFIN_CONCEPT_ID = "311731000"
@@ -48,7 +48,7 @@ FROZEN_PREP_CONCEPT_ID = "433469005"
 
 # staining_procedure
 HE_CONCEPT_ID = "12710003"  # haematoxylin and eosin
-IHC_CONCEPT_ID = "406917005"  # immunohistochemistry
+IHC_CONCEPT_ID = "117617002"  # immunohistochemistry
 ISH_CONCEPT_ID = "115959002"  # in situ hybridisation
 
 # specimen_type
@@ -483,6 +483,25 @@ def get_dataset_url(
         if rs.id == dataset_id:
             return rs.results[0].datasetUrl
     return None
+
+
+@pytest.mark.asyncio
+async def test_status(bp_opensearch_index, client):
+    body = client.get("/status").json()
+
+    assert body["deployment"] == "Bigpicture"
+    assert body["documents"]["indexed"] == len(OPENSEARCH_DOCS)
+    assert body["scopes"]["non_clinical"]["documents"]["indexed"] == len(
+        OPENSEARCH_DOCS
+    )
+    assert body["scopes"]["clinical"]["documents"]["indexed"] == 0
+    assert set(body["scopes"]) == {"clinical", "non_clinical"}
+
+
+def test_status_needs_session():
+    with httpx.Client(base_url="http://localhost:8000", timeout=30.0) as anonymous:
+        assert anonymous.get("/status").status_code == 401
+        assert anonymous.get("/health").status_code == 200
 
 
 @pytest.mark.asyncio

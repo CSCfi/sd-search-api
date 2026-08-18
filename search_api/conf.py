@@ -1,6 +1,6 @@
 import base64
 from typing import Literal
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 
 from pydantic import Field, computed_field, field_validator
 from pydantic_settings import BaseSettings
@@ -27,6 +27,23 @@ class DatabaseConfiguration(BaseSettings):
     POSTGRES_DB: str = Field(description="PostgreSQL database name.")
     POSTGRES_USER: str = Field(description="PostgreSQL user.")
     POSTGRES_PASSWORD: str = Field(description="PostgreSQL password.")
+
+    POSTGRES_POOL_MIN_SIZE: int = Field(
+        default=2, description="Connections the pool keeps open."
+    )
+    POSTGRES_POOL_MAX_SIZE: int = Field(
+        default=10, description="Connections the pool may open at once."
+    )
+    POSTGRES_POOL_MAX_LIFETIME: float = Field(
+        default=3600.0,
+        description="Seconds after which a pooled connection is replaced.",
+    )
+    POSTGRES_POOL_TIMEOUT: float = Field(
+        default=5.0,
+        description=(
+            "Seconds a caller waits for a connection from the pool before failing."
+        ),
+    )
 
 
 class OpenSearchConfiguration(BaseSettings):
@@ -137,6 +154,13 @@ class OIDCConfiguration(BaseSettings):
     def redirect_url(self) -> str:
         """URL to send the user to after login/logout."""
         return self.OIDC_REDIRECT_URL or urljoin(self.BASE_URL, "/docs")
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def post_logout_redirect_url(self) -> str:
+        """URL to send the user to after logout: redirect_url's origin, path dropped."""
+        parsed = urlparse(self.redirect_url)
+        return f"{parsed.scheme}://{parsed.netloc}/"
 
 
 class JWTConfiguration(BaseSettings):

@@ -145,7 +145,9 @@ class AuthServiceHandler:
 
     def logout(self) -> RedirectResponse:
         """Clear the session cookie and redirect to the post-logout URL."""
-        response = RedirectResponse(url=oidc_config().redirect_url, status_code=303)
+        response = RedirectResponse(
+            url=oidc_config().post_logout_redirect_url, status_code=303
+        )
         response.delete_cookie(
             SESSION_COOKIE,
             path="/",

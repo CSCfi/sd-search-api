@@ -81,18 +81,24 @@ class OntologyTermCache:
 
     async def cache_preferred_terms(
         self, field_id: str, concept_ids: set[str], ontology: OntologyService
-    ) -> None:
+    ) -> set[str]:
+        """Cache the preferred terms of the concept ids not cached yet.
+
+        :returns: the concept ids the ontology did not resolve, so nothing could be
+            cached for them.
+        """
         missing_concept_ids = concept_ids.difference(
             self._preferred_term_by_id.get(field_id, {})
         )
         if not missing_concept_ids:
-            return
+            return set()
 
         logger.info(
             "Resolving %d new concept ID(s) from the ontology.",
             len(missing_concept_ids),
         )
         terms_by_concept_id = await ontology.get_preferred_terms(missing_concept_ids)
+        unresolved = missing_concept_ids - set(terms_by_concept_id)
         new_terms = [
             StoredTerm(
                 field_id=field_id, concept_id=concept_id, preferred_term=preferred_term
@@ -100,7 +106,7 @@ class OntologyTermCache:
             for concept_id, preferred_term in terms_by_concept_id.items()
         ]
         if not new_terms:
-            return
+            return unresolved
 
         await insert_terms(self._ontology_id, new_terms)
         for term in new_terms:
@@ -110,6 +116,7 @@ class OntologyTermCache:
             "Cached preferred terms for %d (concept_id, field_id) pair(s).",
             len(new_terms),
         )
+        return unresolved
 
     async def refresh(self, ontology: OntologyService) -> None:
         """Update preferred term using the current ontology release."""

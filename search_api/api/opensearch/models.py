@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from pydantic.json_schema import SkipJsonSchema
 
 from search_api.api.beacon.models import BeaconFilteringTerm
+from search_api.api.extract_logs import ExtractLog
 
 # Semantic field type. The index generator maps them to a concrete OpenSearch field type.
 OpenSearchFieldType = Literal[
@@ -104,8 +105,8 @@ _VALUE_TYPES: dict[str, type | tuple[type, ...]] = {
     "text": str,
     "keyword": str,
     "controlledValue": str,
-    "ontology": str,
-    "ontologyOrValue": str,
+    "ontology": tuple,  # (concept id, meaning)
+    "ontologyOrValue": tuple,  # (concept id, meaning)
     "iso8601Range": tuple,
     "integer": int,
 }
@@ -114,8 +115,12 @@ _VALUE_TYPES: dict[str, type | tuple[type, ...]] = {
 class OpenSearchFieldValue(BaseModel):
     """An OpenSearch field value."""
 
+    model_config = ConfigDict(frozen=True)
+
     field: OpenSearchField
-    value: str | int | tuple[str, str]
+    value: str | int | tuple[str | None, str | None]
+    # The concept id an ontology field value was resolved to.
+    resolved_concept_id: str | None = None
 
     @model_validator(mode="after")
     def validate_value(self) -> "OpenSearchFieldValue":
@@ -160,8 +165,9 @@ class ExtractedDocument(BaseModel):
     values: list[OpenSearchFieldValue] = Field(default_factory=list)
     groups: list[OpenSearchGroup] = Field(default_factory=list)
     modified_at: datetime | None = None
+    # Document extraction logs, written to the database by the load.
+    logs: list[ExtractLog] = Field(default_factory=list)
 
     @property
     def all_values(self) -> list[OpenSearchFieldValue]:
-        """Every value in the document, top-level and in a group."""
         return [*self.values, *(v for group in self.groups for v in group.values)]

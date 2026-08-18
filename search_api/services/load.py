@@ -11,47 +11,33 @@ from search_api.api.beacon.models import (
     BeaconFilteringTerm,
 )
 from search_api.api.opensearch.document import build_document
-from search_api.api.opensearch.models import ExtractedDocument, OpenSearchFieldValue
+from search_api.api.opensearch.models import ExtractedDocument
 from search_api.api.qualifiers import validate_requested_qualifiers
 from search_api.api.scopes import validate_document_scope
 from search_api.database.document import get_modified_at, upsert_document
+from search_api.database.document_log import delete_document_logs, write_document_log
+from search_api.database.models import StoredDocumentLog
 from search_api.database.repository import get_cursor
-from search_api.services.ontology.service import (
-    OntologyService,
-    get_ontology_id_by_field,
-    get_ontology_service,
-)
 from search_api.exceptions import UserException
 from search_api.services.ontology.term_cache import OntologyTermCache
+from search_api.services.ontology.values import (
+    cache_concept_terms,
+    get_ontology_bindings,
+    resolve_concepts,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def ontology_services_by_field(
-    filtering_terms: Sequence[BeaconFilteringTerm],
-) -> dict[str, OntologyService]:
-    """Map each ontology field id to its provider, selected by ``ontology.id``."""
-    return {
-        field_id: get_ontology_service(ontology_id)
-        for field_id, ontology_id in get_ontology_id_by_field(filtering_terms).items()
-    }
-
-
-def concept_ids_from_values(
-    values: list[OpenSearchFieldValue],
-    ontology_by_field: dict[str, OntologyService],
-) -> dict[str, set[str]]:
-    """Return concept IDs grouped by field id, from ontology field values."""
-    result: dict[str, set[str]] = {}
-    for fv in values:
-        provider = ontology_by_field.get(fv.field.id)
-        if (
-            provider is not None
-            and isinstance(fv.value, str)
-            and provider.is_concept_id(fv.value)
-        ):
-            result.setdefault(fv.field.id, set()).add(fv.value)
-    return result
+def extraction_logs(doc: ExtractedDocument) -> Iterator[StoredDocumentLog]:
+    """Return the log entries from document extraction."""
+    for log in doc.logs:
+        yield StoredDocumentLog(
+            document_id=doc.id,
+            field_id=log.field_id,
+            severity=log.severity,
+            message=log.message,
+        )
 
 
 class LoadService:
@@ -63,12 +49,13 @@ class LoadService:
         filtering_terms: Sequence[BeaconFilteringTerm],
         filtering_scopes: Sequence[BeaconFilteringScope] = (),
         filtering_qualifiers: Sequence[BeaconFilteringQualifier] = (),
+        replace_concepts: bool = True,
     ) -> None:
         self._term_caches = term_caches
-        self._ontology_id_by_field = get_ontology_id_by_field(filtering_terms)
-        self._ontology_by_field = ontology_services_by_field(filtering_terms)
+        self._ontology_bindings = get_ontology_bindings(filtering_terms, term_caches)
         self._filtering_scopes = filtering_scopes
         self._filtering_qualifiers = filtering_qualifiers
+        self._replace_concepts = replace_concepts
 
     def validate_document(self, doc: ExtractedDocument) -> None:
         """Check an extracted document's scope and qualifiers against the
@@ -114,7 +101,9 @@ class LoadService:
 
         # The ontologies must be initialised before load to
         # resolve preferred terms for the terms cache.
-        for ontology in set(self._ontology_by_field.values()):
+        for ontology in {
+            binding.ontology for binding in self._ontology_bindings.values()
+        }:
             await ontology.init()
 
         loaded = 0
@@ -134,16 +123,22 @@ class LoadService:
                     skipped += 1
                     continue
 
+                # A document loaded again replaces its log rows.
+                await delete_document_logs(cur, doc.id)
+
+                # Write messages from document extraction.
+                for log in extraction_logs(doc):
+                    await write_document_log(cur, log)
+
+                # The document's ontology values are resolved to concept
+                # ids before the document is stored. Values that could not
+                # be resolved are logged.
+                await resolve_concepts(
+                    cur, doc, self._ontology_bindings, self._replace_concepts
+                )
                 await self.store_document(cur, doc)
+                await cache_concept_terms(cur, doc, self._ontology_bindings)
                 loaded += 1
                 logger.debug("Loaded document %s.", doc.id)
-
-                for field_id, concept_ids in concept_ids_from_values(
-                    doc.all_values, self._ontology_by_field
-                ).items():
-                    ontology_id = self._ontology_id_by_field[field_id]
-                    await self._term_caches[ontology_id].cache_preferred_terms(
-                        field_id, concept_ids, self._ontology_by_field[field_id]
-                    )
 
         logger.info("Done — loaded %d, skipped %d document(s).", loaded, skipped)

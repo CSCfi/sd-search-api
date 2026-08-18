@@ -1,7 +1,7 @@
-"""JSONB document store.
+"""The document table.
 
-A document holds a JSONB payload. The document freshness is tracked by
-modified_at. OpenSearch sync state is tracked by synced_at.
+Functions that participate in a transaction require a cursor, the
+others do not.
 """
 
 from collections.abc import AsyncIterator, Sequence
@@ -10,6 +10,8 @@ from typing import Any
 
 from psycopg import AsyncCursor
 from psycopg.types.json import Json
+
+from search_api.database.repository import get_cursor
 
 DOCUMENT_TABLE = "document"
 
@@ -54,10 +56,11 @@ async def get_modified_at(cur: AsyncCursor, doc_id: str) -> datetime | None:
     return row[0] if row else None
 
 
-async def max_synced_at(cur: AsyncCursor) -> datetime | None:
+async def max_synced_at() -> datetime | None:
     """Return when a document was last synced to the search index."""
-    await cur.execute(f"SELECT max(synced_at) FROM {DOCUMENT_TABLE}")
-    row = await cur.fetchone()
+    async with get_cursor() as cur:
+        await cur.execute(f"SELECT max(synced_at) FROM {DOCUMENT_TABLE}")
+        row = await cur.fetchone()
     return row[0] if row else None
 
 
@@ -92,11 +95,28 @@ async def unsynced_count(cur: AsyncCursor) -> int:
     return row[0] if row else 0
 
 
-async def count_documents(cur: AsyncCursor) -> int:
+async def pending_by_scope() -> dict[str | None, int]:
+    """Return the number of documents pending sync, by scope."""
+    async with get_cursor() as cur:
+        await cur.execute(
+            f"SELECT payload->>'scope', COUNT(1) FROM {DOCUMENT_TABLE} "
+            f"WHERE synced_at IS NULL GROUP BY 1"
+        )
+        return {scope: count for scope, count in await cur.fetchall()}
+
+
+async def count_documents() -> int:
     """Return the total number of documents."""
-    await cur.execute(f"SELECT COUNT(1) FROM {DOCUMENT_TABLE}")
-    row = await cur.fetchone()
+    async with get_cursor() as cur:
+        await cur.execute(f"SELECT COUNT(1) FROM {DOCUMENT_TABLE}")
+        row = await cur.fetchone()
     return row[0] if row else 0
+
+
+async def reset_synced_at(cur: AsyncCursor) -> int:
+    """Reset every document to pending sync and return the number of documents."""
+    await cur.execute(f"UPDATE {DOCUMENT_TABLE} SET synced_at = NULL")
+    return cur.rowcount
 
 
 async def delete_all_documents(cur: AsyncCursor) -> int:

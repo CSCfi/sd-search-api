@@ -50,7 +50,8 @@ def test_build_document_nested_field():
     doc = _build(
         groups=[
             _group(
-                "blocks", _value("animal_species", "ontology", "blocks", "337915000")
+                "blocks",
+                _value("animal_species", "ontology", "blocks", ("337915000", None)),
             )
         ]
     )
@@ -63,11 +64,12 @@ def test_build_document_one_item_per_group():
         groups=[
             _group(
                 "blocks",
-                _value("animal_species", "ontology", "blocks", "337915000"),
+                _value("animal_species", "ontology", "blocks", ("337915000", None)),
                 _value("sex", "controlledValue", "blocks", "Female"),
             ),
             _group(
-                "blocks", _value("animal_species", "ontology", "blocks", "447612001")
+                "blocks",
+                _value("animal_species", "ontology", "blocks", ("447612001", None)),
             ),
         ]
     )
@@ -88,14 +90,14 @@ def test_build_document_multivalued_field():
                     "anatomical_site",
                     "ontology",
                     "blocks",
-                    "80248007",
+                    ("80248007", None),
                     multivalued=True,
                 ),
                 _value(
                     "anatomical_site",
                     "ontology",
                     "blocks",
-                    "368209003",
+                    ("368209003", None),
                     multivalued=True,
                 ),
             )
@@ -113,7 +115,7 @@ def test_build_document_multivalued_single_value():
                     "anatomical_site",
                     "ontology",
                     "blocks",
-                    "80248007",
+                    ("80248007", None),
                     multivalued=True,
                 ),
             )
@@ -149,7 +151,7 @@ def test_build_document_writes_every_qualifier_of_an_item_to_one_field():
         groups=[
             _group(
                 "diagnosis",
-                _value("diagnosis", "ontology", "diagnosis", "73211009"),
+                _value("diagnosis", "ontology", "diagnosis", ("73211009", None)),
                 qualifiers={"observation": "confirmed", "certainty": "high"},
             )
         ]
@@ -169,12 +171,12 @@ def test_build_document_qualifiers_stay_with_their_own_nested_item():
         groups=[
             _group(
                 "diagnosis",
-                _value("diagnosis", "ontology", "diagnosis", "a"),
+                _value("diagnosis", "ontology", "diagnosis", ("a", None)),
                 qualifiers={"observation": "confirmed"},
             ),
             _group(
                 "diagnosis",
-                _value("diagnosis", "ontology", "diagnosis", "b"),
+                _value("diagnosis", "ontology", "diagnosis", ("b", None)),
                 qualifiers={"observation": "candidate"},
             ),
         ]

@@ -22,7 +22,7 @@ oidc_config()
 jwt_config()
 
 app = FastAPI(
-    title=f"CSC {_domain.name.capitalize()} Beacon",
+    title=_domain.beacon_name,
     version="1.0",
     lifespan=make_lifespan(_domain),
 )

@@ -6,6 +6,7 @@ from typing import Any, Generic, TypeVar, override
 from opensearchpy import AsyncOpenSearch
 
 from search_api.api.opensearch.services import (
+    count_indexed_documents,
     fetch_indexed_keywords,
     build_match_query,
     build_term_query,
@@ -104,6 +105,10 @@ class BeaconService(ABC, Generic[T, S]):
         pass
 
     @abstractmethod
+    async def count_indexed(self, scope: str | None = None) -> int:
+        """Return how many documents are indexed, all of them or in a scope."""
+
+    @abstractmethod
     async def is_healthy(self) -> bool:
         pass
 
@@ -186,6 +191,11 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm, S]):
         )
         prefix, _, rest = field_name.partition(".")
         return prefix if rest else None
+
+    @override
+    async def count_indexed(self, scope: str | None = None) -> int:
+        query = build_term_query(SCOPE_FIELD, scope) if scope is not None else None
+        return await count_indexed_documents(self.client, self.index_name, query)
 
     @override
     async def is_healthy(self) -> bool:

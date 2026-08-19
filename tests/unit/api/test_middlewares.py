@@ -15,6 +15,9 @@ from search_api.api.middlewares import AuthMiddleware
 from search_api.services.session import create_jwt_token
 
 
+PROTECTED_PATH = "/protected"
+
+
 def _make_scope(
     path: str, headers: list[tuple[bytes, bytes]] | None = None, method: str = "GET"
 ) -> dict:
@@ -71,7 +74,7 @@ async def test_protected_path_without_token_returns_401_and_skips_downstream():
     app, called = _make_downstream_app()
     middleware = AuthMiddleware(app)
 
-    scope = _make_scope("/query", method="POST")
+    scope = _make_scope(PROTECTED_PATH, method="POST")
     sent = []
 
     async def send(message):
@@ -92,7 +95,7 @@ async def test_protected_path_with_valid_cookie_succeeds():
     middleware = AuthMiddleware(app)
 
     token = create_jwt_token("user-1", "Jane Doe")
-    scope = _make_scope("/query", _cookie_header(token), method="POST")
+    scope = _make_scope(PROTECTED_PATH, _cookie_header(token), method="POST")
     sent = []
 
     async def send(message):
@@ -111,7 +114,7 @@ async def test_protected_path_with_valid_bearer_header_succeeds():
     middleware = AuthMiddleware(app)
 
     token = create_jwt_token("user-1", "Jane Doe")
-    scope = _make_scope("/query", _bearer_header(token), method="POST")
+    scope = _make_scope(PROTECTED_PATH, _bearer_header(token), method="POST")
     sent = []
 
     async def send(message):
@@ -132,7 +135,7 @@ async def test_protected_path_with_expired_token_returns_401():
     middleware = AuthMiddleware(app)
 
     token = create_jwt_token("user-1", "Jane Doe", expiration=timedelta(seconds=-1))
-    scope = _make_scope("/query", _cookie_header(token), method="POST")
+    scope = _make_scope(PROTECTED_PATH, _cookie_header(token), method="POST")
     sent = []
 
     async def send(message):
@@ -157,7 +160,7 @@ async def test_protected_path_with_tampered_token_returns_401():
     middle = len(token) // 2
     flipped_char = "A" if token[middle] != "A" else "B"
     tampered = token[:middle] + flipped_char + token[middle + 1 :]
-    scope = _make_scope("/query", _cookie_header(tampered), method="POST")
+    scope = _make_scope(PROTECTED_PATH, _cookie_header(tampered), method="POST")
     sent = []
 
     async def send(message):
@@ -198,7 +201,9 @@ async def test_protected_path_with_non_jwt_validation_error_returns_401(monkeypa
     app, called = _make_downstream_app()
     middleware = AuthMiddleware(app)
 
-    scope = _make_scope("/query", _cookie_header("irrelevant-token"), method="POST")
+    scope = _make_scope(
+        PROTECTED_PATH, _cookie_header("irrelevant-token"), method="POST"
+    )
     sent = []
 
     async def send(message):

@@ -108,11 +108,22 @@ which files are hand-edited and which are generated.
 name, opensearch_index, beacon_id, beacon_name, schemas
 filtering_terms, filtering_groups, filtering_scopes, non_filtering_fields   # field config
 loader: Loader[…]                              # how source data is ingested
-beacon_service_factory                         # builds the BeaconService for a search client
-result_sets_response_model                     # deployment's Beacon resultSets shape
-ai_assistant_description, ai_result_model, ai_result_instructions   # AI search persona + output
+beacon_service_factory                         # one shared service: health, status, value counts
+query_endpoints: Sequence[BeaconQueryEndpoint] # /datasets, /images: service, response shape, AI persona
 replace_concepts = True                        # substitute a retired concept at load
 ```
+
+`/datasets` and `/images` are Bigpicture's two Beacon entity endpoints (see *Query path*), declared
+as a `BeaconQueryEndpoint` each: its `path`, a `beacon_service_factory` building this request's
+`BeaconQueryService` from a search client, the `result_sets_response_model` its records come back
+as, and — read only when `FEATURE_AI` is set — its own `ai_assistant_description` /
+`ai_result_model` / `ai_result_instructions`, mounted at `/ai<path>` (see *AI search*). Each needs
+its own service (a different result shape, so a different `S` type parameter) and its own result
+shapes, which is why `Domain` carries a sequence of endpoints rather than one pair of
+factory/response-model fields — a deployment with a third entity just adds a third endpoint.
+`Domain.beacon_service_factory` is separate: the one shared, query-less service behind `/status`,
+`/health`, `/values`, `/suggestions` and `ValueCountsUpdater`, none of which depend on how a query
+endpoint's records are shaped (see *BeaconService* below).
 
 - `Domain.ontology_ids` → distinct `ontology.id`s referenced by the filtering terms.
 - `make_lifespan` builds **one term cache per ontology** via `create_term_caches(domain.ontology_ids)`
@@ -131,7 +142,7 @@ pattern: `BP_DOMAIN`, `BP_LOADER`).
    newer than what's stored), and caches ontology preferred terms as it goes. Rows with
    `synced_at IS NULL` are pending sync.
 
-2. **OpenSearch** (`api/opensearch/services.py`) — the search index (`bp-image-index` for Bigpicture).
+2. **OpenSearch** (`api/opensearch/index.py`) — the search index (`bp-image-index` for Bigpicture).
    `SyncService` (`services/sync.py`, constructed with the index name) reads unsynced rows, bulk-indexes
    via `index_documents`, then stamps `synced_at`.
 
@@ -394,9 +405,17 @@ is absent is not filtered on**, so all of its values match — there is no defau
 ### API layer & routes
 
 The Beacon router is generic, built per domain by `make_beacon_router(domain)`
-(`api/beacon/routes.py`). Dependency providers (`get_beacon_service`, `get_ai_service`,
+(`api/beacon/routes.py`). Dependency providers (`get_beacon_service`, `get_beacon_query_services`,
 `get_ontology_term_services`) resolve services from `app.state` and are module-level so tests can
-override them via `app.dependency_overrides`.
+override them via `app.dependency_overrides`. `get_beacon_service` returns
+`domain.beacon_service_factory`'s one shared instance, used by every route that only needs the
+generic `BeaconService` behaviour (health, status, value counts) — none of those depend on how a
+query endpoint's records are shaped, so `make_lifespan`'s `ValueCountsUpdater` (which needs one
+persistent instance) does not have to know Bigpicture calls its endpoints `/datasets` and
+`/images`. `get_beacon_query_services` builds this request's `BeaconQueryService` for every endpoint
+`domain.query_endpoints` declares, keyed by path — cheap, since building one wraps a search client
+and config, no I/O — and is what `/datasets`, `/images`, and their `/ai/*` counterparts each read
+their own service from by path.
 
 | Endpoint | Description |
 |---|---|
@@ -405,8 +424,10 @@ override them via `app.dependency_overrides`.
 | `GET /filtering_groups` | UI groupings of filtering terms |
 | `GET /filtering_scopes` | Available scopes (e.g. `clinical` / `non_clinical`) |
 | `GET /filtering_qualifiers` | Available qualifiers of the values in a nested group |
-| `POST /query` | Beacon V2 search |
-| `POST /ai/query` | Natural-language search (gated by `FEATURE_AI`) |
+| `POST /datasets` | Beacon V2 search, images aggregated into their datasets |
+| `POST /images` | Beacon V2 search, one result per matching image |
+| `POST /ai/datasets` | Natural-language dataset search (gated by `FEATURE_AI`) |
+| `POST /ai/images` | Natural-language image search (gated by `FEATURE_AI`) |
 | `GET /filtering_terms/{field_id}/values` | Indexed values with counts; ontology fields resolve concept IDs to preferred terms |
 | `GET /filtering_terms/{field_id}/suggestions` | Autocomplete restricted to indexed values |
 | `GET /status` | What the deployment holds: documents indexed and pending, in total and per scope, and when a document was last synced |
@@ -436,25 +457,55 @@ Auth routes (`api/auth/routes.py`, always mounted): `GET /login`, `GET /callback
 an OIDC relying party (`services/auth.py`) that issues a session JWT cookie. Configured by
 `OIDCConfiguration` / `JWTConfiguration` in `conf.py`.
 
-The BeaconService abstraction lives in `api/beacon/services.py` (`BeaconService` ABC,
-`OpenSearchBeaconService` generic base); the Bigpicture implementation is
-`BigpictureOpenSearchBeaconService` (`api/bigpicture/opensearch.py`).
+### BeaconService (`api/beacon/services.py`)
+
+`BeaconService` (ABC, `Generic[T]`) covers a deployment's health, indexed counts and field value
+counts — nothing that depends on how a query endpoint's records are shaped, so **one instance
+answers for the whole deployment**. `BeaconQueryService` (ABC, `Generic[S]`) is the separate,
+independent contract for the one thing that does depend on that shape: `query`, returning
+`BeaconQueryResult[S]` — `total` (the match count) and `result_sets` (the records, for record
+granularity) kept apart, so a count can be served without materialising every match. It does not
+inherit `BeaconService` — nothing ever calls `count_indexed`/`is_healthy`/`get_value_counts` on a
+value typed as `BeaconQueryService` (the query route and the AI agent's query tool only ever call
+`query`), so forcing that capability onto the abstract type would be unused surface, not a real
+dependency. A class needing both inherits both, as `OpenSearchQueryBeaconService` does. A query
+endpoint (`/datasets`, `/images`) needs its own `BeaconQueryService`; every other route needs only
+the query-less `BeaconService`.
+
+`OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm])` implements that query-less
+contract against OpenSearch (field value counts, cluster health) and is **concrete on its own** —
+no deployment needs to subclass it just to answer `/status`/`/health`/`/values`/`/suggestions`;
+Bigpicture's `Domain.beacon_service_factory` builds one directly.
+`OpenSearchQueryBeaconService(OpenSearchBeaconService, BeaconQueryService[S])` adds query
+construction and boolean/count/record dispatch on top of it — the `OpenSearchBeaconService` side
+supplies `client`/`index_name`/`filtering_scopes`/`_qualifier_clauses_by_group` for genuine code
+reuse, unrelated to what `BeaconQueryService` itself declares. Bigpicture provides two concrete
+query services (`api/bigpicture/opensearch.py`), one per entity endpoint:
+`BigpictureDatasetBeaconService` (`OpenSearchQueryBeaconService[BigpictureBeaconDatasetResult]`)
+groups images into datasets; `BigpictureImageBeaconService`
+(`OpenSearchQueryBeaconService[BigpictureBeaconImageResult]`) does not. Both implement only the two
+abstract methods the base class leaves open, `_get_count` and `_get_records`.
 
 ### Query path
 
-`POST /query` receives a `BeaconQueryRequest`. Ontology filters (`ontology` / `ontologyOrValue`)
+`/datasets` and `/images` (`api/beacon/routes.py`) are registered by the same
+`register_query_route(endpoint)`, called once per `domain.query_endpoints` entry inside
+`make_beacon_router`: the two run the exact same handler and differ only in which
+`BeaconQueryService` answers the query (looked up from `get_beacon_query_services()`'s dict by the
+endpoint's own path) and which response model wraps the result — both are the `BeaconQueryEndpoint`
+itself, not the router's concern. Each receives a `BeaconQueryRequest`. Ontology filters (`ontology` / `ontologyOrValue`)
 are resolved first: per filter, `get_ontology_service(term.ontology.id).prepare_ontology_filter(...)`
 turns free text / concept IDs into concept IDs (optionally expanding to descendants when
 `includeDescendantTerms`), scoped by the field's `ontologyRestriction` — see the resolution cascade
 under *Ontology providers*. The filter `type` (`BeaconFilteringTermType`) then selects the query
-builder (`api/opensearch/services.py`):
+builder (`api/opensearch/clauses.py`):
 
 | type | builder | notes |
 |---|---|---|
-| `text` | `build_match_query` | full-text match |
-| `controlledValue` / `keyword` | `build_term_query` / `build_terms_query` | exact keyword match |
-| `ontology` / `ontologyOrValue` | `build_term_query` | exact concept-ID match |
-| `iso8601Range` | `build_iso8601_range_query` | ISO-8601 duration range, converted to days |
+| `text` | `build_match_clause` | full-text match |
+| `controlledValue` / `keyword` | `build_term_clause` / `build_terms_clause` | exact keyword match |
+| `ontology` / `ontologyOrValue` | `build_term_clause` | exact concept-ID match |
+| `iso8601Range` | `build_iso8601_range_clause` | ISO-8601 duration range, converted to days |
 
 **A filter only constrains the scopes its field is indexed for.** A field absent from a scope cannot
 match any document of it, so including the filter as a plain condition would exclude every such
@@ -465,11 +516,50 @@ branches reduce to one flat query, which is what is emitted instead. The corolla
 `diagnosis` (clinical-only) returns non-clinical documents untouched, and filtering on a field with
 `requestedScope` set to a scope it does not cover leaves that scope unconstrained.
 
-Filters mapping to multiple OpenSearch fields are combined with `or_queries`; filters on a nested
+Filters mapping to multiple OpenSearch fields are combined with `build_or_clause`; filters on a nested
 group (`specimen`, `staining`, `diagnosis`, `finding`) are wrapped in nested queries. A requested
 qualifier adds a `terms` clause **inside** the nested query of each group it qualifies, so it must
 hold for the very nested item that matched rather than for any item in the group. A group that no
-filter targets gets no nested query, so a qualifier alone never constrains it. `get_value_counts` serves `ValueCounts` from a plain dict on the service, keyed by
+filter targets gets no nested query, so a qualifier alone never constrains it.
+
+**`_get_count(query_clause)` and `_get_records(query_clause)`** are the two seams left abstract by
+`OpenSearchQueryBeaconService`: given the finished query clause, answer a count or list every
+record. Each returns its own natural type — `int`, `BeaconResultSets[S]` — rather than a shared
+wrapper, so neither fakes a total or a record it does not have. `query()` on the base class is the
+only place that builds a `BeaconQueryResult`: it calls `_get_count` for count granularity and wraps
+the int with an empty `result_sets`, or calls `_get_records` for record granularity and sets
+`total` from `len(result_sets.resultSet)`. Boolean granularity bypasses both — `_get_boolean_result`
+reads `hits.total.value` off a `{"size": 0}` search directly and passes it through as `total`
+unclamped, since boolean only ever reads it as `> 0` and the real number costs nothing extra.
+
+Both Bigpicture services page their OpenSearch response via a shared, deployment-agnostic mechanism
+in `api/opensearch/search.py` (composite aggregation and plain search alike);
+only what a page's bucket or hit *means* is Bigpicture's own.
+
+`BigpictureDatasetBeaconService` pages a composite aggregation, via `get_grouped_documents(search,
+index_name, query_clause, page_size, group_field, build_record, accumulate_record, sub_aggs, extra_sources)`:
+pages a composite aggregation grouped by `group_field` (`_paged_buckets_request`/
+`_iter_paged_buckets`, now private — this is their only caller), calling `build_record(group_id,
+bucket)` once per group, on its first bucket, then `accumulate_record(record, bucket)` for every
+bucket of that group including that first one, and returns `dict[group_id, record]` — callers
+supply only what a group and its members mean, nothing about fetching or paging. `_get_count`
+groups by `dataset_id` alone (`doc_count` is the image count) and returns `len(datasets)`;
+`_get_records` adds `image_id` as a second composite source, so each bucket is one image within a
+dataset rather than the whole dataset, and returns one `BeaconResultSet` per group. Both pass the
+same `build_record` (reads dataset metadata via `top_hits_source(bucket, name)` — the response-side
+counterpart of `top_hits_sub_agg`, since a composite key alone doesn't carry it) and their own
+`accumulate_record` (`_accumulate_count` vs `_accumulate_image_id`); grouping many images into few
+datasets is the reason this service needs aggregation at all.
+
+`BigpictureImageBeaconService` has nothing to group — a document already is one image — so it uses
+no composite aggregation for either method. `_get_count` is a single `count_documents` call.
+`_get_records` is one call to `get_documents(search, index_name, query_clause, page_size, source_fields,
+sort_field, build_record)`: pages via the same plain-search mechanics as before
+(`_paged_documents_request`/`_iter_paged_documents`, now private — `get_documents` is their only caller) and
+calls `build_record` with each hit's `_source`, so the caller supplies only field/sort configuration
+and the `_source → record` mapping, nothing about paging.
+
+`get_value_counts` serves `ValueCounts` from a plain dict on the service, keyed by
 `ValueCountsKey` (`api/models.py`) — the field, the scope and the qualifier, frozen so it can key a
 dict. Its
 `qualifiers` is a `frozenset` of `<id>:<value>` strings, the same encoding the index and the
@@ -662,14 +752,31 @@ terminology server. Orthogonal to the term cache above, which every ontology has
 
 ### AI search (`search_api/ai/`)
 
-`AIService` (`ai/services.py`) is a generic pydantic-ai agent (Ollama by default). It's
-parameterised by `result_model` (the agent's structured `output_type`) and `result_instructions`
-(step 3 of the system prompt). The generic prompt covers the tool flow (`get_filtering_terms`, then
-the `query` tool) and a scope-constraint block; deployments supply the persona and result shape via
-`Domain`. `ai/models.py` holds the generic base `AISearchResult` (`interpretation`, `filters`) and
-`AIQueryFilter`. Bigpicture's result shape (`BigpictureAISearchResult` with `dataset_count` +
-nested `Dataset`) and prompt fragments live in `api/bigpicture/ai.py`. The agent's `output_type`
-constrains the LLM to emit JSON matching the model; `result.output` is the concrete subclass.
+`AIService` (`ai/services.py`) is a generic pydantic-ai agent (Ollama by default) over a
+`BeaconQueryService` (its `query` tool calls `ctx.deps.query(...)`, so it needs one specific query
+endpoint's service, never the query-less `BeaconService`). It's parameterised by `result_model`
+(the agent's structured `output_type`) and `result_instructions` (step 3 of the system prompt). The
+generic prompt covers the tool flow (`get_filtering_terms`, then the `query` tool) and a
+scope-constraint block; deployments supply the persona and result shape per query endpoint, on its
+`BeaconQueryEndpoint` (`ai_assistant_description`, `ai_result_model`, `ai_result_instructions`) —
+the same reasoning as the endpoint's own `result_sets_response_model`: the AI agent's structured
+output mirrors that endpoint's own record shape, so it travels with the endpoint rather than living
+once on `Domain`.
+
+`ai/models.py` holds the generic base `AISearchResult` (`interpretation`, `filters`) and
+`AIQueryFilter`. Bigpicture's two result shapes and prompt fragments live in
+`api/bigpicture/ai.py`: `BigpictureAIDatasetSearchResult` (`dataset_count` + nested `Dataset`) for
+`/ai/datasets`, `BigpictureAIImageSearchResult` (`image_count` + nested `Image`) for `/ai/images` —
+both share `BP_AI_ASSISTANT_DESCRIPTION`, since the persona does not need to differ by entity. The
+agent's `output_type` constrains the LLM to emit JSON matching the model; `result.output` is the
+concrete subclass.
+
+`register_ai_query_route(endpoint)` (`api/beacon/routes.py`), called once per `domain.query_endpoints`
+entry when `FEATURE_AI` is set, mounts one agent at `/ai<path>` — e.g. `/ai/datasets`, `/ai/images`.
+The `AIService` is built once per endpoint at router-construction time, not per request: it holds no
+per-request state, only the pydantic-ai `Agent`, which is meant to be built once and reused across
+runs. The route itself reads its own service out of `get_beacon_query_services()`'s dict by
+`endpoint.path`, the same lookup `register_query_route` uses.
 
 ### OpenSearch index mapping highlights
 
@@ -683,7 +790,7 @@ constrains the LLM to emit JSON matching the model; `result.output` is the concr
   `staining` finds "stained" and `cancer` finds "Cancers". Changing it requires a recreate and
   reload, since a field's analyzer is fixed at index creation. Tuning it (stem_exclusion, custom
   stopwords, synonyms) would mean declaring a named analyzer in the settings again.
-- `build_match_query` sets `minimum_should_match` to `2<75%`: up to two terms all must match, so the
+- `build_match_clause` sets `minimum_should_match` to `2<75%`: up to two terms all must match, so the
   common two-word query behaves like `and`; beyond that three quarters must, tolerating one stray
   word. The `or` default would need only one term, which is far too broad given that results are
   never ranked (see *Query path*) — a document matching one word would be indistinguishable from one

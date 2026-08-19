@@ -14,7 +14,8 @@ import search_api
 from search_api.api.deployments import DOMAINS
 from search_api.api.domain import Domain
 from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorService
-from search_api.api.opensearch.services import create_index, create_search
+from search_api.api.opensearch.client import create_search
+from search_api.api.opensearch.index import create_index
 from search_api.exceptions import SystemException
 from search_api.services.load import LoadService, extraction_logs
 from search_api.services.sync import SyncService

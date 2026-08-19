@@ -16,7 +16,8 @@ from search_api.api.beacon.models import (
 )
 from search_api.api.bigpicture.models import (
     BP_OPENSEARCH_INDEX,
-    BigpictureBeaconResultSetsResponse,
+    BigpictureBeaconDatasetResultSetsResponse,
+    BigpictureBeaconImageResultSetsResponse,
 )
 from search_api.api.models import FieldValue
 from search_api.database.repository import get_connection
@@ -449,26 +450,40 @@ def get_filters(
     ]
 
 
-def query(
+def query_datasets(
     client: httpx.Client, *field_id_value_pairs: tuple[str, str | list[str]]
-) -> BigpictureBeaconResultSetsResponse:
+) -> BigpictureBeaconDatasetResultSetsResponse:
     request = BeaconQueryRequest(
         query=BeaconQuery(
             filters=get_filters(*field_id_value_pairs),
             requestedGranularity="record",
         )
     )
-    resp = client.post("/query", json=request.model_dump())
+    resp = client.post("/datasets", json=request.model_dump())
     assert resp.status_code == 200
-    return BigpictureBeaconResultSetsResponse.model_validate(resp.json())
+    return BigpictureBeaconDatasetResultSetsResponse.model_validate(resp.json())
 
 
-def get_dataset_ids(response: BigpictureBeaconResultSetsResponse) -> set[str]:
+def query_images(
+    client: httpx.Client, *field_id_value_pairs: tuple[str, str | list[str]]
+) -> BigpictureBeaconImageResultSetsResponse:
+    request = BeaconQueryRequest(
+        query=BeaconQuery(
+            filters=get_filters(*field_id_value_pairs),
+            requestedGranularity="record",
+        )
+    )
+    resp = client.post("/images", json=request.model_dump())
+    assert resp.status_code == 200
+    return BigpictureBeaconImageResultSetsResponse.model_validate(resp.json())
+
+
+def get_dataset_ids(response: BigpictureBeaconDatasetResultSetsResponse) -> set[str]:
     return {rs.id for rs in response.response.resultSet}
 
 
 def get_matching_image_count(
-    response: BigpictureBeaconResultSetsResponse, dataset_id: str
+    response: BigpictureBeaconDatasetResultSetsResponse, dataset_id: str
 ) -> int:
     for rs in response.response.resultSet:
         if rs.id == dataset_id:
@@ -477,12 +492,16 @@ def get_matching_image_count(
 
 
 def get_dataset_url(
-    response: BigpictureBeaconResultSetsResponse, dataset_id: str
+    response: BigpictureBeaconDatasetResultSetsResponse, dataset_id: str
 ) -> str | None:
     for rs in response.response.resultSet:
         if rs.id == dataset_id:
             return rs.results[0].datasetUrl
     return None
+
+
+def get_image_ids(response: BigpictureBeaconImageResultSetsResponse) -> set[str]:
+    return {rs.id for rs in response.response.resultSet}
 
 
 @pytest.mark.asyncio
@@ -505,8 +524,8 @@ def test_status_needs_session():
 
 
 @pytest.mark.asyncio
-async def test_query_no_filters_returns_all_datasets(bp_opensearch_index, client):
-    result = query(client)
+async def test_datasets_no_filters_returns_all_datasets(bp_opensearch_index, client):
+    result = query_datasets(client)
     assert get_dataset_ids(result) == {DATASET_1, DATASET_2}
     assert get_matching_image_count(result, DATASET_1) == 3
     assert get_matching_image_count(result, DATASET_2) == 2
@@ -523,22 +542,24 @@ async def test_query_no_filters_returns_all_datasets(bp_opensearch_index, client
 
 
 @pytest.mark.asyncio
-async def test_query_filter_human_species(bp_opensearch_index, client):
-    result = query(client, ("animal_species", HUMAN_CONCEPT_ID))
+async def test_datasets_filter_human_species(bp_opensearch_index, client):
+    result = query_datasets(client, ("animal_species", HUMAN_CONCEPT_ID))
     assert get_dataset_ids(result) == {DATASET_1}
     assert get_matching_image_count(result, DATASET_1) == 3
 
 
 @pytest.mark.asyncio
-async def test_query_filter_mouse_species(bp_opensearch_index, client):
-    result = query(client, ("animal_species", MOUSE_CONCEPT_ID))
+async def test_datasets_filter_mouse_species(bp_opensearch_index, client):
+    result = query_datasets(client, ("animal_species", MOUSE_CONCEPT_ID))
     assert get_dataset_ids(result) == {DATASET_2}
     assert get_matching_image_count(result, DATASET_2) == 2
 
 
 @pytest.mark.asyncio
-async def test_query_filter_both_species(bp_opensearch_index, client):
-    result = query(client, ("animal_species", [HUMAN_CONCEPT_ID, MOUSE_CONCEPT_ID]))
+async def test_datasets_filter_both_species(bp_opensearch_index, client):
+    result = query_datasets(
+        client, ("animal_species", [HUMAN_CONCEPT_ID, MOUSE_CONCEPT_ID])
+    )
     assert get_dataset_ids(result) == {DATASET_1, DATASET_2}
 
 
@@ -547,16 +568,16 @@ async def test_query_filter_both_species(bp_opensearch_index, client):
 
 
 @pytest.mark.asyncio
-async def test_query_filter_sex_female(bp_opensearch_index, client):
-    result = query(client, ("sex", "Female"))
+async def test_datasets_filter_sex_female(bp_opensearch_index, client):
+    result = query_datasets(client, ("sex", "Female"))
     assert get_dataset_ids(result) == {DATASET_1, DATASET_2}
     assert get_matching_image_count(result, DATASET_1) == 2  # image_1, image_2
     assert get_matching_image_count(result, DATASET_2) == 1  # image_5
 
 
 @pytest.mark.asyncio
-async def test_query_filter_sex_male(bp_opensearch_index, client):
-    result = query(client, ("sex", "Male"))
+async def test_datasets_filter_sex_male(bp_opensearch_index, client):
+    result = query_datasets(client, ("sex", "Male"))
     assert get_dataset_ids(result) == {DATASET_1, DATASET_2}
     assert get_matching_image_count(result, DATASET_1) == 1  # image_3
     assert get_matching_image_count(result, DATASET_2) == 1  # image_4
@@ -567,15 +588,15 @@ async def test_query_filter_sex_male(bp_opensearch_index, client):
 
 
 @pytest.mark.asyncio
-async def test_query_filter_anatomical_site_breast(bp_opensearch_index, client):
-    result = query(client, ("anatomical_site", BREAST_CONCEPT_ID))
+async def test_datasets_filter_anatomical_site_breast(bp_opensearch_index, client):
+    result = query_datasets(client, ("anatomical_site", BREAST_CONCEPT_ID))
     assert get_dataset_ids(result) == {DATASET_1}
     assert get_matching_image_count(result, DATASET_1) == 2  # image_1, image_2
 
 
 @pytest.mark.asyncio
-async def test_query_filter_anatomical_site_kidney(bp_opensearch_index, client):
-    result = query(client, ("anatomical_site", KIDNEY_CONCEPT_ID))
+async def test_datasets_filter_anatomical_site_kidney(bp_opensearch_index, client):
+    result = query_datasets(client, ("anatomical_site", KIDNEY_CONCEPT_ID))
     assert get_dataset_ids(result) == {DATASET_1, DATASET_2}
     assert get_matching_image_count(result, DATASET_1) == 1  # image_3
     assert get_matching_image_count(result, DATASET_2) == 2
@@ -586,16 +607,16 @@ async def test_query_filter_anatomical_site_kidney(bp_opensearch_index, client):
 
 
 @pytest.mark.asyncio
-async def test_query_filter_fixation_ffpe(bp_opensearch_index, client):
-    result = query(client, ("fixation_type", FFPE_CONCEPT_ID))
+async def test_datasets_filter_fixation_ffpe(bp_opensearch_index, client):
+    result = query_datasets(client, ("fixation_type", FFPE_CONCEPT_ID))
     assert get_dataset_ids(result) == {DATASET_1, DATASET_2}
     assert get_matching_image_count(result, DATASET_1) == 3
     assert get_matching_image_count(result, DATASET_2) == 1  # image_5
 
 
 @pytest.mark.asyncio
-async def test_query_filter_fixation_frozen(bp_opensearch_index, client):
-    result = query(client, ("fixation_type", FROZEN_FIX_CONCEPT_ID))
+async def test_datasets_filter_fixation_frozen(bp_opensearch_index, client):
+    result = query_datasets(client, ("fixation_type", FROZEN_FIX_CONCEPT_ID))
     assert get_dataset_ids(result) == {DATASET_2}
     assert get_matching_image_count(result, DATASET_2) == 1  # image_4
 
@@ -605,16 +626,16 @@ async def test_query_filter_fixation_frozen(bp_opensearch_index, client):
 
 
 @pytest.mark.asyncio
-async def test_query_filter_block_preparation_paraffin(bp_opensearch_index, client):
-    result = query(client, ("block_preparation", PARAFFIN_CONCEPT_ID))
+async def test_datasets_filter_block_preparation_paraffin(bp_opensearch_index, client):
+    result = query_datasets(client, ("block_preparation", PARAFFIN_CONCEPT_ID))
     assert get_dataset_ids(result) == {DATASET_1, DATASET_2}
     assert get_matching_image_count(result, DATASET_1) == 3
     assert get_matching_image_count(result, DATASET_2) == 1  # image_5
 
 
 @pytest.mark.asyncio
-async def test_query_filter_block_preparation_frozen(bp_opensearch_index, client):
-    result = query(client, ("block_preparation", FROZEN_PREP_CONCEPT_ID))
+async def test_datasets_filter_block_preparation_frozen(bp_opensearch_index, client):
+    result = query_datasets(client, ("block_preparation", FROZEN_PREP_CONCEPT_ID))
     assert get_dataset_ids(result) == {DATASET_2}
     assert get_matching_image_count(result, DATASET_2) == 1  # image_4
 
@@ -624,30 +645,32 @@ async def test_query_filter_block_preparation_frozen(bp_opensearch_index, client
 
 
 @pytest.mark.asyncio
-async def test_query_filter_staining_he(bp_opensearch_index, client):
-    result = query(client, ("staining_procedure", HE_CONCEPT_ID))
+async def test_datasets_filter_staining_he(bp_opensearch_index, client):
+    result = query_datasets(client, ("staining_procedure", HE_CONCEPT_ID))
     assert get_dataset_ids(result) == {DATASET_1, DATASET_2}
     assert get_matching_image_count(result, DATASET_1) == 2  # image_1, image_3
     assert get_matching_image_count(result, DATASET_2) == 1  # image_4
 
 
 @pytest.mark.asyncio
-async def test_query_filter_staining_ihc(bp_opensearch_index, client):
-    result = query(client, ("staining_procedure", IHC_CONCEPT_ID))
+async def test_datasets_filter_staining_ihc(bp_opensearch_index, client):
+    result = query_datasets(client, ("staining_procedure", IHC_CONCEPT_ID))
     assert get_dataset_ids(result) == {DATASET_1}
     assert get_matching_image_count(result, DATASET_1) == 1  # image_2
 
 
 @pytest.mark.asyncio
-async def test_query_filter_staining_ish(bp_opensearch_index, client):
-    result = query(client, ("staining_procedure", ISH_CONCEPT_ID))
+async def test_datasets_filter_staining_ish(bp_opensearch_index, client):
+    result = query_datasets(client, ("staining_procedure", ISH_CONCEPT_ID))
     assert get_dataset_ids(result) == {DATASET_2}
     assert get_matching_image_count(result, DATASET_2) == 1  # image_5
 
 
 @pytest.mark.asyncio
-async def test_query_filter_staining_he_and_ihc(bp_opensearch_index, client):
-    result = query(client, ("staining_procedure", [HE_CONCEPT_ID, IHC_CONCEPT_ID]))
+async def test_datasets_filter_staining_he_and_ihc(bp_opensearch_index, client):
+    result = query_datasets(
+        client, ("staining_procedure", [HE_CONCEPT_ID, IHC_CONCEPT_ID])
+    )
     assert get_dataset_ids(result) == {DATASET_1, DATASET_2}
     assert (
         get_matching_image_count(result, DATASET_1) == 3
@@ -661,8 +684,8 @@ async def test_query_filter_staining_he_and_ihc(bp_opensearch_index, client):
 
 @pytest.mark.requires_snowstorm
 @pytest.mark.asyncio
-async def test_query_filter_staining_substance(bp_opensearch_index, client):
-    result = query(client, ("staining_substance", "antibody"))
+async def test_datasets_filter_staining_substance(bp_opensearch_index, client):
+    result = query_datasets(client, ("staining_substance", "antibody"))
     assert get_dataset_ids(result) == {DATASET_1}
     assert get_matching_image_count(result, DATASET_1) == 1  # image_2
 
@@ -672,25 +695,25 @@ async def test_query_filter_staining_substance(bp_opensearch_index, client):
 
 
 @pytest.mark.asyncio
-async def test_query_filter_age_45_to_55_years(bp_opensearch_index, client):
+async def test_datasets_filter_age_45_to_55_years(bp_opensearch_index, client):
     # P45Y=16425d, P55Y=20075d — intersects image_1 (16425-18250) and image_2 (20075-21900).
-    result = query(client, ("age_at_extraction", "P45Y-P55Y"))
+    result = query_datasets(client, ("age_at_extraction", "P45Y-P55Y"))
     assert get_dataset_ids(result) == {DATASET_1}
     assert get_matching_image_count(result, DATASET_1) == 2
 
 
 @pytest.mark.asyncio
-async def test_query_filter_age_65_to_75_years(bp_opensearch_index, client):
+async def test_datasets_filter_age_65_to_75_years(bp_opensearch_index, client):
     # P65Y=23725d, P75Y=27375d — intersects only image_3 (23725-25550).
-    result = query(client, ("age_at_extraction", "P65Y-P75Y"))
+    result = query_datasets(client, ("age_at_extraction", "P65Y-P75Y"))
     assert get_dataset_ids(result) == {DATASET_1}
     assert get_matching_image_count(result, DATASET_1) == 1
 
 
 @pytest.mark.asyncio
-async def test_query_filter_age_range_no_match(bp_opensearch_index, client):
+async def test_datasets_filter_age_range_no_match(bp_opensearch_index, client):
     # P80Y=29200d — beyond all ages in the fixture.
-    result = query(client, ("age_at_extraction", "P80Y-P90Y"))
+    result = query_datasets(client, ("age_at_extraction", "P80Y-P90Y"))
     assert get_dataset_ids(result) == set()
 
 
@@ -699,8 +722,8 @@ async def test_query_filter_age_range_no_match(bp_opensearch_index, client):
 
 
 @pytest.mark.asyncio
-async def test_query_filter_dataset_title_text(bp_opensearch_index, client):
-    result = query(client, ("dataset_title", "Breast"))
+async def test_datasets_filter_dataset_title_text(bp_opensearch_index, client):
+    result = query_datasets(client, ("dataset_title", "Breast"))
     assert get_dataset_ids(result) == {DATASET_1}
     assert get_matching_image_count(result, DATASET_1) == 3
 
@@ -710,8 +733,8 @@ async def test_query_filter_dataset_title_text(bp_opensearch_index, client):
 
 
 @pytest.mark.asyncio
-async def test_query_filter_dataset_description_text(bp_opensearch_index, client):
-    result = query(client, ("dataset_description", "frozen"))
+async def test_datasets_filter_dataset_description_text(bp_opensearch_index, client):
+    result = query_datasets(client, ("dataset_description", "frozen"))
     assert get_dataset_ids(result) == {DATASET_2}
 
 
@@ -720,8 +743,8 @@ async def test_query_filter_dataset_description_text(bp_opensearch_index, client
 
 
 @pytest.mark.asyncio
-async def test_query_combined_species_and_staining(bp_opensearch_index, client):
-    result = query(
+async def test_datasets_combined_species_and_staining(bp_opensearch_index, client):
+    result = query_datasets(
         client,
         ("animal_species", HUMAN_CONCEPT_ID),
         ("staining_procedure", HE_CONCEPT_ID),
@@ -731,8 +754,10 @@ async def test_query_combined_species_and_staining(bp_opensearch_index, client):
 
 
 @pytest.mark.asyncio
-async def test_query_combined_species_and_anatomical_site(bp_opensearch_index, client):
-    result = query(
+async def test_datasets_combined_species_and_anatomical_site(
+    bp_opensearch_index, client
+):
+    result = query_datasets(
         client,
         ("animal_species", MOUSE_CONCEPT_ID),
         ("anatomical_site", KIDNEY_CONCEPT_ID),
@@ -742,9 +767,9 @@ async def test_query_combined_species_and_anatomical_site(bp_opensearch_index, c
 
 
 @pytest.mark.asyncio
-async def test_query_combined_no_match(bp_opensearch_index, client):
+async def test_datasets_combined_no_match(bp_opensearch_index, client):
     # Human species + ISH_CONCEPT_ID staining (only in mouse dataset) → no results.
-    result = query(
+    result = query_datasets(
         client,
         ("animal_species", HUMAN_CONCEPT_ID),
         ("staining_procedure", ISH_CONCEPT_ID),
@@ -757,31 +782,81 @@ async def test_query_combined_no_match(bp_opensearch_index, client):
 
 
 @pytest.mark.asyncio
-async def test_query_boolean_granularity(bp_opensearch_index, client):
+async def test_datasets_boolean_granularity(bp_opensearch_index, client):
     request = BeaconQueryRequest(
         query=BeaconQuery(
             filters=get_filters(("animal_species", HUMAN_CONCEPT_ID)),
             requestedGranularity="boolean",
         )
     )
-    resp = client.post("/query", json=request.model_dump())
+    resp = client.post("/datasets", json=request.model_dump())
     assert resp.status_code == 200
     assert resp.json()["responseSummary"]["exists"] is True
 
 
 @pytest.mark.asyncio
-async def test_query_count_granularity(bp_opensearch_index, client):
+async def test_datasets_count_granularity(bp_opensearch_index, client):
     request = BeaconQueryRequest(
         query=BeaconQuery(
             filters=get_filters(("animal_species", HUMAN_CONCEPT_ID)),
             requestedGranularity="count",
         )
     )
-    resp = client.post("/query", json=request.model_dump())
+    resp = client.post("/datasets", json=request.model_dump())
     assert resp.status_code == 200
     data = resp.json()
     assert data["responseSummary"]["exists"] is True
     assert data["responseSummary"]["numTotalResults"] == 1  # 1 matching dataset
+
+
+# Images
+#
+
+
+@pytest.mark.asyncio
+async def test_images_no_filters_returns_all_images(bp_opensearch_index, client):
+    result = query_images(client)
+    assert get_image_ids(result) == {
+        "image_1",
+        "image_2",
+        "image_3",
+        "image_4",
+        "image_5",
+    }
+
+
+@pytest.mark.asyncio
+async def test_images_filter_human_species(bp_opensearch_index, client):
+    result = query_images(client, ("animal_species", HUMAN_CONCEPT_ID))
+    assert get_image_ids(result) == {"image_1", "image_2", "image_3"}
+
+
+@pytest.mark.asyncio
+async def test_images_query_boolean_granularity(bp_opensearch_index, client):
+    request = BeaconQueryRequest(
+        query=BeaconQuery(
+            filters=get_filters(("animal_species", HUMAN_CONCEPT_ID)),
+            requestedGranularity="boolean",
+        )
+    )
+    resp = client.post("/images", json=request.model_dump())
+    assert resp.status_code == 200
+    assert resp.json()["responseSummary"]["exists"] is True
+
+
+@pytest.mark.asyncio
+async def test_images_query_count_granularity(bp_opensearch_index, client):
+    request = BeaconQueryRequest(
+        query=BeaconQuery(
+            filters=get_filters(("animal_species", HUMAN_CONCEPT_ID)),
+            requestedGranularity="count",
+        )
+    )
+    resp = client.post("/images", json=request.model_dump())
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["responseSummary"]["exists"] is True
+    assert data["responseSummary"]["numTotalResults"] == 3  # 3 matching images
 
 
 # /values with controlled value (sex)

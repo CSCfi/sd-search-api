@@ -14,13 +14,13 @@ from search_api.api.beacon.models import (
     BeaconFilteringScope,
     BeaconResultSetsResponse,
 )
-from search_api.api.beacon.services import BeaconService
+from search_api.api.beacon.services import BeaconQueryService, BeaconService
 from search_api.api.opensearch.models import (
     ExtractedDocument,
     OpenSearchBeaconFilteringTerm,
     OpenSearchField,
 )
-from search_api.api.opensearch.services import create_search
+from search_api.api.opensearch.client import create_search
 from search_api.conf import cache_config
 from search_api.database.repository import close_pool, open_pool
 from search_api.api.qualifiers import qualifier_fields
@@ -52,6 +52,18 @@ class Loader(Generic[LoadOptionsT]):
 
 
 @dataclass(frozen=True)
+class BeaconQueryEndpoint:
+    """One Beacon V2 query endpoint."""
+
+    path: str
+    beacon_service_factory: Callable[[Any], BeaconQueryService[Any]]
+    result_sets_response_model: type[BeaconResultSetsResponse[Any]]
+    ai_assistant_description: str
+    ai_result_model: type[AISearchResult]
+    ai_result_instructions: str
+
+
+@dataclass(frozen=True)
 class Domain:
     """A deployment configuration including the Beacon API and OpenSearch index."""
 
@@ -65,13 +77,10 @@ class Domain:
     non_filtering_fields: Sequence[OpenSearchField]
     loader: Loader[Any]
     beacon_service_factory: Callable[[Any], BeaconService]
+    query_endpoints: Sequence[BeaconQueryEndpoint]
     beacon_id: str
     beacon_name: str
     schemas: Sequence[str]  # Beacon entity types (returnedSchemas).
-    result_sets_response_model: type[BeaconResultSetsResponse[Any]]
-    ai_assistant_description: str
-    ai_result_model: type[AISearchResult]
-    ai_result_instructions: str
     # Whether to replace retired concepts with an active one.
     replace_concepts: bool = True
 

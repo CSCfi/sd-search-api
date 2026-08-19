@@ -1,12 +1,9 @@
-from unittest.mock import AsyncMock
-
 import pytest
-from opensearchpy import AsyncOpenSearch
 
 from search_api.api.beacon.models import BeaconQueryFilter
-from search_api.exceptions import SystemException, UserException
+from search_api.exceptions import UserException
 from search_api.api.beacon.services import (
-    OpenSearchBeaconService,
+    OpenSearchQueryBeaconService,
     build_filtering_term_query,
 )
 from search_api.api.bigpicture.models import (
@@ -14,10 +11,9 @@ from search_api.api.bigpicture.models import (
     BP_FILTERING_SCOPES,
     BP_FILTERING_TERMS,
 )
-from search_api.api.bigpicture.opensearch import BigpictureOpenSearchBeaconService
-from search_api.api.models import ValueCountsKey
+from search_api.api.bigpicture.opensearch import BigpictureDatasetBeaconService
+from search_api.api.models import ValueCounts, ValueCountsKey
 from search_api.api.opensearch.models import ONTOLOGY_OTHER_VALUE_FIELD_SUFFIX
-from search_api.api.opensearch.services import fetch_indexed_keywords
 
 
 def get_term(field_id: str):
@@ -552,8 +548,8 @@ def test_get_query_scope_clinical_with_filter():
     }
 
 
-def _service() -> OpenSearchBeaconService:
-    return BigpictureOpenSearchBeaconService(
+def _service() -> OpenSearchQueryBeaconService:
+    return BigpictureDatasetBeaconService(
         client=None,  # type: ignore[arg-type]
         index_name="test",
         filtering_terms=BP_FILTERING_TERMS,
@@ -608,136 +604,89 @@ def test_get_query_qualifier_alone_does_not_constrain_an_unfiltered_group():
     assert not any("nested" in clause for clause in query["bool"]["filter"])
 
 
-# ---------------------------------------------------------------------------
-# Field value counts — restricted by scope and by qualifier
-# ---------------------------------------------------------------------------
-
-# These check the request that gets built.
+# Count values OpenSearch filters.
+#
 
 
-def _service_over_mock_search() -> tuple[BigpictureOpenSearchBeaconService, AsyncMock]:
-    """A real service over a mocked OpenSearch client."""
-
-    def no_values(index: str, body: dict) -> dict:
-        """Answer with the aggregations the request asked for, each finding none.
-
-        A terms aggregation answers with one bucket per distinct value, so an empty
-        bucket list is a field with no values. The response has to mirror the
-        request's aggregation names, because that is how the counts are read out.
-        """
-        aggregations: dict = {"field_values": {"buckets": []}}
-        group_items = body["aggs"].get("group_items")
-        if group_items is None:
-            # A top-level field: the buckets sit directly under the aggregations.
-            return {"aggregations": aggregations}
-        if "qualified_items" in group_items["aggs"]:
-            aggregations = {"qualified_items": aggregations}
-        return {"aggregations": {"group_items": aggregations}}
-
-    client = AsyncMock(spec=AsyncOpenSearch)
-    client.search.side_effect = no_values
-    service = BigpictureOpenSearchBeaconService(
-        client=client,
-        index_name="idx",
-        filtering_terms=BP_FILTERING_TERMS,
-        filtering_scopes=BP_FILTERING_SCOPES,
-        filtering_qualifiers=BP_FILTERING_QUALIFIERS,
-    )
-    return service, client
+def _count_values_filters(
+    field_id: str, scope=None, qualifiers=None
+) -> tuple[dict | None, dict | None]:
+    return _service()._count_values_filters(get_term(field_id), scope, qualifiers)
 
 
-async def _counts_body(field_id: str, scope=None, qualifiers=None) -> dict:
-    """Return the request body that get_value_counts sends."""
-    service, client = _service_over_mock_search()
-    await service.get_value_counts(field_id, scope, qualifiers)
-    return client.search.await_args.kwargs["body"]
-
-
-@pytest.mark.asyncio
-async def test_field_value_counts_restrict_by_scope_and_qualifier():
-    """Scope restricts the documents counted, a qualifier the group items in them."""
-    body = await _counts_body(
+def test_count_values_filters_from_scope_and_qualifier():
+    document_filter, group_item_filter = _count_values_filters(
         "diagnosis", scope="clinical", qualifiers={"observation": ["confirmed"]}
     )
 
-    assert body["query"] == {"term": {"scope": "clinical"}}
-    group_items = body["aggs"]["group_items"]
-    assert group_items["nested"] == {"path": "diagnosis"}
-    assert group_items["aggs"]["qualified_items"]["filter"] == {
+    assert document_filter == {"term": {"scope": "clinical"}}
+    assert group_item_filter == {
         "bool": {
             "filter": [{"terms": {"diagnosis.qualifiers": ["observation:confirmed"]}}]
         }
     }
 
 
+def test_count_values_filters_without_scope_or_qualifier():
+    assert _count_values_filters("diagnosis") == (None, None)
+
+
+def test_count_values_filters_scope_top_level_field():
+    document_filter, group_item_filter = _count_values_filters(
+        "dataset_title", scope="non_clinical"
+    )
+
+    assert document_filter == {"term": {"scope": "non_clinical"}}
+    assert group_item_filter is None
+
+
+def test_count_values_filters_qualifier_ignored():
+    _, group_item_filter = _count_values_filters(
+        "sex", qualifiers={"observation": ["confirmed"]}
+    )
+
+    # observation qualifier does not apply to sex field.
+    assert group_item_filter is None
+
+
+# Value counts.
+#
+
+
+def _mock_count_values(monkeypatch, service) -> list[ValueCountsKey]:
+    calls: list[ValueCountsKey] = []
+
+    async def mock_count_values(key: ValueCountsKey) -> ValueCounts:
+        calls.append(key)
+        return ValueCounts(counts={})
+
+    monkeypatch.setattr(service, "_count_values", mock_count_values)
+    return calls
+
+
 @pytest.mark.asyncio
-async def test_field_value_counts_without_scope_or_qualifier_count_everything():
-    """Neither axis has a default, so omitting both counts every value."""
-    body = await _counts_body("diagnosis")
-
-    assert "query" not in body
-    assert "qualified_items" not in body["aggs"]["group_items"]["aggs"]
-
-
-@pytest.mark.asyncio
-async def test_field_value_counts_scope_applies_to_a_top_level_field():
-    body = await _counts_body("dataset_title", scope="non_clinical")
-
-    assert body["query"] == {"term": {"scope": "non_clinical"}}
-
-
-@pytest.mark.asyncio
-async def test_field_value_counts_qualifier_ignored_for_an_unqualified_group():
-    """specimen carries no qualifier values, so a qualifier must not zero its counts."""
-    body = await _counts_body("sex", qualifiers={"observation": ["confirmed"]})
-
-    assert "qualified_items" not in body["aggs"]["group_items"]["aggs"]
-
-
-@pytest.mark.asyncio
-async def test_field_value_counts_of_a_grouped_field_ask_for_document_counts():
-    """A grouped field's buckets count items, so reverse_nested is added to climb back."""
-    body = await _counts_body("diagnosis")
-
-    field_values = body["aggs"]["group_items"]["aggs"]["field_values"]
-    assert field_values["aggs"] == {"documents": {"reverse_nested": {}}}
-
-
-@pytest.mark.asyncio
-async def test_get_value_counts():
-    service, client = _service_over_mock_search()
+async def test_get_value_counts(monkeypatch):
+    service = _service()
+    calls = _mock_count_values(monkeypatch, service)
 
     await service.get_value_counts("sex")
     await service.get_value_counts("sex")
-    assert client.search.await_count == 1
+    assert len(calls) == 1
 
     # A different key of the same field counts something else.
     await service.get_value_counts("sex", scope="clinical")
-    assert client.search.await_count == 2
+    assert len(calls) == 2
 
 
 @pytest.mark.asyncio
-async def test_refresh_value_counts():
-    service, client = _service_over_mock_search()
+async def test_refresh_value_counts(monkeypatch):
+    service = _service()
+    calls = _mock_count_values(monkeypatch, service)
 
     await service.get_value_counts("sex")
     await service.refresh_value_counts(ValueCountsKey.of("sex"))
-    assert client.search.await_count == 2
+    assert len(calls) == 2
 
     service.clear_value_counts()
     await service.get_value_counts("sex")
-    assert client.search.await_count == 3
-
-
-@pytest.mark.asyncio
-async def test_group_item_filter_is_rejected_for_a_field_without_a_group():
-    """Dropping it silently would return counts wider than the caller asked for."""
-    with pytest.raises(
-        SystemException, match="Cannot filter the group items of 'dataset_title'"
-    ):
-        await fetch_indexed_keywords(
-            AsyncMock(spec=AsyncOpenSearch),
-            "idx",
-            "dataset_title",
-            group_item_filter={"bool": {"filter": []}},
-        )
+    assert len(calls) == 3

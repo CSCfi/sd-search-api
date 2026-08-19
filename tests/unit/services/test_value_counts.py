@@ -8,12 +8,12 @@ from search_api.api.bigpicture.models import (
     BP_FILTERING_SCOPES,
     BP_FILTERING_TERMS,
 )
-from search_api.api.bigpicture.opensearch import BigpictureOpenSearchBeaconService
+from search_api.api.bigpicture.opensearch import BigpictureDatasetBeaconService
 from search_api.api.models import ValueCounts, ValueCountsKey
 from search_api.services.value_counts import ValueCountsUpdater
 
 
-class _MockBeaconService(BigpictureOpenSearchBeaconService):
+class _MockBeaconService(BigpictureDatasetBeaconService):
     """Records which values the cache was asked to count, without using OpenSearch."""
 
     def __init__(self) -> None:

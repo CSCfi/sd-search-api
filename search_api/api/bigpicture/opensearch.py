@@ -1,145 +1,136 @@
 from typing import Any, override
 
 from search_api.exceptions import SystemException
-from search_api.api.beacon.models import (
-    BeaconQueryGranularity,
-    BeaconResultSet,
-    BeaconResultSets,
+from search_api.api.beacon.models import BeaconResultSet, BeaconResultSets
+from search_api.api.beacon.services import OpenSearchQueryBeaconService
+from search_api.api.bigpicture.models import (
+    BigpictureBeaconDatasetResult,
+    BigpictureBeaconImageResult,
 )
-from search_api.api.beacon.services import OpenSearchBeaconService
-from search_api.api.bigpicture.models import BigpictureBeaconResultSetResult
+from search_api.api.opensearch.search import (
+    count_documents,
+    get_documents,
+    get_grouped_documents,
+    top_hits_source,
+    top_hits_sub_agg,
+)
 
-_COMPOSITE_PAGE_SIZE = 1000
+# How many results one round trip fetches.
+_PAGE_SIZE = 1000
 
 
-class BigpictureOpenSearchBeaconService(
-    OpenSearchBeaconService[BigpictureBeaconResultSetResult]
+class BigpictureDatasetBeaconService(
+    OpenSearchQueryBeaconService[BigpictureBeaconDatasetResult]
 ):
-    """OpenSearch beacon service for the Bigpicture document schema.
+    """OpenSearch beacon service grouping Bigpicture images into datasets."""
 
-    Bigpicture documents are indexed one per image, with dataset-level fields
-    (dataset_id, dataset_title, dataset_description, dataset_image_cnt) stored
-    on every document, and nested types (blocks, stains) for other data.
-    Results are grouped by dataset_id using composite aggregation.
-    """
+    # Get dataset metadata from one document per composite bucket.
+    _SUB_AGGS = {
+        "dataset_info": top_hits_sub_agg(
+            ["dataset_title", "dataset_description", "dataset_image_cnt"]
+        )
+    }
 
     @staticmethod
-    def _build_composite_body(
-        query: dict[str, Any],
-        include_image_ids: bool,
-        after_key: dict[str, Any] | None,
-    ) -> dict[str, Any]:
-        """Build an OpenSearch composite aggregation request body for one page.
+    def _build_dataset(
+        dataset_id: str, bucket: dict[str, Any]
+    ) -> BigpictureBeaconDatasetResult:
+        source = top_hits_source(bucket, "dataset_info")
+        for f in ("dataset_title", "dataset_description", "dataset_image_cnt"):
+            if f not in source:
+                raise SystemException(f"Dataset '{dataset_id}' is missing field: {f}")
+        return BigpictureBeaconDatasetResult(
+            datasetId=dataset_id,
+            datasetTitle=source["dataset_title"],
+            datasetDescription=source["dataset_description"],
+            datasetUrl=f"https://datasets.bigpicture.eu/datasets/{dataset_id.lower()}.html",
+            totalImageCount=source["dataset_image_cnt"],
+            matchingImageCount=0,
+            imageIds=[],
+        )
 
-        Composite sources are always keyed by dataset_id; image_id is added as
-        a second source for record granularity so each bucket represents a single
-        image. A top_hits sub-aggregation fetches dataset metadata (title,
-        description, total image count) from one document per bucket. Pass
-        after_key from the previous response to advance to the next page.
-        """
-        sources: list[dict[str, Any]] = [
-            {"dataset_id": {"terms": {"field": "dataset_id"}}}
-        ]
-        if include_image_ids:
-            sources.append({"image_id": {"terms": {"field": "image_id"}}})
+    @staticmethod
+    def _accumulate_count(
+        result: BigpictureBeaconDatasetResult, bucket: dict[str, Any]
+    ) -> None:
+        result.matchingImageCount += bucket["doc_count"]
 
-        composite: dict[str, Any] = {"size": _COMPOSITE_PAGE_SIZE, "sources": sources}
-        if after_key:
-            composite["after"] = after_key
-
-        return {
-            "size": 0,
-            "query": query,
-            "aggs": {
-                "pages": {
-                    "composite": composite,
-                    "aggs": {
-                        "dataset_info": {
-                            "top_hits": {
-                                "size": 1,
-                                "_source": [
-                                    "dataset_title",
-                                    "dataset_description",
-                                    "dataset_image_cnt",
-                                ],
-                            }
-                        }
-                    },
-                }
-            },
-        }
+    @staticmethod
+    def _accumulate_image_id(
+        result: BigpictureBeaconDatasetResult, bucket: dict[str, Any]
+    ) -> None:
+        result.imageIds.append(bucket["key"]["image_id"])
+        result.matchingImageCount += 1
 
     @override
-    async def _get_result(
-        self,
-        query_clause: dict[str, Any],
-        granularity: BeaconQueryGranularity,
-    ) -> BeaconResultSets[BigpictureBeaconResultSetResult]:
-        """Aggregate matching images by dataset using composite aggregation.
+    async def _get_count(self, query_clause: dict[str, Any]) -> int:
+        datasets = await get_grouped_documents(
+            search=self.client,
+            index_name=self.index_name,
+            query_clause=query_clause,
+            page_size=_PAGE_SIZE,
+            group_field="dataset_id",
+            build_record=BigpictureDatasetBeaconService._build_dataset,
+            accumulate_record=BigpictureDatasetBeaconService._accumulate_count,
+            sub_aggs=BigpictureDatasetBeaconService._SUB_AGGS,
+        )
+        return len(datasets)
 
-        Pages through all composite buckets via after_key cursors. For count
-        granularity, buckets are keyed by dataset_id and doc_count accumulates
-        the matching image count. For record granularity, image_id is added as
-        a composite source so each bucket represents one image, and image IDs
-        are collected into a list.
-        """
-        include_image_ids = granularity == "record"
-        result_sets: dict[str, BigpictureBeaconResultSetResult] = {}
-        after_key: dict[str, Any] | None = None
-
-        while True:
-            body = BigpictureOpenSearchBeaconService._build_composite_body(
-                query_clause, include_image_ids, after_key
-            )
-            resp = await self.client.search(index=self.index_name, body=body)
-            agg = resp["aggregations"]["pages"]
-
-            for bucket in agg["buckets"]:
-                dataset_id = bucket["key"]["dataset_id"]
-
-                if dataset_id not in result_sets:
-                    hits = bucket["dataset_info"]["hits"]["hits"]
-                    source = hits[0]["_source"] if hits else {}
-                    for f in (
-                        "dataset_title",
-                        "dataset_description",
-                        "dataset_image_cnt",
-                    ):
-                        if f not in source:
-                            raise SystemException(
-                                f"Dataset '{dataset_id}' is missing field: {f}"
-                            )
-                    dataset_title = source["dataset_title"]
-                    dataset_description = source["dataset_description"]
-                    dataset_image_cnt = source["dataset_image_cnt"]
-                    result = BigpictureBeaconResultSetResult(
-                        datasetId=dataset_id,
-                        datasetTitle=dataset_title,
-                        datasetDescription=dataset_description,
-                        datasetUrl=f"https://datasets.bigpicture.eu/datasets/{dataset_id.lower()}.html",
-                        totalImageCount=dataset_image_cnt,
-                        matchingImageCount=0,
-                        imageIds=[],
-                    )
-                    result_sets[dataset_id] = result
-                else:
-                    result = result_sets[dataset_id]
-
-                if include_image_ids:
-                    result.imageIds.append(bucket["key"]["image_id"])
-                    result.matchingImageCount += 1
-                else:
-                    result.matchingImageCount += bucket["doc_count"]
-
-            after_key = agg.get("after_key")
-            if not after_key:
-                break
-
-        results: BeaconResultSets[BigpictureBeaconResultSetResult] = BeaconResultSets()
-        for dataset_id, result in result_sets.items():
+    @override
+    async def _get_records(
+        self, query_clause: dict[str, Any]
+    ) -> BeaconResultSets[BigpictureBeaconDatasetResult]:
+        datasets = await get_grouped_documents(
+            search=self.client,
+            index_name=self.index_name,
+            query_clause=query_clause,
+            page_size=_PAGE_SIZE,
+            group_field="dataset_id",
+            build_record=BigpictureDatasetBeaconService._build_dataset,
+            accumulate_record=BigpictureDatasetBeaconService._accumulate_image_id,
+            sub_aggs=BigpictureDatasetBeaconService._SUB_AGGS,
+            extra_sources=[{"image_id": {"terms": {"field": "image_id"}}}],
+        )
+        results: BeaconResultSets[BigpictureBeaconDatasetResult] = BeaconResultSets()
+        for dataset_id, result in datasets.items():
             results.resultSet.append(
-                BeaconResultSet[BigpictureBeaconResultSetResult](
+                BeaconResultSet[BigpictureBeaconDatasetResult](
                     id=dataset_id, results=[result]
                 )
             )
         return results
+
+
+class BigpictureImageBeaconService(
+    OpenSearchQueryBeaconService[BigpictureBeaconImageResult]
+):
+    """OpenSearch beacon service serving individual Bigpicture images."""
+
+    @override
+    async def _get_count(self, query_clause: dict[str, Any]) -> int:
+        return await count_documents(self.client, self.index_name, query_clause)
+
+    @override
+    async def _get_records(
+        self, query_clause: dict[str, Any]
+    ) -> BeaconResultSets[BigpictureBeaconImageResult]:
+        def build_record(
+            source: dict[str, Any],
+        ) -> BeaconResultSet[BigpictureBeaconImageResult]:
+            image_id = source["image_id"]
+            return BeaconResultSet[BigpictureBeaconImageResult](
+                id=image_id,
+                setType="image",
+                results=[BigpictureBeaconImageResult(imageId=image_id)],
+            )
+
+        records = await get_documents(
+            search=self.client,
+            index_name=self.index_name,
+            query_clause=query_clause,
+            page_size=_PAGE_SIZE,
+            source_fields=["image_id"],
+            sort_field="image_id",
+            build_record=build_record,
+        )
+        return BeaconResultSets(resultSet=records)

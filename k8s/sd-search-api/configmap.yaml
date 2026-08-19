@@ -21,7 +21,7 @@ data:
   # Snowstorm SNOMED CT server
   SNOWSTORM_URL: "https://snowstorm.example.com"
 
-  # Set to "true" to enable POST /ai/query; also set LLM_* vars in the secret
+  # Set to "true" to enable POST /ai/*; also set LLM_* vars in the secret
   FEATURE_AI: "false"
 
   # LLM base URL (only used when FEATURE_AI=true)

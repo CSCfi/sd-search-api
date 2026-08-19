@@ -6,7 +6,10 @@ import httpx
 import pytest
 
 from search_api.ai.models import AIQueryFilter
-from search_api.api.bigpicture.ai import BigpictureAISearchResult
+from search_api.api.bigpicture.ai import (
+    BigpictureAIImageSearchResult,
+    BigpictureAIDatasetSearchResult,
+)
 from tests.integration.mockauth import PORT as OIDC_MOCK_PORT
 
 skip = pytest.mark.skip(reason="Requires Ollama")
@@ -47,12 +50,12 @@ def client() -> httpx.Client:
 
 
 @skip
-def test_ai_query_returns_result(client: httpx.Client):
+def test_ai_datasets_query_returns_result(client: httpx.Client):
     resp = client.post(
-        "/ai/query", json={"query": "images for human females"}, timeout=60.0
+        "/ai/datasets", json={"query": "images for human females"}, timeout=60.0
     )
     assert resp.status_code == 200
-    result = BigpictureAISearchResult.model_validate(resp.json())
+    result = BigpictureAIDatasetSearchResult.model_validate(resp.json())
     assert isinstance(result.interpretation, str)
     assert len(result.interpretation) > 0
     assert result.dataset_count >= 0
@@ -60,7 +63,7 @@ def test_ai_query_returns_result(client: httpx.Client):
 
     assert result.dataset_count == 1
     assert len(result.datasets) == 1
-    dataset: BigpictureAISearchResult.Dataset = result.datasets[0]
+    dataset: BigpictureAIDatasetSearchResult.Dataset = result.datasets[0]
     assert dataset.dataset_id == "testDataset"
     assert dataset.dataset_title == "testTitle"
     assert dataset.total_image_count == 1
@@ -72,6 +75,26 @@ def test_ai_query_returns_result(client: httpx.Client):
 
 
 @skip
-def test_ai_query_missing_body_returns_422(client: httpx.Client):
-    resp = client.post("/ai/query", json={})
+def test_ai_datasets_query_missing_body_returns_422(client: httpx.Client):
+    resp = client.post("/ai/datasets", json={})
+    assert resp.status_code == 422
+
+
+@skip
+def test_ai_images_query_returns_result(client: httpx.Client):
+    resp = client.post(
+        "/ai/images", json={"query": "images for human females"}, timeout=60.0
+    )
+    assert resp.status_code == 200
+    result = BigpictureAIImageSearchResult.model_validate(resp.json())
+    assert isinstance(result.interpretation, str)
+    assert len(result.interpretation) > 0
+    assert result.image_count >= 0
+    assert isinstance(result.images, list)
+    assert result.image_count == len(result.images)
+
+
+@skip
+def test_ai_images_query_missing_body_returns_422(client: httpx.Client):
+    resp = client.post("/ai/images", json={})
     assert resp.status_code == 422

@@ -436,17 +436,6 @@ ollama pull qwen2.5:14b
 ollama serve
 ```
 
-The `/ai/query` endpoint accepts a query for the LLM search. The LLM translates
-the query text into Beacon V2 filters and returns structured results.
-
-Example:
-
-```bash
-curl -X POST "http://localhost:8000/ai/query" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "images for human females"}'
-```
-
 ## Performance tests
 
 See [tests/performance/README.md](tests/performance/README.md).

@@ -5,7 +5,7 @@ from search_api.api.opensearch.models import (
     OpenSearchFieldValue,
     OpenSearchGroup,
 )
-from search_api.api.opensearch.services import iso8601_duration_to_days
+from search_api.api.opensearch.clauses import iso8601_duration_to_days
 from search_api.api.qualifiers import QUALIFIERS_FIELD, encode_qualifier_value
 from search_api.api.scopes import SCOPE_FIELD
 

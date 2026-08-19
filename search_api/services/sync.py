@@ -7,8 +7,8 @@ from typing import Any
 from opensearchpy import AsyncOpenSearch
 from psycopg import AsyncCursor
 
-from search_api.api.opensearch.services import (
-    create_search,
+from search_api.api.opensearch.client import create_search
+from search_api.api.opensearch.index import (
     delete_all_documents as delete_all_opensearch_documents,
     index_documents,
 )

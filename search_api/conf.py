@@ -103,7 +103,7 @@ class FeatureConfiguration(BaseSettings):
 
     FEATURE_AI: bool = Field(
         default=False,
-        description="Enable the POST /ai/query endpoint. Disabled by default.",
+        description="Enable the POST /ai/* endpoints. Disabled by default.",
     )
 
 

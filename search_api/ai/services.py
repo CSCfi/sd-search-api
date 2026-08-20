@@ -8,7 +8,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 
 from search_api.ai.models import AIQueryFilter, AISearchResult
 from search_api.api.beacon.models import BeaconFilteringTerm, BeaconQueryFilter
-from search_api.api.beacon.services import BeaconService
+from search_api.api.beacon.services import BeaconQueryService
 from search_api.conf import ai_config as _ai_config
 
 
@@ -57,9 +57,9 @@ class AIService:
             provider=OpenAIProvider(base_url=cfg.LLM_BASE_URL, api_key=cfg.LLM_API_KEY),
         )
 
-        self._agent: Agent[BeaconService, AISearchResult] = Agent(
+        self._agent: Agent[BeaconQueryService, AISearchResult] = Agent(
             model=model,
-            deps_type=BeaconService,  # type: ignore[type-abstract]
+            deps_type=BeaconQueryService,  # type: ignore[type-abstract]
             output_type=result_model,
             system_prompt=_SYSTEM_PROMPT_TEMPLATE.format(
                 assistant_description=assistant_description,
@@ -90,17 +90,19 @@ class AIService:
 
         @self._agent.tool
         async def query(
-            ctx: RunContext[BeaconService], filters: list[AIQueryFilter]
+            ctx: RunContext[BeaconQueryService], filters: list[AIQueryFilter]
         ) -> str:
             """
             Execute a search using Beacon V2 filters and return results.
             """
-            results = await ctx.deps.query(
+            result = await ctx.deps.query(
                 [BeaconQueryFilter(id=f.id, value=f.value) for f in filters]
             )
-            return results.model_dump_json(indent=2)
+            return result.result_sets.model_dump_json(indent=2)
 
-    async def search(self, query: str, beacon_service: BeaconService) -> AISearchResult:
+    async def search(
+        self, query: str, beacon_service: BeaconQueryService
+    ) -> AISearchResult:
         """
         Translate a natural language query into Beacon V2 filters and search the index.
         """

@@ -18,10 +18,16 @@ from search_api.api.beacon.models import (
 )
 from search_api.api.bigpicture.models import (
     BP_FILTERING_QUALIFIERS,
-    BigpictureBeaconResultSetResult,
-    BigpictureBeaconResultSetsResponse,
+    BigpictureBeaconDatasetResult,
+    BigpictureBeaconDatasetResultSetsResponse,
+    BigpictureBeaconImageResult,
+    BigpictureBeaconImageResultSetsResponse,
 )
-from search_api.api.beacon.services import BeaconService
+from search_api.api.beacon.services import (
+    BeaconQueryResult,
+    BeaconQueryService,
+    BeaconService,
+)
 from search_api.api.opensearch.models import (
     OpenSearchBeaconFilteringTerm,
     OpenSearchOntologyOrValue,
@@ -36,6 +42,7 @@ from search_api.api.bigpicture.models import (
 from search_api.api.bigpicture.domain import BP_DOMAIN
 from search_api.api.beacon.routes import (
     get_beacon_service,
+    get_beacon_query_services,
     get_ontology_term_services,
     make_beacon_router,
 )
@@ -47,13 +54,13 @@ app.include_router(make_beacon_router(BP_DOMAIN))
 register_exception_handlers(app)
 
 
-def get_mock_query_result() -> BeaconResultSets[BigpictureBeaconResultSetResult]:
-    results: BeaconResultSets[BigpictureBeaconResultSetResult] = BeaconResultSets()
+def get_mock_dataset_query_result() -> BeaconQueryResult[BigpictureBeaconDatasetResult]:
+    results: BeaconResultSets[BigpictureBeaconDatasetResult] = BeaconResultSets()
     results.resultSet.append(
-        BeaconResultSet[BigpictureBeaconResultSetResult](
+        BeaconResultSet[BigpictureBeaconDatasetResult](
             id="testDataset",
             results=[
-                BigpictureBeaconResultSetResult(
+                BigpictureBeaconDatasetResult(
                     datasetId="testDataset",
                     datasetTitle="testTitle",
                     datasetDescription="testDescription",
@@ -65,7 +72,19 @@ def get_mock_query_result() -> BeaconResultSets[BigpictureBeaconResultSetResult]
             ],
         )
     )
-    return results
+    return BeaconQueryResult(total=len(results.resultSet), result_sets=results)
+
+
+def get_mock_image_query_result() -> BeaconQueryResult[BigpictureBeaconImageResult]:
+    results: BeaconResultSets[BigpictureBeaconImageResult] = BeaconResultSets()
+    results.resultSet.append(
+        BeaconResultSet[BigpictureBeaconImageResult](
+            id="testImage",
+            setType="image",
+            results=[BigpictureBeaconImageResult(imageId="testImage")],
+        )
+    )
+    return BeaconQueryResult(total=len(results.resultSet), result_sets=results)
 
 
 # Indexed document counts, keyed as None for every document and value per scope.
@@ -76,14 +95,8 @@ _MOCK_INDEXED_COUNTS: dict[str | None, int] = {
 }
 
 
-class MockBeaconService(
-    BeaconService[OpenSearchBeaconFilteringTerm, BigpictureBeaconResultSetResult]
-):
-    @override
-    async def query(
-        self, filters, granularity="record", scope=None, qualifiers=None
-    ) -> BeaconResultSets[BigpictureBeaconResultSetResult]:
-        return get_mock_query_result()
+class MockBeaconService(BeaconService[OpenSearchBeaconFilteringTerm]):
+    """The generic beacon service."""
 
     @override
     async def count_indexed(self, scope: str | None = None) -> int:
@@ -101,6 +114,22 @@ class MockBeaconService(
         if isinstance(term.opensearch_field, OpenSearchOntologyOrValue):
             return ValueCounts(counts={}, other_counts={})
         return ValueCounts(counts={})
+
+
+class MockBeaconDatasetService(BeaconQueryService[BigpictureBeaconDatasetResult]):
+    @override
+    async def query(
+        self, filters, granularity="record", scope=None, qualifiers=None
+    ) -> BeaconQueryResult[BigpictureBeaconDatasetResult]:
+        return get_mock_dataset_query_result()
+
+
+class MockBeaconImageService(BeaconQueryService[BigpictureBeaconImageResult]):
+    @override
+    async def query(
+        self, filters, granularity="record", scope=None, qualifiers=None
+    ) -> BeaconQueryResult[BigpictureBeaconImageResult]:
+        return get_mock_image_query_result()
 
 
 SUGGESTIONS_AND_VALUES_INDEXED_COUNTS: dict[str, ValueCounts] = {
@@ -156,6 +185,10 @@ def client():
     app.dependency_overrides[get_beacon_service] = lambda: MockBeaconService(
         BP_FILTERING_TERMS
     )
+    app.dependency_overrides[get_beacon_query_services] = lambda: {
+        "/datasets": MockBeaconDatasetService(),
+        "/images": MockBeaconImageService(),
+    }
     app.dependency_overrides[get_ontology_term_services] = lambda: {
         SNOMED_ONTOLOGY_ID: MockOntologyTermCache()
     }
@@ -164,29 +197,51 @@ def client():
     app.dependency_overrides.update(saved)
 
 
-def test_query(client: TestClient):
+def test_datasets_query(client: TestClient):
     request = BeaconQueryRequest(query=BeaconQuery(requestedGranularity="boolean"))
-    resp = client.post("/query", json=request.model_dump())
+    resp = client.post("/datasets", json=request.model_dump())
     assert resp.status_code == 200
     assert BeaconBooleanResponse.model_validate(resp.json()).responseSummary.exists
 
     request = BeaconQueryRequest(query=BeaconQuery(requestedGranularity="count"))
-    resp = client.post("/query", json=request.model_dump())
+    resp = client.post("/datasets", json=request.model_dump())
     assert resp.status_code == 200
     response = BeaconCountResponse.model_validate(resp.json())
     assert response.responseSummary.exists
     assert response.responseSummary.numTotalResults == 1
 
     request = BeaconQueryRequest(query=BeaconQuery(requestedGranularity="record"))
-    resp = client.post("/query", json=request.model_dump())
+    resp = client.post("/datasets", json=request.model_dump())
     assert resp.status_code == 200
-    response = BigpictureBeaconResultSetsResponse.model_validate(resp.json())
+    response = BigpictureBeaconDatasetResultSetsResponse.model_validate(resp.json())
     assert response.responseSummary.exists
     assert response.responseSummary.numTotalResults == 1
     assert response.response.resultSet[0].results[0].matchingImageCount == 1
     assert response.response.resultSet[0].results[0].datasetUrl == (
         "https://datasets.bigipicture.eu/datasets/testDataset.html"
     )
+
+
+def test_images_query(client: TestClient):
+    request = BeaconQueryRequest(query=BeaconQuery(requestedGranularity="boolean"))
+    resp = client.post("/images", json=request.model_dump())
+    assert resp.status_code == 200
+    assert BeaconBooleanResponse.model_validate(resp.json()).responseSummary.exists
+
+    request = BeaconQueryRequest(query=BeaconQuery(requestedGranularity="count"))
+    resp = client.post("/images", json=request.model_dump())
+    assert resp.status_code == 200
+    response = BeaconCountResponse.model_validate(resp.json())
+    assert response.responseSummary.exists
+    assert response.responseSummary.numTotalResults == 1
+
+    request = BeaconQueryRequest(query=BeaconQuery(requestedGranularity="record"))
+    resp = client.post("/images", json=request.model_dump())
+    assert resp.status_code == 200
+    response = BigpictureBeaconImageResultSetsResponse.model_validate(resp.json())
+    assert response.responseSummary.exists
+    assert response.responseSummary.numTotalResults == 1
+    assert response.response.resultSet[0].results[0].imageId == "testImage"
 
 
 def test_info(client: TestClient):
@@ -493,7 +548,7 @@ def test_query_rejects_unknown_qualifier(client: TestClient):
     request = BeaconQueryRequest(
         query=BeaconQuery(requestedQualifiers={"certainty": ["confirmed"]})
     )
-    response = client.post("/query", json=request.model_dump())
+    response = client.post("/datasets", json=request.model_dump())
     assert response.status_code == 400
     assert "Unsupported qualifier" in response.text
 
@@ -502,7 +557,7 @@ def test_query_rejects_unknown_qualifier_value(client: TestClient):
     request = BeaconQueryRequest(
         query=BeaconQuery(requestedQualifiers={"observation": ["known"]})
     )
-    response = client.post("/query", json=request.model_dump())
+    response = client.post("/datasets", json=request.model_dump())
     assert response.status_code == 400
     assert "Unsupported value(s) ['known']" in response.text
 
@@ -511,7 +566,7 @@ def test_query_accepts_absent_qualifiers(client: TestClient):
     """An absent qualifier is not filtered on, so the query is valid without one."""
     request = BeaconQueryRequest(query=BeaconQuery(requestedGranularity="boolean"))
     assert request.query.requestedQualifiers == {}
-    assert client.post("/query", json=request.model_dump()).status_code == 200
+    assert client.post("/datasets", json=request.model_dump()).status_code == 200
 
 
 @pytest.mark.parametrize("path", ["values", "suggestions"])

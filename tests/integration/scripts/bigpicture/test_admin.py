@@ -27,7 +27,7 @@ from search_api.database.document_log import (
     read_document_logs,
 )
 from search_api.database.models import StoredDocumentLog
-from search_api.api.opensearch.services import create_search
+from search_api.api.opensearch.client import create_search
 from search_api.database.models import StoredTerm
 from search_api.database.repository import get_connection
 from search_api.database.terms_cache import (

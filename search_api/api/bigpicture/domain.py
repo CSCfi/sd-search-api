@@ -16,15 +16,22 @@ from search_api.api.bigpicture.models import (
     BP_NON_FILTERING_FIELDS,
     BP_OPENSEARCH_INDEX,
     BP_SCHEMAS,
-    BigpictureBeaconResultSetsResponse,
+    BigpictureBeaconDatasetResultSetsResponse,
+    BigpictureBeaconImageResultSetsResponse,
 )
 from search_api.api.bigpicture.ai import (
     BP_AI_ASSISTANT_DESCRIPTION,
-    BP_AI_RESULT_INSTRUCTIONS,
-    BigpictureAISearchResult,
+    BP_AI_IMAGE_RESULT_INSTRUCTIONS,
+    BP_AI_DATASET_RESULT_INSTRUCTIONS,
+    BigpictureAIImageSearchResult,
+    BigpictureAIDatasetSearchResult,
 )
-from search_api.api.bigpicture.opensearch import BigpictureOpenSearchBeaconService
-from search_api.api.domain import Domain, Loader
+from search_api.api.bigpicture.opensearch import (
+    BigpictureDatasetBeaconService,
+    BigpictureImageBeaconService,
+)
+from search_api.api.domain import BeaconQueryEndpoint, Domain, Loader
+from search_api.api.opensearch.beacon import OpenSearchBeaconService
 from search_api.api.opensearch.models import ExtractedDocument
 from search_api.api.bigpicture.extract import extract_documents
 
@@ -98,18 +105,44 @@ BP_DOMAIN = Domain(
     filtering_qualifiers=BP_FILTERING_QUALIFIERS,
     non_filtering_fields=BP_NON_FILTERING_FIELDS,
     loader=BP_LOADER,
-    beacon_service_factory=lambda search: BigpictureOpenSearchBeaconService(
+    beacon_service_factory=lambda search: OpenSearchBeaconService(
         search,
         BP_OPENSEARCH_INDEX,
         BP_FILTERING_TERMS,
         BP_FILTERING_SCOPES,
         BP_FILTERING_QUALIFIERS,
     ),
+    query_endpoints=[
+        BeaconQueryEndpoint(
+            path="/datasets",
+            beacon_service_factory=lambda search: BigpictureDatasetBeaconService(
+                search,
+                BP_OPENSEARCH_INDEX,
+                BP_FILTERING_TERMS,
+                BP_FILTERING_SCOPES,
+                BP_FILTERING_QUALIFIERS,
+            ),
+            result_sets_response_model=BigpictureBeaconDatasetResultSetsResponse,
+            ai_assistant_description=BP_AI_ASSISTANT_DESCRIPTION,
+            ai_result_model=BigpictureAIDatasetSearchResult,
+            ai_result_instructions=BP_AI_DATASET_RESULT_INSTRUCTIONS,
+        ),
+        BeaconQueryEndpoint(
+            path="/images",
+            beacon_service_factory=lambda search: BigpictureImageBeaconService(
+                search,
+                BP_OPENSEARCH_INDEX,
+                BP_FILTERING_TERMS,
+                BP_FILTERING_SCOPES,
+                BP_FILTERING_QUALIFIERS,
+            ),
+            result_sets_response_model=BigpictureBeaconImageResultSetsResponse,
+            ai_assistant_description=BP_AI_ASSISTANT_DESCRIPTION,
+            ai_result_model=BigpictureAIImageSearchResult,
+            ai_result_instructions=BP_AI_IMAGE_RESULT_INSTRUCTIONS,
+        ),
+    ],
     beacon_id=BP_BEACON_ID,
     beacon_name=BP_BEACON_NAME,
     schemas=BP_SCHEMAS,
-    result_sets_response_model=BigpictureBeaconResultSetsResponse,
-    ai_assistant_description=BP_AI_ASSISTANT_DESCRIPTION,
-    ai_result_model=BigpictureAISearchResult,
-    ai_result_instructions=BP_AI_RESULT_INSTRUCTIONS,
 )

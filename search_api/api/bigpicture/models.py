@@ -30,8 +30,8 @@ from search_api.api.opensearch.models import (
 )
 
 
-class BigpictureBeaconResultSetResult(BeaconResultSetResult):
-    """Beacon V2 result set result for the Bigpicture document schema."""
+class BigpictureBeaconDatasetResult(BeaconResultSetResult):
+    """Beacon V2 result set result for Bigpicture datasets."""
 
     datasetId: str
     datasetTitle: str
@@ -42,10 +42,22 @@ class BigpictureBeaconResultSetResult(BeaconResultSetResult):
     imageIds: list[str] = Field(default_factory=list)
 
 
-class BigpictureBeaconResultSetsResponse(
-    BeaconResultSetsResponse[BigpictureBeaconResultSetResult]
+class BigpictureBeaconDatasetResultSetsResponse(
+    BeaconResultSetsResponse[BigpictureBeaconDatasetResult]
 ):
-    """Beacon V2 result sets response for the Bigpicture document schema."""
+    """Beacon V2 result sets response for Bigpicture datasets."""
+
+
+class BigpictureBeaconImageResult(BeaconResultSetResult):
+    """Beacon V2 result set result for Bigpicture images."""
+
+    imageId: str
+
+
+class BigpictureBeaconImageResultSetsResponse(
+    BeaconResultSetsResponse[BigpictureBeaconImageResult]
+):
+    """Beacon V2 result sets response for Bigpicture images."""
 
 
 BP_DOMAIN_NAME = "Bigpicture"

@@ -156,7 +156,7 @@ class OpenSearchUser(HttpUser):
         query = random.choice(QUERIES)
 
         response = self.client.post(
-            "/query",
+            "/datasets",
             json=query["body"],
             headers={"Content-Type": "application/json"},
             name=query["name"],

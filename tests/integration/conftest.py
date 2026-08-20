@@ -12,7 +12,7 @@ from opensearchpy import helpers
 
 load_dotenv(Path(__file__).parent / ".env")
 
-from search_api.api.opensearch.services import create_search  # noqa: E402
+from search_api.api.opensearch.client import create_search  # noqa: E402
 from tests.integration.mockauth import MockAuthProvider  # noqa: E402
 
 bp_search = create_search()

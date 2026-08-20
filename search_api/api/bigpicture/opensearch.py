@@ -2,11 +2,11 @@ from typing import Any, override
 
 from search_api.exceptions import SystemException
 from search_api.api.beacon.models import BeaconResultSet, BeaconResultSets
-from search_api.api.beacon.services import OpenSearchQueryBeaconService
 from search_api.api.bigpicture.models import (
     BigpictureBeaconDatasetResult,
     BigpictureBeaconImageResult,
 )
+from search_api.api.opensearch.beacon import OpenSearchQueryBeaconService
 from search_api.api.opensearch.search import (
     count_documents,
     get_documents,

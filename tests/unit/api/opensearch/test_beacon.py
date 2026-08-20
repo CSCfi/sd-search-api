@@ -2,9 +2,9 @@ import pytest
 
 from search_api.api.beacon.models import BeaconQueryFilter
 from search_api.exceptions import UserException
-from search_api.api.beacon.services import (
+from search_api.api.opensearch.beacon import (
     OpenSearchQueryBeaconService,
-    build_filtering_term_query,
+    build_filtering_term_clause,
 )
 from search_api.api.bigpicture.models import (
     BP_FILTERING_QUALIFIERS,
@@ -20,21 +20,22 @@ def get_term(field_id: str):
     return next(t for t in BP_FILTERING_TERMS if t.id == field_id)
 
 
-def get_query(*id_value_pairs: tuple[str, str], scope: str | None = None) -> dict:
+def get_query_clause(
+    *id_value_pairs: tuple[str, str], scope: str | None = None
+) -> dict:
     """Build and return the OpenSearch query clause for the given filter pairs."""
     filters = [BeaconQueryFilter(id=fid, value=val) for fid, val in id_value_pairs]
-    return _service()._get_query(filters, scope)
+    return _service()._get_query_clause(filters, scope)
 
 
-# ---------------------------------------------------------------------------
-# build_filtering_term_query — exact-match types (controlledValue / ontology)
-# ---------------------------------------------------------------------------
+# Test filtering term clause.
+#
 
 
-def test_build_filtering_term_query_controlled_value_single():
+def test_build_filtering_term_clause_controlled_value_single():
     """Single value for controlledValue produces a terms query."""
     term = get_term("sex")  # controlledValue
-    result = build_filtering_term_query(term, "Male")
+    result = build_filtering_term_clause(term, "Male")
     assert result == {
         "bool": {
             "should": [{"terms": {"specimen.sex": ["Male"]}}],
@@ -43,10 +44,10 @@ def test_build_filtering_term_query_controlled_value_single():
     }
 
 
-def test_build_filtering_term_query_controlled_value_multi():
+def test_build_filtering_term_clause_controlled_value_multi():
     """Multiple values for controlledValue are combined in a single terms query."""
     term = get_term("sex")
-    result = build_filtering_term_query(term, ["Male", "Female"])
+    result = build_filtering_term_clause(term, ["Male", "Female"])
     assert result == {
         "bool": {
             "should": [{"terms": {"specimen.sex": ["Male", "Female"]}}],
@@ -55,10 +56,10 @@ def test_build_filtering_term_query_controlled_value_multi():
     }
 
 
-def test_build_filtering_term_query_keyword_single():
+def test_build_filtering_term_clause_keyword_single():
     """Single value for keyword produces an exact terms query (not a match query)."""
     term = get_term("staining_target")  # keyword
-    result = build_filtering_term_query(term, "Ki-67")
+    result = build_filtering_term_clause(term, "Ki-67")
     assert result == {
         "bool": {
             "should": [{"terms": {"staining.staining_target": ["Ki-67"]}}],
@@ -67,10 +68,10 @@ def test_build_filtering_term_query_keyword_single():
     }
 
 
-def test_build_filtering_term_query_ontology_single():
+def test_build_filtering_term_clause_ontology_single():
     """Single concept ID for ontology produces a terms query."""
     term = get_term("animal_species")  # ontology
-    result = build_filtering_term_query(term, "410607006")
+    result = build_filtering_term_clause(term, "410607006")
     assert result == {
         "bool": {
             "should": [{"terms": {"specimen.animal_species": ["410607006"]}}],
@@ -79,10 +80,10 @@ def test_build_filtering_term_query_ontology_single():
     }
 
 
-def test_build_filtering_term_query_ontology_multi():
+def test_build_filtering_term_clause_ontology_multi():
     """Multiple concept IDs for ontology are combined in a single terms query."""
     term = get_term("animal_species")
-    result = build_filtering_term_query(term, ["123456789", "987654321"])
+    result = build_filtering_term_clause(term, ["123456789", "987654321"])
     assert result == {
         "bool": {
             "should": [
@@ -93,12 +94,12 @@ def test_build_filtering_term_query_ontology_multi():
     }
 
 
-def test_build_filtering_term_query_ontology_or_value_concept_ids_only():
+def test_build_filtering_term_clause_ontology_or_value_concept_ids_only():
     """ontologyOrValue with concept IDs only."""
     term = get_term(
         "fixation_type"
     )  # maps to specimen.fixation_type + specimen.fixation_type_other
-    result = build_filtering_term_query(term, ["337915000", "80248007"])
+    result = build_filtering_term_clause(term, ["337915000", "80248007"])
     assert result == {
         "bool": {
             "should": [
@@ -109,12 +110,12 @@ def test_build_filtering_term_query_ontology_or_value_concept_ids_only():
     }
 
 
-def test_build_filtering_term_query_ontology_or_value_mixed_values():
+def test_build_filtering_term_clause_ontology_or_value_mixed_values():
     """ontologyOrValue with mixed concept IDs and other values."""
     term = get_term(
         "fixation_type"
     )  # maps to specimen.fixation_type + specimen.fixation_type_other
-    result = build_filtering_term_query(term, ["337915000", "Formalin"])
+    result = build_filtering_term_clause(term, ["337915000", "Formalin"])
     assert result == {
         "bool": {
             "should": [
@@ -132,12 +133,12 @@ def test_build_filtering_term_query_ontology_or_value_mixed_values():
     }
 
 
-def test_build_filtering_term_query_ontology_or_value_free_text_only():
+def test_build_filtering_term_clause_ontology_or_value_free_text_only():
     """ontologyOrValue with non-concept IDs only."""
     term = get_term(
         "fixation_type"
     )  # maps to specimen.fixation_type + specimen.fixation_type_other
-    result = build_filtering_term_query(term, ["Formalin", "Glutaraldehyde"])
+    result = build_filtering_term_clause(term, ["Formalin", "Glutaraldehyde"])
     assert result == {
         "bool": {
             "should": [
@@ -155,15 +156,10 @@ def test_build_filtering_term_query_ontology_or_value_free_text_only():
     }
 
 
-# ---------------------------------------------------------------------------
-# build_filtering_term_query — text type
-# ---------------------------------------------------------------------------
-
-
-def test_build_filtering_term_query_text_single():
+def test_build_filtering_term_clause_text_single():
     """Single value for text produces a match query."""
     term = get_term("dataset_title")  # text
-    result = build_filtering_term_query(term, "cancer")
+    result = build_filtering_term_clause(term, "cancer")
     assert result == {
         "bool": {
             "should": [
@@ -181,10 +177,10 @@ def test_build_filtering_term_query_text_single():
     }
 
 
-def test_build_filtering_term_query_text_multi():
+def test_build_filtering_term_clause_text_multi():
     """Multiple values for text produce one match query per value (OR semantics)."""
     term = get_term("dataset_title")
-    result = build_filtering_term_query(term, ["cancer", "tumor"])
+    result = build_filtering_term_clause(term, ["cancer", "tumor"])
     assert result == {
         "bool": {
             "should": [
@@ -210,15 +206,10 @@ def test_build_filtering_term_query_text_multi():
     }
 
 
-# ---------------------------------------------------------------------------
-# build_filtering_term_query — iso8601Range type
-# ---------------------------------------------------------------------------
-
-
-def test_build_filtering_term_query_iso8601range_single():
+def test_build_filtering_term_clause_iso8601range_single():
     """Single iso8601 range value produces a range query in days."""
     term = get_term("age_at_extraction")  # iso8601Range
-    result = build_filtering_term_query(term, "P10Y-P20Y")
+    result = build_filtering_term_clause(term, "P10Y-P20Y")
     assert result == {
         "bool": {
             "should": [
@@ -229,10 +220,10 @@ def test_build_filtering_term_query_iso8601range_single():
     }
 
 
-def test_build_filtering_term_query_iso8601range_multi():
+def test_build_filtering_term_clause_iso8601range_multi():
     """Multiple iso8601 range values produce one range query per value (OR semantics)."""
     term = get_term("age_at_extraction")
-    result = build_filtering_term_query(term, ["P10Y-P20Y", "P30Y-P40Y"])
+    result = build_filtering_term_clause(term, ["P10Y-P20Y", "P30Y-P40Y"])
     assert result == {
         "bool": {
             "should": [
@@ -244,21 +235,15 @@ def test_build_filtering_term_query_iso8601range_multi():
     }
 
 
-# ---------------------------------------------------------------------------
-# build_filtering_term_query — unsupported type
-# ---------------------------------------------------------------------------
-
-
-def test_build_filtering_term_query_unsupported_type():
+def test_build_filtering_term_clause_unsupported_type():
     term = get_term("sex")
     term_bad = term.model_copy(update={"type": "unknown"})  # type: ignore[arg-type]
     with pytest.raises(UserException, match="Unsupported term type unknown"):
-        build_filtering_term_query(term_bad, "Male")
+        build_filtering_term_clause(term_bad, "Male")
 
 
-# ---------------------------------------------------------------------------
-# get_query — nested path routing
-# ---------------------------------------------------------------------------
+# Test get_query.
+#
 
 
 def _clauses_for_scope(query: dict, scope: str) -> list[dict]:
@@ -270,12 +255,12 @@ def _clauses_for_scope(query: dict, scope: str) -> list[dict]:
     raise AssertionError(f"no alternative for scope {scope!r}")
 
 
-def test_get_query_no_filters():
-    assert get_query() == {"bool": {"filter": [{"match_all": {}}]}}
+def test_get_query_clause_no_filters():
+    assert get_query_clause() == {"bool": {"filter": [{"match_all": {}}]}}
 
 
-def test_get_query_top_level_filter():
-    assert get_query(("dataset_title", "cancer")) == {
+def test_get_query_clause_top_level_filter():
+    assert get_query_clause(("dataset_title", "cancer")) == {
         "bool": {
             "filter": [
                 {
@@ -298,8 +283,8 @@ def test_get_query_top_level_filter():
     }
 
 
-def test_get_query_nested_block_filter():
-    assert get_query(("sex", "Female")) == {
+def test_get_query_clause_nested_block_filter():
+    assert get_query_clause(("sex", "Female")) == {
         "bool": {
             "filter": [
                 {
@@ -326,8 +311,8 @@ def test_get_query_nested_block_filter():
     }
 
 
-def test_get_query_nested_stain_filter():
-    assert get_query(("staining_target", "Ki-67")) == {
+def test_get_query_clause_nested_stain_filter():
+    assert get_query_clause(("staining_target", "Ki-67")) == {
         "bool": {
             "filter": [
                 {
@@ -360,8 +345,8 @@ def test_get_query_nested_stain_filter():
     }
 
 
-def test_get_query_multiple_nested_specimen_filter():
-    assert get_query(("sex", "Female"), ("specimen_type", "119376003")) == {
+def test_get_query_clause_multiple_nested_specimen_filter():
+    assert get_query_clause(("sex", "Female"), ("specimen_type", "119376003")) == {
         "bool": {
             "filter": [
                 {
@@ -402,10 +387,10 @@ def test_get_query_multiple_nested_specimen_filter():
     }
 
 
-def test_get_query_scope_specific_filter_excludes_other_scopes():
+def test_get_query_clause_scope_specific_filter_excludes_other_scopes():
     """animal_species is indexed for non-clinical only and must not exclude
     clinical documents; sex applies to both."""
-    query = get_query(("sex", "Female"), ("animal_species", "337915000"))
+    query = get_query_clause(("sex", "Female"), ("animal_species", "337915000"))
 
     sex = {
         "bool": {
@@ -430,8 +415,8 @@ def test_get_query_scope_specific_filter_excludes_other_scopes():
     ]
 
 
-def test_get_query_top_level_and_nested_filters():
-    assert get_query(
+def test_get_query_clause_top_level_and_nested_filters():
+    assert get_query_clause(
         ("dataset_title", "cancer"),  # top-level
         ("sex", "Female"),  # specimen
         ("staining_target", "Ki-67"),  # staining
@@ -502,29 +487,29 @@ def test_get_query_top_level_and_nested_filters():
     }
 
 
-def test_get_query_scope_none():
+def test_get_query_clause_scope_none():
     """scope=None (the default) means no scope restriction."""
     assert (
-        get_query(scope=None)
-        == get_query()
+        get_query_clause(scope=None)
+        == get_query_clause()
         == {"bool": {"filter": [{"match_all": {}}]}}
     )
 
 
-def test_get_query_scope_clinical():
-    assert get_query(scope="clinical") == {
+def test_get_query_clause_scope_clinical():
+    assert get_query_clause(scope="clinical") == {
         "bool": {"filter": [{"term": {"scope": "clinical"}}]}
     }
 
 
-def test_get_query_scope_non_clinical():
-    assert get_query(scope="non_clinical") == {
+def test_get_query_clause_scope_non_clinical():
+    assert get_query_clause(scope="non_clinical") == {
         "bool": {"filter": [{"term": {"scope": "non_clinical"}}]}
     }
 
 
-def test_get_query_scope_clinical_with_filter():
-    assert get_query(("dataset_title", "cancer"), scope="clinical") == {
+def test_get_query_clause_scope_clinical_with_filter():
+    assert get_query_clause(("dataset_title", "cancer"), scope="clinical") == {
         "bool": {
             "filter": [
                 {"term": {"scope": "clinical"}},
@@ -575,9 +560,9 @@ def test_qualifier_clauses_cover_every_group_the_qualifier_names():
     }
 
 
-def test_get_query_qualifier_joins_the_filter_inside_the_nested_query():
+def test_get_query_clause_qualifier_joins_the_filter_inside_the_nested_query():
     service = _service()
-    query = service._get_query(
+    query = service._get_query_clause(
         [BeaconQueryFilter(id="diagnosis", value="73211009")],
         qualifiers={"observation": ["confirmed"]},
     )
@@ -595,16 +580,16 @@ def test_get_query_qualifier_joins_the_filter_inside_the_nested_query():
     ]
 
 
-def test_get_query_qualifier_alone_does_not_constrain_an_unfiltered_group():
+def test_get_query_clause_qualifier_alone_does_not_constrain_an_unfiltered_group():
     service = _service()
-    query = service._get_query(
+    query = service._get_query_clause(
         [BeaconQueryFilter(id="dataset_title", value="cancer")],
         qualifiers={"observation": ["candidate"]},
     )
     assert not any("nested" in clause for clause in query["bool"]["filter"])
 
 
-# Count values OpenSearch filters.
+# Test count values filters.
 #
 
 
@@ -649,7 +634,7 @@ def test_count_values_filters_qualifier_ignored():
     assert group_item_filter is None
 
 
-# Value counts.
+# Test value counts.
 #
 
 

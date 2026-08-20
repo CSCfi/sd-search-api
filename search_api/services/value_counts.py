@@ -3,7 +3,7 @@ import logging
 from collections.abc import Iterator, Sequence
 from datetime import datetime
 
-from search_api.api.beacon.services import OpenSearchBeaconService
+from search_api.api.opensearch.beacon import OpenSearchBeaconService
 from search_api.api.models import ValueCountsKey
 from search_api.database.document import max_synced_at
 from search_api.services.poller import UpdatedPoller

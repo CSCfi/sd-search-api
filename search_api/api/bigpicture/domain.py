@@ -30,8 +30,8 @@ from search_api.api.bigpicture.opensearch import (
     BigpictureDatasetBeaconService,
     BigpictureImageBeaconService,
 )
-from search_api.api.beacon.services import OpenSearchBeaconService
 from search_api.api.domain import BeaconQueryEndpoint, Domain, Loader
+from search_api.api.opensearch.beacon import OpenSearchBeaconService
 from search_api.api.opensearch.models import ExtractedDocument
 from search_api.api.bigpicture.extract import extract_documents
 

@@ -457,7 +457,7 @@ Auth routes (`api/auth/routes.py`, always mounted): `GET /login`, `GET /callback
 an OIDC relying party (`services/auth.py`) that issues a session JWT cookie. Configured by
 `OIDCConfiguration` / `JWTConfiguration` in `conf.py`.
 
-### BeaconService (`api/beacon/services.py`)
+### BeaconService (`api/beacon/services.py`, `api/opensearch/beacon.py`)
 
 `BeaconService` (ABC, `Generic[T]`) covers a deployment's health, indexed counts and field value
 counts — nothing that depends on how a query endpoint's records are shaped, so **one instance
@@ -472,8 +472,10 @@ dependency. A class needing both inherits both, as `OpenSearchQueryBeaconService
 endpoint (`/datasets`, `/images`) needs its own `BeaconQueryService`; every other route needs only
 the query-less `BeaconService`.
 
-`OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm])` implements that query-less
-contract against OpenSearch (field value counts, cluster health) and is **concrete on its own** —
+`OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm])` (`api/opensearch/beacon.py` —
+everything OpenSearch-specific lives under `api/opensearch/`, `api/beacon/services.py` holds only the
+backend-agnostic contracts) implements that query-less contract against OpenSearch (field value
+counts, cluster health) and is **concrete on its own** —
 no deployment needs to subclass it just to answer `/status`/`/health`/`/values`/`/suggestions`;
 Bigpicture's `Domain.beacon_service_factory` builds one directly.
 `OpenSearchQueryBeaconService(OpenSearchBeaconService, BeaconQueryService[S])` adds query
@@ -509,7 +511,7 @@ builder (`api/opensearch/clauses.py`):
 
 **A filter only constrains the scopes its field is indexed for.** A field absent from a scope cannot
 match any document of it, so including the filter as a plain condition would exclude every such
-document rather than leave it alone. When some filter is scope-specific, `_get_query` therefore emits
+document rather than leave it alone. When some filter is scope-specific, `_get_query_clause` therefore emits
 one `should` branch per scope — each pairing that scope with only the filters that apply to it — and a
 document matches through its own scope's branch. With every filter applying to every scope in play the
 branches reduce to one flat query, which is what is emitted instead. The corollary: filtering on

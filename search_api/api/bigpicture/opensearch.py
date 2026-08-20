@@ -18,6 +18,10 @@ from search_api.api.opensearch.search import (
 # How many results one round trip fetches.
 _PAGE_SIZE = 1000
 
+_DATASET_ID_FIELD = "dataset_id"
+_IMAGE_ID_FIELD = "image_id"
+_DATASET_OTHER_FIELDS = ("dataset_title", "dataset_description", "dataset_image_cnt")
+
 
 class BigpictureDatasetBeaconService(
     OpenSearchQueryBeaconService[BigpictureBeaconDatasetResult]
@@ -25,18 +29,14 @@ class BigpictureDatasetBeaconService(
     """OpenSearch beacon service grouping Bigpicture images into datasets."""
 
     # Get dataset metadata from one document per composite bucket.
-    _SUB_AGGS = {
-        "dataset_info": top_hits_sub_agg(
-            ["dataset_title", "dataset_description", "dataset_image_cnt"]
-        )
-    }
+    _SUB_AGGS = {"dataset_info": top_hits_sub_agg(list(_DATASET_OTHER_FIELDS))}
 
     @staticmethod
     def _build_dataset(
         dataset_id: str, bucket: dict[str, Any]
     ) -> BigpictureBeaconDatasetResult:
         source = top_hits_source(bucket, "dataset_info")
-        for f in ("dataset_title", "dataset_description", "dataset_image_cnt"):
+        for f in _DATASET_OTHER_FIELDS:
             if f not in source:
                 raise SystemException(f"Dataset '{dataset_id}' is missing field: {f}")
         return BigpictureBeaconDatasetResult(
@@ -59,7 +59,7 @@ class BigpictureDatasetBeaconService(
     def _accumulate_image_id(
         result: BigpictureBeaconDatasetResult, bucket: dict[str, Any]
     ) -> None:
-        result.imageIds.append(bucket["key"]["image_id"])
+        result.imageIds.append(bucket["key"][_IMAGE_ID_FIELD])
         result.matchingImageCount += 1
 
     @override
@@ -69,7 +69,7 @@ class BigpictureDatasetBeaconService(
             index_name=self.index_name,
             query_clause=query_clause,
             page_size=_PAGE_SIZE,
-            group_field="dataset_id",
+            group_field=_DATASET_ID_FIELD,
             build_record=BigpictureDatasetBeaconService._build_dataset,
             accumulate_record=BigpictureDatasetBeaconService._accumulate_count,
             sub_aggs=BigpictureDatasetBeaconService._SUB_AGGS,
@@ -85,11 +85,11 @@ class BigpictureDatasetBeaconService(
             index_name=self.index_name,
             query_clause=query_clause,
             page_size=_PAGE_SIZE,
-            group_field="dataset_id",
+            group_field=_DATASET_ID_FIELD,
             build_record=BigpictureDatasetBeaconService._build_dataset,
             accumulate_record=BigpictureDatasetBeaconService._accumulate_image_id,
             sub_aggs=BigpictureDatasetBeaconService._SUB_AGGS,
-            extra_sources=[{"image_id": {"terms": {"field": "image_id"}}}],
+            extra_sources=[{_IMAGE_ID_FIELD: {"terms": {"field": _IMAGE_ID_FIELD}}}],
         )
         results: BeaconResultSets[BigpictureBeaconDatasetResult] = BeaconResultSets()
         for dataset_id, result in datasets.items():
@@ -117,7 +117,7 @@ class BigpictureImageBeaconService(
         def build_record(
             source: dict[str, Any],
         ) -> BeaconResultSet[BigpictureBeaconImageResult]:
-            image_id = source["image_id"]
+            image_id = source[_IMAGE_ID_FIELD]
             return BeaconResultSet[BigpictureBeaconImageResult](
                 id=image_id,
                 setType="image",
@@ -129,8 +129,8 @@ class BigpictureImageBeaconService(
             index_name=self.index_name,
             query_clause=query_clause,
             page_size=_PAGE_SIZE,
-            source_fields=["image_id"],
-            sort_field="image_id",
+            source_fields=[_IMAGE_ID_FIELD],
+            sort_field=_IMAGE_ID_FIELD,
             build_record=build_record,
         )
         return BeaconResultSets(resultSet=records)

@@ -31,7 +31,7 @@ from search_api.exceptions import SystemException
 from search_api.api.opensearch.clauses import build_match_clause
 from search_api.api.opensearch.index import create_index, index_documents
 from search_api.api.opensearch.keywords import fetch_indexed_keywords
-from search_api.api.opensearch.search import get_documents, get_grouped_documents
+from search_api.api.opensearch.search import iter_paged_buckets, iter_paged_documents
 from tests.integration.conftest import bp_search
 
 _CONFIRMED = "observation:confirmed"
@@ -212,42 +212,43 @@ async def test_dataset_count_indexed(bp_opensearch_index, dataset_service):
 
 
 @pytest.mark.asyncio
-async def test_get_documents_pagination(bp_opensearch_index, bp_opensearch_index_name):
-    # 3 datasets, page_size 2, two pages (2 + 1).
-    image_ids = await get_documents(
-        search=bp_search,
-        index_name=bp_opensearch_index_name,
-        query_clause={"match_all": {}},
-        page_size=2,
-        source_fields=["image_id"],
-        sort_field="image_id",
-        build_record=lambda source: source["image_id"],
-    )
+async def test_iter_paged_documents_pagination(
+    bp_opensearch_index, bp_opensearch_index_name
+):
+    # 3 documents, page_size 2, two pages (2 + 1).
+    image_ids = [
+        source["image_id"]
+        async for source in iter_paged_documents(
+            search=bp_search,
+            index_name=bp_opensearch_index_name,
+            query_clause={"match_all": {}},
+            page_size=2,
+            source_fields=["image_id"],
+            sort_field="image_id",
+        )
+    ]
     assert sorted(image_ids) == ["image_1", "image_2", "image_3"]
 
 
 @pytest.mark.asyncio
-async def test_get_grouped_documents_pagination(
+async def test_iter_paged_buckets_pagination(
     bp_opensearch_index, bp_opensearch_index_name
 ):
-    def _build_record(_group_id: str, _bucket: dict[str, Any]) -> list[str]:
-        return []
-
-    def _accumulate_record(image_ids: list[str], bucket: dict[str, Any]) -> None:
-        image_ids.append(bucket["key"]["image_id"])
-
-    # 3 images, page_size 2, two pages (2 + 1).
-    groups = await get_grouped_documents(
-        search=bp_search,
-        index_name=bp_opensearch_index_name,
-        query_clause={"match_all": {}},
-        page_size=2,
-        group_field="dataset_id",
-        build_record=_build_record,
-        accumulate_record=_accumulate_record,
-        extra_sources=[{"image_id": {"terms": {"field": "image_id"}}}],
-    )
-    assert sorted(groups["ds"]) == ["image_1", "image_2", "image_3"]
+    # 3 images sharing dataset "ds", page_size 2, two pages (2 + 1).
+    image_ids = [
+        bucket["key"]["image_id"]
+        async for bucket in iter_paged_buckets(
+            search=bp_search,
+            index_name=bp_opensearch_index_name,
+            query_clause={"match_all": {}},
+            page_size=2,
+            sources=[
+                {"dataset_id": {"terms": {"field": "dataset_id"}}},
+                {"image_id": {"terms": {"field": "image_id"}}},
+            ],
+        )
+    ]
+    assert sorted(image_ids) == ["image_1", "image_2", "image_3"]
 
 
 # Test queries.

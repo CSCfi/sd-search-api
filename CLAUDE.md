@@ -535,31 +535,30 @@ reads `hits.total.value` off a `{"size": 0}` search directly and passes it throu
 unclamped, since boolean only ever reads it as `> 0` and the real number costs nothing extra.
 
 Both Bigpicture services page their OpenSearch response via a shared, deployment-agnostic mechanism
-in `api/opensearch/search.py` (composite aggregation and plain search alike);
-only what a page's bucket or hit *means* is Bigpicture's own.
+in `api/opensearch/search.py` (composite aggregation and plain search alike): `iter_paged_buckets`
+and `iter_paged_documents` are plain async generators that know how to fetch and page — a page
+shorter than `page_size` is the last one, so no confirming empty page is fetched afterward — and
+yield raw buckets or raw `_source` dicts. Neither takes a callback; there is no `build_record` or
+similar crossing a function boundary. What a bucket or hit *means* is entirely Bigpicture's own,
+written as an ordinary loop in `api/bigpicture/opensearch.py` — deliberately, since a caller-supplied
+callback threaded through a generic pager was hard to trace (the request shape, the response
+handling, and the cursor's lifecycle were split across three functions read out of order); a plain
+loop the caller owns keeps all three in one place, at the cost of the two Bigpicture services each
+writing their own accumulation loop instead of sharing one.
 
-`BigpictureDatasetBeaconService` pages a composite aggregation, via `get_grouped_documents(search,
-index_name, query_clause, page_size, group_field, build_record, accumulate_record, sub_aggs, extra_sources)`:
-pages a composite aggregation grouped by `group_field` (`_paged_buckets_request`/
-`_iter_paged_buckets`, now private — this is their only caller), calling `build_record(group_id,
-bucket)` once per group, on its first bucket, then `accumulate_record(record, bucket)` for every
-bucket of that group including that first one, and returns `dict[group_id, record]` — callers
-supply only what a group and its members mean, nothing about fetching or paging. `_get_count`
-groups by `dataset_id` alone (`doc_count` is the image count) and returns `len(datasets)`;
-`_get_records` adds `image_id` as a second composite source, so each bucket is one image within a
-dataset rather than the whole dataset, and returns one `BeaconResultSet` per group. Both pass the
-same `build_record` (reads dataset metadata via `top_hits_source(bucket, name)` — the response-side
-counterpart of `top_hits_sub_agg`, since a composite key alone doesn't carry it) and their own
-`accumulate_record` (`_accumulate_count` vs `_accumulate_image_id`); grouping many images into few
-datasets is the reason this service needs aggregation at all.
+`BigpictureDatasetBeaconService._get_records` iterates `iter_paged_buckets` with `dataset_id` and
+`image_id` as composite sources, so each bucket is one image within a dataset. Its loop builds a
+`BigpictureBeaconDatasetResult` the first time a `dataset_id` is seen (`_build_dataset`, reading
+title/description via `top_hits_source(bucket, name)` — the response-side counterpart of
+`top_hits_sub_agg`, since a composite key alone doesn't carry them) and folds every bucket's
+`image_id` into it. `_get_count` iterates the same generator with `dataset_id` alone as the only
+source and no `sub_aggs` — cheaper than `_get_records`, since counting distinct dataset ids needs
+no title/description fetch at all.
 
-`BigpictureImageBeaconService` has nothing to group — a document already is one image — so it uses
-no composite aggregation for either method. `_get_count` is a single `count_documents` call.
-`_get_records` is one call to `get_documents(search, index_name, query_clause, page_size, source_fields,
-sort_field, build_record)`: pages via the same plain-search mechanics as before
-(`_paged_documents_request`/`_iter_paged_documents`, now private — `get_documents` is their only caller) and
-calls `build_record` with each hit's `_source`, so the caller supplies only field/sort configuration
-and the `_source → record` mapping, nothing about paging.
+`BigpictureImageBeaconService` has nothing to group — a document already is one image — so
+`_get_count` is a single `count_documents` call, and `_get_records` is a list comprehension over
+`iter_paged_documents` (`source_fields=["image_id"], sort_field="image_id"`), building one
+`BigpictureBeaconImageResult` per `_source` directly.
 
 `get_value_counts` serves `ValueCounts` from a plain dict on the service, keyed by
 `ValueCountsKey` (`api/models.py`) — the field, the scope and the qualifier, frozen so it can key a

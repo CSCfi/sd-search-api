@@ -23,6 +23,19 @@ _IMAGE_ID_FIELD = "image_id"
 _DATASET_OTHER_FIELDS = ("dataset_title", "dataset_description", "dataset_image_cnt")
 
 
+def _group_by(field_id: str) -> dict[str, Any]:
+    """One composite-aggregation source, grouping by a field's own value."""
+    return {field_id: {"terms": {"field": field_id}}}
+
+
+# Groups by dataset_id alone, so one bucket is one dataset.
+_DATASET_COUNT_SOURCES = [_group_by(_DATASET_ID_FIELD)]
+
+# Groups by dataset_id and image_id together, so one bucket is one image
+# within a dataset. This is needed to report which images matched.
+_DATASET_RECORD_SOURCES = [_group_by(_DATASET_ID_FIELD), _group_by(_IMAGE_ID_FIELD)]
+
+
 class BigpictureDatasetBeaconService(
     OpenSearchQueryBeaconService[BigpictureBeaconDatasetResult]
 ):
@@ -59,9 +72,7 @@ class BigpictureDatasetBeaconService(
                 self.index_name,
                 query_clause,
                 _PAGE_SIZE,
-                # One composite-aggregation source. Documents are grouped to buckets
-                # by their dataset_id value. The outer key names the source.
-                sources=[{_DATASET_ID_FIELD: {"terms": {"field": _DATASET_ID_FIELD}}}],
+                sources=_DATASET_COUNT_SOURCES,
             )
         }
         return len(dataset_ids)
@@ -70,23 +81,13 @@ class BigpictureDatasetBeaconService(
     async def _get_records(
         self, query_clause: dict[str, Any]
     ) -> BeaconResultSets[BigpictureBeaconDatasetResult]:
-        # image_id as a second composite source makes each bucket one image
-        # within a dataset, rather than the whole dataset.
         datasets: dict[str, BigpictureBeaconDatasetResult] = {}
         async for bucket in iter_paged_buckets(
             self.client,
             self.index_name,
             query_clause,
             _PAGE_SIZE,
-            # Two composite-aggregation sources. Documents are grouped to buckets
-            # by their dataset_id and image_id values together. Each bucket is one
-            # image within a dataset, not the whole dataset. This is required to
-            # report which images matched, since the list of image ids is included
-            # in the result.
-            sources=[
-                {_DATASET_ID_FIELD: {"terms": {"field": _DATASET_ID_FIELD}}},
-                {_IMAGE_ID_FIELD: {"terms": {"field": _IMAGE_ID_FIELD}}},
-            ],
+            sources=_DATASET_RECORD_SOURCES,
             # Fetches dataset title, description, and image count from one
             # representative document per bucket. The composite key alone
             # only has dataset_id and image_id, not these fields.

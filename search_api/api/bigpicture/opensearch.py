@@ -3,6 +3,7 @@ from typing import Any, override
 from search_api.exceptions import SystemException
 from search_api.api.beacon.models import BeaconResultSet, BeaconResultSets
 from search_api.api.bigpicture.models import (
+    BP_DOCUMENT_FIELDS,
     BigpictureBeaconDatasetResult,
     BigpictureBeaconImageResult,
 )
@@ -21,6 +22,11 @@ _PAGE_SIZE = 1000
 _DATASET_ID_FIELD = "dataset_id"
 _IMAGE_ID_FIELD = "image_id"
 _DATASET_OTHER_FIELDS = ("dataset_title", "dataset_description", "dataset_image_cnt")
+
+# Validate field constants against fields.yaml.
+for _field_id in (_DATASET_ID_FIELD, _IMAGE_ID_FIELD, *_DATASET_OTHER_FIELDS):
+    if _field_id not in BP_DOCUMENT_FIELDS:
+        raise SystemException(f"'{_field_id}' is not a declared field in fields.yaml.")
 
 
 def _group_by(field_id: str) -> dict[str, Any]:

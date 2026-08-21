@@ -22,12 +22,14 @@ from search_api.api.bigpicture.models import (
     BigpictureBeaconDatasetResult,
     BigpictureBeaconImageResult,
 )
+from search_api.api.bigpicture import opensearch as bp_opensearch
 from search_api.api.bigpicture.opensearch import (
     BigpictureDatasetBeaconService,
     BigpictureImageBeaconService,
 )
 from search_api.api.opensearch.models import OpenSearchBeaconFilteringTerm
 from search_api.exceptions import SystemException
+from search_api.api.opensearch import keywords
 from search_api.api.opensearch.clauses import build_match_clause
 from search_api.api.opensearch.index import create_index, index_documents
 from search_api.api.opensearch.keywords import fetch_indexed_keywords
@@ -249,6 +251,64 @@ async def test_iter_paged_buckets_pagination(
         )
     ]
     assert sorted(image_ids) == ["image_1", "image_2", "image_3"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_indexed_keywords_pagination_top_level_field(
+    bp_opensearch_index, bp_opensearch_index_name, monkeypatch
+):
+    # scope has 2 distinct values; page_size 1 forces two pages.
+    monkeypatch.setattr(keywords, "_KEYWORD_PAGE_SIZE", 1)
+
+    counts = await fetch_indexed_keywords(bp_search, bp_opensearch_index_name, "scope")
+
+    assert counts == {"clinical": 2, "non_clinical": 1}
+
+
+@pytest.mark.asyncio
+async def test_fetch_indexed_keywords_pagination_nested_field(
+    bp_opensearch_index, bp_opensearch_index_name, monkeypatch
+):
+    # diagnosis.diagnosis has 2 distinct values; page_size 1 forces two pages.
+    monkeypatch.setattr(keywords, "_KEYWORD_PAGE_SIZE", 1)
+
+    counts = await fetch_indexed_keywords(
+        bp_search, bp_opensearch_index_name, "diagnosis.diagnosis"
+    )
+
+    assert counts == {"73211009": 2, "38341003": 1}
+
+
+@pytest.mark.asyncio
+async def test_image_query_pagination(bp_opensearch_index, image_service, monkeypatch):
+    # 3 images, page_size 1, forces iter_paged_documents through three real pages.
+    monkeypatch.setattr(bp_opensearch, "_PAGE_SIZE", 1)
+
+    result = await image_service.query(filters=[], granularity="record")
+
+    image_ids = sorted(
+        r.imageId for rs in result.result_sets.resultSet for r in rs.results
+    )
+    assert image_ids == ["image_1", "image_2", "image_3"]
+
+
+@pytest.mark.asyncio
+async def test_dataset_query_pagination(
+    bp_opensearch_index, dataset_service, monkeypatch
+):
+    # All 3 images share dataset "ds"; page_size 1 forces the composite aggregation
+    # through multiple real pages, both for counting buckets and for building records.
+    # This proves the per-dataset accumulator persists correctly across pages, rather
+    # than being reset with each new page fetched.
+    monkeypatch.setattr(bp_opensearch, "_PAGE_SIZE", 1)
+
+    count_result = await dataset_service.query(filters=[], granularity="count")
+    assert count_result.total == 1
+
+    record_result = await dataset_service.query(filters=[], granularity="record")
+    dataset = record_result.result_sets.resultSet[0].results[0]
+    assert sorted(dataset.imageIds) == ["image_1", "image_2", "image_3"]
+    assert dataset.matchingImageCount == 3
 
 
 # Test queries.

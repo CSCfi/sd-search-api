@@ -54,9 +54,6 @@
           },
           "control_terminology": {
             "type": "keyword"
-          },
-          "qualifiers": {
-            "type": "keyword"
           }
         }
       },
@@ -77,26 +74,15 @@
           },
           "staining_substance_other": {
             "type": "keyword"
-          },
-          "qualifiers": {
-            "type": "keyword"
           }
         }
       },
-      "diagnosis": {
+      "observation": {
         "type": "nested",
         "properties": {
           "diagnosis": {
             "type": "keyword"
           },
-          "qualifiers": {
-            "type": "keyword"
-          }
-        }
-      },
-      "finding": {
-        "type": "nested",
-        "properties": {
           "finding": {
             "type": "keyword"
           },
@@ -112,7 +98,7 @@
           "finding_result_category": {
             "type": "keyword"
           },
-          "qualifiers": {
+          "observation_type": {
             "type": "keyword"
           }
         }

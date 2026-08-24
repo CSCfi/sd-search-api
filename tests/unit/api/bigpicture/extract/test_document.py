@@ -83,21 +83,22 @@ def test_extract_fields_non_clinical():
     assert payload["scope"] == "non_clinical"
     # The short name is excluded for non-clinical datasets.
     assert "dataset_short_name" not in payload
-    assert "diagnosis" not in payload
+    # No clinical diagnosis reaches a non-clinical dataset's observation items.
+    assert all("diagnosis" not in item for item in payload["observation"])
 
     assert payload["image_id"] == NON_CLINICAL_IMAGE_1
     assert payload["dataset_id"] == NON_CLINICAL_DATASET
     assert payload["dataset_description"] == "test_description"
 
-    # One finding group per Finding statement, holding all five of its fields.
-    assert payload["finding"] == [
+    # One observation item per Finding statement, holding all five of its fields.
+    assert payload["observation"] == [
         {
             "finding": "C3137",
             "finding_severity": "C147501",
             "finding_chronicity": "C14141",
             "finding_distribution": "C25253",
             "finding_result_category": "C53529",
-            "qualifiers": ["observation:confirmed"],
+            "observation_type": "confirmed",
         }
     ]
     specimen = payload["specimen"][0]
@@ -124,49 +125,49 @@ def test_extract_fields_non_clinical():
     assert stain2["staining_target"] == "pan Cytokeratin"
 
     # Each image gets only the finding of the observation referencing it.
-    assert payload2["finding"] == [
+    assert payload2["observation"] == [
         {
             "finding": "C41428",
             "finding_severity": "C147501",
             "finding_result_category": "C53529",
-            "qualifiers": ["observation:confirmed"],
+            "observation_type": "confirmed",
         }
     ]
     # This statement declares no MICHRON or MIDISTR, so neither is indexed.
-    assert "finding_chronicity" not in payload2["finding"][0]
-    assert "finding_distribution" not in payload2["finding"][0]
+    assert "finding_chronicity" not in payload2["observation"][0]
+    assert "finding_distribution" not in payload2["observation"][0]
 
 
 def test_extract_diagnoses():
     docs = {doc.id: doc for doc in extract_dataset_documents(str(CLINICAL_DATASET_DIR))}
 
-    def qualifiers_by_diagnosis(payload) -> dict[str, list[str]]:
+    def observation_type_by_diagnosis(payload) -> dict[str, str]:
         return {
-            item["diagnosis"]: sorted(item["qualifiers"])
-            for item in payload["diagnosis"]
+            item["diagnosis"]: item["observation_type"]
+            for item in payload["observation"]
         }
 
-    image1 = qualifiers_by_diagnosis(build_document(docs[CLINICAL_IMAGE_1]))
-    image2 = qualifiers_by_diagnosis(build_document(docs[CLINICAL_IMAGE_2]))
+    image1 = observation_type_by_diagnosis(build_document(docs[CLINICAL_IMAGE_1]))
+    image2 = observation_type_by_diagnosis(build_document(docs[CLINICAL_IMAGE_2]))
 
     # A diagnosis stated for the image itself, or stated as Distinct, is confirmed
     # for that image; one reaching several images via another ref is a candidate.
     # Image 1: CASE_REF and SPECIMEN_REF (Distinct, both images), IMAGE_REF
     # (image 1), BIOLOGICAL_BEING_REF and BLOCK_REF (Summary, both images).
     assert image1 == {
-        "109355002": ["observation:confirmed"],
-        "254837009": ["observation:confirmed"],
-        "73211009": ["observation:confirmed"],
-        "363346000": ["observation:candidate"],
-        "38341003": ["observation:candidate"],
+        "109355002": "confirmed",
+        "254837009": "confirmed",
+        "73211009": "confirmed",
+        "363346000": "candidate",
+        "38341003": "candidate",
     }
     # Image 2 differs only in SLIDE_REF (Distinct, image 2) replacing IMAGE_REF.
     assert image2 == {
-        "195967001": ["observation:confirmed"],
-        "254837009": ["observation:confirmed"],
-        "73211009": ["observation:confirmed"],
-        "363346000": ["observation:candidate"],
-        "38341003": ["observation:candidate"],
+        "195967001": "confirmed",
+        "254837009": "confirmed",
+        "73211009": "confirmed",
+        "363346000": "candidate",
+        "38341003": "candidate",
     }
 
     # The equality assertions above already exclude the non-SNOMED code 8500/3 and

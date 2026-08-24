@@ -2,7 +2,7 @@
 
 import asyncio
 from abc import abstractmethod
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import Any, TypeVar, override
 
 from opensearchpy import AsyncOpenSearch
@@ -16,13 +16,11 @@ from search_api.api.opensearch.clauses import (
     build_iso8601_range_clause,
     build_or_clause,
 )
-from search_api.api.qualifiers import QUALIFIERS_FIELD, encode_qualifier_value
 from search_api.api.scopes import SCOPE_FIELD
 from search_api.exceptions import SystemException, UserException
 from search_api.services.ontology.service import get_ontology_service
 
 from search_api.api.beacon.models import (
-    BeaconFilteringQualifier,
     BeaconFilteringScope,
     BeaconQueryFilter,
     BeaconQueryGranularity,
@@ -88,39 +86,13 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm]):
         index_name: str,
         filtering_terms: Sequence[OpenSearchBeaconFilteringTerm],
         filtering_scopes: Sequence[BeaconFilteringScope] = (),
-        filtering_qualifiers: Sequence[BeaconFilteringQualifier] = (),
     ) -> None:
         super().__init__(filtering_terms)
         self.client = client
         self.index_name = index_name
         self.filtering_scopes = filtering_scopes
-        self.filtering_qualifiers = filtering_qualifiers
         # Cached value counts.
         self._value_counts: dict[ValueCountsKey, ValueCounts] = {}
-
-    def _qualifier_clauses_by_group(
-        self, qualifiers: Mapping[str, Sequence[str]] | None
-    ) -> dict[str, list[dict[str, Any]]]:
-        """Return the qualifier filter clauses to apply, keyed by nested group.
-
-        A qualifier filters nested groups by the qualifier id and value. A
-        qualifier that is absent from ``qualifiers`` is not filtered on.
-        Clauses are only produced for the groups that use the particular
-        qualifier.
-        """
-        clauses: dict[str, list[dict[str, Any]]] = {}
-        for qualifier in self.filtering_qualifiers:
-            values = (qualifiers or {}).get(qualifier.id)
-            if not values:
-                continue
-            for group in qualifier.groups:
-                clauses.setdefault(group, []).append(
-                    build_terms_clause(
-                        f"{group}.{QUALIFIERS_FIELD}",
-                        [encode_qualifier_value(qualifier.id, v) for v in values],
-                    )
-                )
-        return clauses
 
     @override
     async def count_indexed(self, scope: str | None = None) -> int:
@@ -151,7 +123,6 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm]):
         self,
         field_id: str,
         scope: str | None = None,
-        qualifiers: Mapping[str, Sequence[str]] | None = None,
     ) -> ValueCounts:
         """Return field's value counts.
 
@@ -159,37 +130,19 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm]):
         in the cache, they are retrieved from OpenSearch and added
         to the cache.
         """
-        key = ValueCountsKey.of(field_id, scope, qualifiers)
+        key = ValueCountsKey.of(field_id, scope)
         counts = self._value_counts.get(key)
         if counts is None:
             counts = await self._count_values(key)
             self._value_counts[key] = counts
         return counts
 
-    def _count_values_filters(
-        self,
-        term: OpenSearchBeaconFilteringTerm,
-        scope: str | None,
-        qualifiers: Mapping[str, Sequence[str]] | None,
-    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-        """Return document and group item filters for value count queries."""
-        document_filter = (
-            build_term_clause(SCOPE_FIELD, scope) if scope is not None else None
-        )
-        group_clauses = self._qualifier_clauses_by_group(qualifiers).get(
-            term.group or ""
-        )
-        group_item_filter = (
-            {"bool": {"filter": group_clauses}} if group_clauses else None
-        )
-        return document_filter, group_item_filter
-
     async def _count_values(self, key: ValueCountsKey) -> ValueCounts:
         """Retrieve fields's value counts from OpenSearch."""
         term = self.get_term(key.field_id)
         field = term.opensearch_field
-        document_filter, group_item_filter = self._count_values_filters(
-            term, key.scope, key.qualifier_values_by_id
+        document_filter = (
+            build_term_clause(SCOPE_FIELD, key.scope) if key.scope is not None else None
         )
         if isinstance(field, OpenSearchOntologyOrValue):
             concept_counts, other_counts = await asyncio.gather(
@@ -198,14 +151,12 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm]):
                     self.index_name,
                     field.concept_value_field,
                     document_filter=document_filter,
-                    group_item_filter=group_item_filter,
                 ),
                 fetch_indexed_keywords(
                     self.client,
                     self.index_name,
                     field.other_value_field,
                     document_filter=document_filter,
-                    group_item_filter=group_item_filter,
                 ),
             )
             return ValueCounts(counts=concept_counts, other_counts=other_counts)
@@ -215,7 +166,6 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm]):
                 self.index_name,
                 field,
                 document_filter=document_filter,
-                group_item_filter=group_item_filter,
             )
         )
 
@@ -243,34 +193,27 @@ class OpenSearchQueryBeaconService(OpenSearchBeaconService, BeaconQueryService[S
     @staticmethod
     def _nest_group_filters(
         term_clauses: Sequence[tuple[OpenSearchBeaconFilteringTerm, dict[str, Any]]],
-        qualifier_clauses_by_group: Mapping[str, list[dict[str, Any]]],
     ) -> list[dict[str, Any]]:
         """Return the bool clauses matching the given filters.
 
         A filter on a top-level field is a clause on its own. Filters on fields
         in a group are collected into one nested query per group, so that a single
-        group item has to satisfy all of them. That group's qualifier clauses
-        join them inside the same nested query, so the qualifier holds for the
-        item that matched.
+        group item has to satisfy all of them.
 
         Does not know about scopes.
 
         Each clause comes from ``term_clauses`` unchanged; only its placement is
         decided here. For example, filtering ``dataset_title`` plus ``finding`` and
-        ``finding_severity`` (both in ``finding``) for Bigpicture, with the
-        ``observation`` qualifier requested, returns::
+        ``finding_severity`` (both in ``observation``) for Bigpicture returns::
 
             [<dataset_title term clause>,
-             {"nested": {"path": "finding",
+             {"nested": {"path": "observation",
                          "query": {"bool": {"filter": [
                              <finding term clause>,
-                             <finding_severity term clause>,
-                             {"terms": {"finding.qualifiers":
-                                        ["observation:confirmed"]}}]}}}}]
+                             <finding_severity term clause>]}}}}]
 
         Args:
             term_clauses: Each filtering term with the clause built for its value.
-            qualifier_clauses_by_group: The qualifier clauses to apply, keyed by group.
 
         Returns:
             The clauses, in no particular order.
@@ -289,14 +232,7 @@ class OpenSearchQueryBeaconService(OpenSearchBeaconService, BeaconQueryService[S
                 {
                     "nested": {
                         "path": group,
-                        "query": {
-                            "bool": {
-                                "filter": [
-                                    *group_filters,
-                                    *qualifier_clauses_by_group.get(group, []),
-                                ]
-                            }
-                        },
+                        "query": {"bool": {"filter": group_filters}},
                     }
                 }
             )
@@ -306,7 +242,6 @@ class OpenSearchQueryBeaconService(OpenSearchBeaconService, BeaconQueryService[S
         self,
         filters: list[BeaconQueryFilter],
         scope: str | None = None,
-        qualifiers: Mapping[str, Sequence[str]] | None = None,
     ) -> dict[str, Any]:
         """Build the OpenSearch query clause from Beacon filters.
 
@@ -331,7 +266,6 @@ class OpenSearchQueryBeaconService(OpenSearchBeaconService, BeaconQueryService[S
             term = terms_by_id[f.id]
             term_clauses.append((term, build_filtering_term_clause(term, f.value)))
 
-        qualifier_clauses_by_group = self._qualifier_clauses_by_group(qualifiers)
         scopes = [scope] if scope is not None else [s.id for s in self.filtering_scopes]
 
         # No scopes or every filter applies to all of them.
@@ -344,9 +278,7 @@ class OpenSearchQueryBeaconService(OpenSearchBeaconService, BeaconQueryService[S
                         # The requested scope, if one was asked for.
                         *([build_term_clause(SCOPE_FIELD, scope)] if scope else []),
                         # The field value filters.
-                        *self._nest_group_filters(
-                            term_clauses, qualifier_clauses_by_group
-                        ),
+                        *self._nest_group_filters(term_clauses),
                     ]
                     # With neither, match every document.
                     or [{"match_all": {}}]
@@ -364,8 +296,7 @@ class OpenSearchQueryBeaconService(OpenSearchBeaconService, BeaconQueryService[S
                                 build_term_clause(SCOPE_FIELD, s),
                                 # The field value filters for the scope.
                                 *self._nest_group_filters(
-                                    [(t, q) for t, q in term_clauses if s in t.scopes],
-                                    qualifier_clauses_by_group,
+                                    [(t, q) for t, q in term_clauses if s in t.scopes]
                                 ),
                             ]
                         }
@@ -397,12 +328,11 @@ class OpenSearchQueryBeaconService(OpenSearchBeaconService, BeaconQueryService[S
         self,
         filters: list[BeaconQueryFilter],
         scope: str | None = None,
-        qualifiers: Mapping[str, Sequence[str]] | None = None,
     ) -> dict[str, Any]:
         """Build the OpenSearch request body for boolean granularity."""
         return {
             "size": 0,
-            "query": self._get_query_clause(filters, scope, qualifiers),
+            "query": self._get_query_clause(filters, scope),
         }
 
     @override
@@ -411,18 +341,17 @@ class OpenSearchQueryBeaconService(OpenSearchBeaconService, BeaconQueryService[S
         filters: list[BeaconQueryFilter],
         granularity: BeaconQueryGranularity = "record",
         scope: str | None = None,
-        qualifiers: Mapping[str, Sequence[str]] | None = None,
     ) -> BeaconQueryResult[S]:
         """Execute the OpenSearch query."""
 
         if granularity == "boolean":
             resp = await self.client.search(
                 index=self.index_name,
-                body=self.get_boolean_request(filters, scope, qualifiers),
+                body=self.get_boolean_request(filters, scope),
             )
             return OpenSearchQueryBeaconService._get_boolean_result(resp)
 
-        query_clause = self._get_query_clause(filters, scope, qualifiers)
+        query_clause = self._get_query_clause(filters, scope)
 
         if granularity == "count":
             return BeaconQueryResult(

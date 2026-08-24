@@ -8,7 +8,6 @@ from typing import Any
 
 import fsspec  # type: ignore
 from lxml.etree import _Element as Element, _ElementTree as ElementTree  # noqa
-from pydantic import BaseModel
 
 from search_api.api.bigpicture.models import BP_DOCUMENT_FIELDS
 from search_api.api.bigpicture.extract.values import (
@@ -24,9 +23,7 @@ from search_api.api.bigpicture.extract.models import (
     BigpictureExtractedObject,
     OBSERVATION_CANDIDATE,
     OBSERVATION_CONFIRMED,
-    OBSERVATION_QUALIFIER,
     BigpictureCodeAttributeValue,
-    BigpictureDiagnosisFields,
     BigpictureFields,
     BigpictureSampleBiologicalBeingFields,
     BigpictureSampleBlockFields,
@@ -51,7 +48,6 @@ from search_api.api.opensearch.models import (
     OpenSearchFieldValue,
     OpenSearchGroup,
 )
-from search_api.api.qualifiers import QUALIFIERS_FIELD
 from search_api.exceptions import SystemException
 from search_api.utils.crypt import load_c4gh_keys, read_file, resolve_path
 from search_api.utils.dir import list_directories
@@ -106,21 +102,15 @@ def to_opensearch_values(
     groups: list[OpenSearchGroup] = []
     for group in NESTED_GROUPS:
         for item in getattr(fields, group):
-            item_values: list[OpenSearchFieldValue] = []
-            for field_name in type(item).model_fields:
-                if field_name == QUALIFIERS_FIELD:
-                    continue
-                item_values += field_value(field_name, getattr(item, field_name))
+            item_values = [
+                v
+                for field_name in type(item).model_fields
+                for v in field_value(field_name, getattr(item, field_name))
+            ]
             if not item_values:
                 # A group carrying no indexable field values is not indexed.
                 continue
-            groups.append(
-                OpenSearchGroup(
-                    group=group,
-                    values=item_values,
-                    qualifiers=dict(getattr(item, QUALIFIERS_FIELD, ())),
-                )
-            )
+            groups.append(OpenSearchGroup(group=group, values=item_values))
 
     return values, groups
 
@@ -451,28 +441,21 @@ def extract_dataset_documents(
                 # A statement is always considered confirmed if it is linked directly
                 # to an image.
                 confirmed = tag == OBSERVATION_IMAGE_REF or status == "Distinct"
-                qualifier_value = (
+                observation_type = (
                     OBSERVATION_CONFIRMED if confirmed else OBSERVATION_CANDIDATE
                 )
                 ref_image_ids = image_ids_for_ref(references, object_keys(ref))
-                qualifier = {
-                    QUALIFIERS_FIELD: frozenset(
-                        {(OBSERVATION_QUALIFIER, qualifier_value)}
-                    )
-                }
                 if statement_type == "Diagnosis":
-                    group = "diagnosis"
-                    diagnoses, statement_logs = extract_diagnoses(statement)
-                    items: list[BaseModel] = [
-                        BigpictureDiagnosisFields(diagnosis=code, **qualifier)
-                        for code in diagnoses
-                    ]
+                    items, statement_logs = extract_diagnoses(
+                        statement, observation_type
+                    )
                 else:
-                    group = "finding"
-                    finding, statement_logs = extract_finding(statement, **qualifier)
-                    items = [finding] if finding is not None else []
+                    finding, statement_logs = extract_finding(
+                        statement, observation_type
+                    )
+                    items = {finding} if finding is not None else set()
                 for ref_image_id in ref_image_ids:
-                    getattr(fields[ref_image_id], group).update(items)
+                    fields[ref_image_id].observation.update(items)
                 _add_logs(ref_image_ids, statement_logs)
                 break
 

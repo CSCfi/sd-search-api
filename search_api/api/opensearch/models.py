@@ -135,7 +135,6 @@ class OpenSearchGroup(BaseModel):
 
     group: str
     values: list[OpenSearchFieldValue]
-    qualifiers: dict[str, str] = Field(default_factory=dict)  # qualifier id -> value
 
     @model_validator(mode="after")
     def validate_group(self) -> "OpenSearchGroup":

@@ -19,8 +19,8 @@ class ValueCountsUpdater:
     The cache is used to speed up repeated filtering terms ``/values`` and
     ``/suggestions`` requests. The set of valid `/values`` and ``/suggestions``
     requests is known for any domain. A value count is asked for all filtering
-    terms, optionally narrowed by scope and qualifiers. This service enumerates
-    these combinations, fills the cache at startup, and refills it when
+    terms, optionally narrowed by scope. This service enumerates these
+    combinations, fills the cache at startup, and refills it when
     new documents are indexed in OpenSearch.
     """
 
@@ -46,22 +46,8 @@ class ValueCountsUpdater:
         for term in service.filtering_terms:
             if term.type not in _CACHED_VALUE_TYPES:
                 continue
-            qualifier_values = list(self._valid_qualifier_values(term.group))
             for scope in (None, *term.scopes):
-                for qualifiers in qualifier_values:
-                    yield ValueCountsKey.of(term.id, scope, qualifiers)
-
-    def _valid_qualifier_values(
-        self, group: str | None
-    ) -> Iterator[dict[str, list[str]]]:
-        """Yield every valid qualifier clause."""
-        yield {}  # Requests without qualifiers.
-        for qualifier in self._beacon_service.filtering_qualifiers:
-            if group is None or group not in qualifier.groups:
-                continue  # No group or the qualifier does not apply to it.
-            # Requests with qualifier values.
-            for value in qualifier.values:
-                yield {qualifier.id: [value]}
+                yield ValueCountsKey.of(term.id, scope)
 
     async def refresh(self) -> None:
         """Refresh the cached value counts.

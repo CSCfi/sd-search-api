@@ -7,7 +7,6 @@ documents holding them. A mocked response could only restate the assumption.
 """
 
 import uuid
-from collections.abc import Mapping, Sequence
 from typing import Any
 
 import pytest
@@ -16,7 +15,6 @@ import pytest_asyncio
 from search_api.api.beacon.models import BeaconQueryFilter
 from search_api.api.beacon.services import BeaconQueryService, BeaconService
 from search_api.api.bigpicture.models import (
-    BP_FILTERING_QUALIFIERS,
     BP_FILTERING_SCOPES,
     BP_FILTERING_TERMS,
     BigpictureBeaconDatasetResult,
@@ -28,7 +26,6 @@ from search_api.api.bigpicture.opensearch import (
     BigpictureImageBeaconService,
 )
 from search_api.api.opensearch.models import OpenSearchBeaconFilteringTerm
-from search_api.exceptions import SystemException
 from search_api.api.opensearch import keywords
 from search_api.api.opensearch.clauses import build_match_clause
 from search_api.api.opensearch.index import create_index, index_documents
@@ -36,8 +33,8 @@ from search_api.api.opensearch.keywords import fetch_indexed_keywords
 from search_api.api.opensearch.search import iter_paged_buckets, iter_paged_documents
 from tests.integration.conftest import bp_search
 
-_CONFIRMED = "observation:confirmed"
-_CANDIDATE = "observation:candidate"
+_CONFIRMED = "confirmed"
+_CANDIDATE = "candidate"
 
 
 def _document(image_id: str, scope: str, **groups: Any) -> dict[str, Any]:
@@ -59,17 +56,17 @@ _DOCS = [
         "image_1",
         "clinical",
         specimen=[{"sex": "Female"}, {"sex": "Female"}],
-        diagnosis=[
-            {"diagnosis": "73211009", "qualifiers": [_CONFIRMED]},
-            {"diagnosis": "73211009", "qualifiers": [_CANDIDATE]},
-            {"diagnosis": "38341003", "qualifiers": [_CANDIDATE]},
+        observation=[
+            {"diagnosis": "73211009", "observation_type": _CONFIRMED},
+            {"diagnosis": "73211009", "observation_type": _CANDIDATE},
+            {"diagnosis": "38341003", "observation_type": _CANDIDATE},
         ],
     ),
     _document(
         "image_2",
         "clinical",
         specimen=[{"sex": "Male"}],
-        diagnosis=[{"diagnosis": "73211009", "qualifiers": [_CONFIRMED]}],
+        observation=[{"diagnosis": "73211009", "observation_type": _CONFIRMED}],
     ),
     _document("image_3", "non_clinical", specimen=[{"sex": "Female"}]),
 ]
@@ -86,7 +83,6 @@ def _dataset_service(index_name: str) -> BigpictureDatasetBeaconService:
         index_name=index_name,
         filtering_terms=BP_FILTERING_TERMS,
         filtering_scopes=BP_FILTERING_SCOPES,
-        filtering_qualifiers=BP_FILTERING_QUALIFIERS,
     )
 
 
@@ -101,7 +97,6 @@ def _image_service(index_name: str) -> BigpictureImageBeaconService:
         index_name=index_name,
         filtering_terms=BP_FILTERING_TERMS,
         filtering_scopes=BP_FILTERING_SCOPES,
-        filtering_qualifiers=BP_FILTERING_QUALIFIERS,
     )
 
 
@@ -118,10 +113,9 @@ async def _value_counts(
     beacon_service: BeaconService[OpenSearchBeaconFilteringTerm],
     field_id: str,
     scope: str | None = None,
-    qualifiers: Mapping[str, Sequence[str]] | None = None,
 ) -> dict[str, int]:
     """Return the value counts for a field."""
-    result = await beacon_service.get_value_counts(field_id, scope, qualifiers)
+    result = await beacon_service.get_value_counts(field_id, scope)
     return result.counts
 
 
@@ -137,6 +131,13 @@ async def _assert_value_counts(
         "38341003": 1,
     }
 
+    # image_1 holds both a confirmed and a candidate item, so it counts once for
+    # each; image_2 only ever confirmed. image_3 has no observation item at all.
+    assert await _value_counts(beacon_service, "observation_type") == {
+        "confirmed": 2,
+        "candidate": 1,
+    }
+
     # Scope restricts which documents are counted.
     assert await _value_counts(beacon_service, "sex", scope="clinical") == {
         "Female": 1,
@@ -145,30 +146,6 @@ async def _assert_value_counts(
     assert await _value_counts(beacon_service, "sex", scope="non_clinical") == {
         "Female": 1
     }
-
-    # Qualifier restricts which group items are counted. 73211009 is confirmed on
-    # image_1 and image_2, and candidate on image_1; 38341003 is only ever a
-    # candidate, on image_1.
-    assert await _value_counts(
-        beacon_service, "diagnosis", qualifiers={"observation": ["confirmed"]}
-    ) == {"73211009": 2}
-    assert await _value_counts(
-        beacon_service, "diagnosis", qualifiers={"observation": ["candidate"]}
-    ) == {"73211009": 1, "38341003": 1}
-
-    # Scope and qualifier compose: image_3 is non-clinical, so its confirmed
-    # 38341003 is excluded.
-    assert await _value_counts(
-        beacon_service,
-        "diagnosis",
-        scope="clinical",
-        qualifiers={"observation": ["confirmed"]},
-    ) == {"73211009": 2}
-
-    # specimen declares no qualifier, so requesting one must not filter it out.
-    assert await _value_counts(
-        beacon_service, "sex", qualifiers={"observation": ["confirmed"]}
-    ) == {"Female": 2, "Male": 1}
 
 
 @pytest.mark.asyncio
@@ -179,23 +156,6 @@ async def test_dataset_value_counts(bp_opensearch_index, dataset_service):
 @pytest.mark.asyncio
 async def test_image_value_counts(bp_opensearch_index, image_service):
     await _assert_value_counts(image_service)
-
-
-# Fetch indexed keywords tests.
-#
-
-
-@pytest.mark.asyncio
-async def test_fetch_indexed_keywords_group_item_filter_rejected_without_group(
-    bp_opensearch_index, bp_opensearch_index_name
-):
-    with pytest.raises(SystemException, match="'dataset_id' because the field"):
-        await fetch_indexed_keywords(
-            bp_search,
-            bp_opensearch_index_name,
-            "dataset_id",
-            group_item_filter={"terms": {"diagnosis.qualifiers": [_CONFIRMED]}},
-        )
 
 
 # Count indexed tests.
@@ -269,11 +229,11 @@ async def test_fetch_indexed_keywords_pagination_top_level_field(
 async def test_fetch_indexed_keywords_pagination_nested_field(
     bp_opensearch_index, bp_opensearch_index_name, monkeypatch
 ):
-    # diagnosis.diagnosis has 2 distinct values; page_size 1 forces two pages.
+    # observation.diagnosis has 2 distinct values; page_size 1 forces two pages.
     monkeypatch.setattr(keywords, "_KEYWORD_PAGE_SIZE", 1)
 
     counts = await fetch_indexed_keywords(
-        bp_search, bp_opensearch_index_name, "diagnosis.diagnosis"
+        bp_search, bp_opensearch_index_name, "observation.diagnosis"
     )
 
     assert counts == {"73211009": 2, "38341003": 1}
@@ -319,14 +279,12 @@ async def _dataset_image_ids(
     dataset_service: BeaconQueryService[BigpictureBeaconDatasetResult],
     pairs: list[tuple[str, str]],
     scope: str | None = None,
-    qualifiers: Mapping[str, Sequence[str]] | None = None,
 ) -> list[str]:
     """Return image ids for a dataset query."""
     result = await dataset_service.query(
         filters=[BeaconQueryFilter(id=i, value=v) for i, v in pairs],
         granularity="record",
         scope=scope,
-        qualifiers=qualifiers,
     )
     return sorted(
         image_id
@@ -356,34 +314,33 @@ async def test_dataset_query_scope_specific_filter(
 
 
 @pytest.mark.asyncio
-async def test_dataset_query_qualifier(bp_opensearch_index, dataset_service):
+async def test_dataset_query_diagnosis_and_observation_type(
+    bp_opensearch_index, dataset_service
+):
     """image_1 states 73211009 both ways; image_2 only confirmed."""
     confirmed = await _dataset_image_ids(
         dataset_service,
-        [("diagnosis", "73211009")],
+        [("diagnosis", "73211009"), ("observation_type", "confirmed")],
         scope="clinical",
-        qualifiers={"observation": ["confirmed"]},
     )
     candidate = await _dataset_image_ids(
         dataset_service,
-        [("diagnosis", "73211009")],
+        [("diagnosis", "73211009"), ("observation_type", "candidate")],
         scope="clinical",
-        qualifiers={"observation": ["candidate"]},
     )
     assert confirmed == ["image_1", "image_2"]
     assert candidate == ["image_1"]
 
-    # The qualifier applies to the item that matched, not merely to some item in
-    # the group: image_1 holds a confirmed diagnosis (73211009) and holds 38341003
-    # — but only as a candidate. A query for 38341003 confirmed must therefore match
-    # nothing, which it only does if the qualifier clause sits inside the same
-    # nested query as the filter.
+    # observation_type applies to the item that matched, not merely to some item
+    # in the group: image_1 holds a confirmed diagnosis (73211009) and holds
+    # 38341003 — but only as a candidate. A query for 38341003 confirmed must
+    # therefore match nothing, which it only does if both filters sit inside the
+    # same nested query.
     assert (
         await _dataset_image_ids(
             dataset_service,
-            [("diagnosis", "38341003")],
+            [("diagnosis", "38341003"), ("observation_type", "confirmed")],
             scope="clinical",
-            qualifiers={"observation": ["confirmed"]},
         )
         == []
     )
@@ -413,14 +370,12 @@ async def _image_ids(
     image_service: BeaconQueryService[BigpictureBeaconImageResult],
     pairs: list[tuple[str, str]],
     scope: str | None = None,
-    qualifiers: Mapping[str, Sequence[str]] | None = None,
 ) -> list[str]:
     """Return the image ids for a image query."""
     result = await image_service.query(
         filters=[BeaconQueryFilter(id=i, value=v) for i, v in pairs],
         granularity="record",
         scope=scope,
-        qualifiers=qualifiers,
     )
     return sorted(r.imageId for rs in result.result_sets.resultSet for r in rs.results)
 
@@ -451,33 +406,32 @@ async def test_image_query_scope_specific_filter(bp_opensearch_index, image_serv
 
 
 @pytest.mark.asyncio
-async def test_image_query_qualifier(bp_opensearch_index, image_service):
+async def test_image_query_diagnosis_and_observation_type(
+    bp_opensearch_index, image_service
+):
     confirmed = await _image_ids(
         image_service,
-        [("diagnosis", "73211009")],
+        [("diagnosis", "73211009"), ("observation_type", "confirmed")],
         scope="clinical",
-        qualifiers={"observation": ["confirmed"]},
     )
     candidate = await _image_ids(
         image_service,
-        [("diagnosis", "73211009")],
+        [("diagnosis", "73211009"), ("observation_type", "candidate")],
         scope="clinical",
-        qualifiers={"observation": ["candidate"]},
     )
     assert confirmed == ["image_1", "image_2"]
     assert candidate == ["image_1"]
 
-    # The qualifier applies to the item that matched, not merely to some item in
-    # the group: image_1 holds a confirmed diagnosis (73211009) and holds 38341003
-    # — but only as a candidate. A query for 38341003 confirmed must therefore match
-    # nothing, which it only does if the qualifier clause sits inside the same
-    # nested query as the filter.
+    # observation_type applies to the item that matched, not merely to some item
+    # in the group: image_1 holds a confirmed diagnosis (73211009) and holds
+    # 38341003 — but only as a candidate. A query for 38341003 confirmed must
+    # therefore match nothing, which it only does if both filters sit inside the
+    # same nested query.
     assert (
         await _image_ids(
             image_service,
-            [("diagnosis", "38341003")],
+            [("diagnosis", "38341003"), ("observation_type", "confirmed")],
             scope="clinical",
-            qualifiers={"observation": ["confirmed"]},
         )
         == []
     )

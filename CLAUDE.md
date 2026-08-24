@@ -181,13 +181,11 @@ The OpenSearch-shaped payload is produced at **load** time by `build_document(do
 ISO-8601 duration tuples become `{gte, lte}` day ranges via `iso8601_duration_to_days`.
 
 `ExtractedDocument` separates the two kinds of value it carries: **`values`** are the top-level
-fields, and **`groups`** holds one `OpenSearchGroup` per item of a nested group — the group's name,
-its own values, and the **`qualifiers`** (`{qualifier id: value}`) labelling that item — one value
-per qualifier, so the rule is the model's shape rather than a check. Membership
-is what ties an item's values together, so nothing correlates them positionally and a qualifier
-belongs to the item rather than to any one value. `OpenSearchGroup` rejects a value whose
-`field.group` is not its own, so a misfiled value is an error rather than a misplaced document.
-`all_values` walks both for the callers that want every value regardless of where it sits.
+fields, and **`groups`** holds one `OpenSearchGroup` per item of a nested group — the group's name
+and its own values. Membership is what ties an item's values together, so nothing correlates them
+positionally. `OpenSearchGroup` rejects a value whose `field.group` is not its own, so a misfiled
+value is an error rather than a misplaced document. `all_values` walks both for the callers that
+want every value regardless of where it sits.
 
 A field's indexed path is exactly `<group>.<id>`, and `OpenSearchField` rejects a dot in either part:
 a group nests one level and holds no group of its own, so a second level would be a mapping the
@@ -199,8 +197,8 @@ indexed at the root under `SCOPE_FIELD` (`api/scopes.py`), and `Domain` contribu
 `opensearch_fields` whenever the deployment declares any scope.
 
 `LoadService.validate_document` is the boundary where a deployment's extraction meets the generic
-store: it checks `scope` against `filtering_scopes` and each group's qualifier ids/values against
-`filtering_qualifiers`, so each extractor does not restate the declared configuration.
+store: it checks `scope` against `filtering_scopes`, so each extractor does not restate the declared
+configuration.
 
 ### Document log (`search_api/database/document_log.py`)
 
@@ -277,7 +275,10 @@ Four modules, each a step of the same job:
 - **`document.py`** — the orchestration: read the files, add every object to the images it reaches,
   and `to_opensearch_values` per document.
 
-`tests/unit/api/bigpicture/extract/` mirrors the four, one test module each.
+`tests/unit/api/bigpicture/extract/` mirrors `refs.py`, `values.py` and `document.py`, one test
+module each. `models.py` has none: its only cross-checked invariant (`observation_type`'s
+`controlledValues` and `group` matching `fields.yaml`) is a load-time `SystemException` check in
+`bigpicture/models.py` instead, so it is verified on every import rather than only when tests run.
 
 **A name is public exactly when another module in the package uses it.** `values.py` exposes its seven
 `extract_*` functions and keeps its 21 readers and tables private; `refs.py` exposes
@@ -295,7 +296,7 @@ walks a directory tree and reads six XML files per dataset:
 | `METADATA/policy.xml` | `scope` (see below) |
 | `METADATA/sample.xml` | biological beings, cases, specimens, blocks |
 | `METADATA/staining.xml` | staining procedures, substances, targets |
-| `METADATA/observation.xml` | `diagnosis` and `finding` groups, each with the `observation` qualifier (optional file) |
+| `METADATA/observation.xml` | the `observation` group: diagnoses and findings, each with its own `observation_type` (optional file) |
 
 `scope` comes from the policy's `type_of_dataset` attribute, whose value is
 `"<scope>/<de-identification>"` (`Clinical/Anonymized`, `Clinical/Pseudonymized`,
@@ -314,8 +315,11 @@ is an ISO-8601 duration tuple `(start, end)` — e.g. `("P40Y", "P41Y")` — com
 recorded as an error against the document. `.c4gh`-encrypted XML is decrypted on the fly (`utils/crypt.py`).
 
 The parsing models are in `extract/models.py`; `BigpictureFields` is the per-image root, holding the
-ids, `scope`, the dataset fields, and the `specimen`, `staining`, `diagnosis` and `finding` sets. `BigpictureSpecimenFields` flattens the biological being, specimen and block
-fields into one model (see the grouping rationale in `fields.yaml`).
+ids, `scope`, the dataset fields, and the `specimen`, `staining` and `observation` sets.
+`BigpictureSpecimenFields` flattens the biological being, specimen and block fields into one model
+(see the grouping rationale in `fields.yaml`); `BigpictureObservationFields` similarly flattens a
+diagnosis and a finding statement into one model, since a document's scope makes the two mutually
+exclusive (see below).
 
 Every `CODE_ATTRIBUTE` contributes the pair `(CODE, MEANING)` as its value, the meaning being what the
 load falls back to when the code is no concept id (see *Ontology providers*).
@@ -332,19 +336,19 @@ routes its text to `fixation_type_other`.
 
 `scope` is not in `fields.yaml` — it is `ExtractedDocument.scope`, produced by `extract_scope`.
 
-An observation statement contributes to the `diagnosis` or `finding` set depending on its
-`STATEMENT_TYPE`; the parsing is otherwise identical, including how statements reach images. Both
-carry the `observation` qualifier (`confirmed` / `candidate`, constants in `extract/models.py`): a statement
+An observation statement contributes a diagnosis or a finding to the `observation` set depending on
+its `STATEMENT_TYPE`; the parsing is otherwise identical, including how statements reach images. Both
+carry `observation_type` (`confirmed` / `candidate`, constants in `extract/models.py`): a statement
 linked by `IMAGE_REF`, or whose `STATEMENT_STATUS` is `Distinct`, is `confirmed` for the image, and
 anything reaching several images through another ref is a `candidate` for each. Each statement yields
-**one nested item**, carrying the single qualifier value that statement was made under; items are not
-merged across statements. The group is a `set`, so a statement repeated verbatim for an image
-collapses. The same codes stated `confirmed` by one statement and `candidate` by another therefore
-appear as two items — which no consumer can see, since facet counts are document counts.
+**one nested item**, carrying the single `observation_type` value that statement was made under; items
+are not merged across statements. The group is a `set`, so a statement repeated verbatim for an image
+collapses. The same code stated `confirmed` by one statement and `candidate` by another therefore
+appears as two items — which no consumer can see, since facet counts are document counts.
 
-Because `specimen` and `staining` are held in `set`s their models must be hashable — hence
-`frozen=True`, and `frozenset` for `anatomical_site`. The `@field_serializer` on `anatomical_site`
-serialises it as `list[dict]` (Pydantic's default `set[dict]` is unhashable and not
+Because `specimen`, `staining` and `observation` are held in `set`s their models must be hashable —
+hence `frozen=True`, and `frozenset` for `anatomical_site`. The `@field_serializer` on
+`anatomical_site` serialises it as `list[dict]` (Pydantic's default `set[dict]` is unhashable and not
 JSON-serialisable).
 
 ### Configurable fields (YAML)
@@ -365,42 +369,6 @@ ontologyRestriction:
   concept_ids: [ "410607006" ]   # Organism
   include_descendants: true      # the subtree; false means exactly these concepts
 ```
-
-### Filtering qualifiers (`api/qualifiers.py`, `config/qualifiers.yaml`)
-
-A **qualifier** is a second axis on the values of a nested group. Where a scope partitions
-documents, a qualifier labels the values *within* a group. The indexed field is multivalued, so a
-group item can carry several qualifier values, though Bigpicture sets exactly one per item. This
-replaces duplicating a field into known/candidate copies:
-Bigpicture declares one qualifier, `observation` (`confirmed` / `candidate`), over the `diagnosis`
-and `finding` groups.
-
-```yaml
-filtering_qualifiers:
-  - id: observation
-    values: [ confirmed, candidate ]
-    groups: [ diagnosis, finding ]   # nested groups whose values it qualifies
-```
-
-A qualifier is **not** a filtering term, so it is absent from `BP_DOCUMENT_FIELDS`. Every nested
-group holds all of its qualifier values in **one** multivalued `keyword` field,
-`<group>.qualifiers` (`QUALIFIERS_FIELD`), with each value encoded as `<qualifier id>:<value>` by
-`encode_qualifier_value` — e.g. `observation:confirmed`. `Domain.opensearch_fields` emits that field
-for **every** nested group, not only the qualified ones, so declaring a qualifier — or applying an
-existing one to another group — never requires an index recreate.
-
-`groups` therefore no longer drives the mapping; it declares where a qualifier is *meaningful*, which
-the query side still needs: applying a qualifier clause to a group that carries no qualifier values
-would match nothing and silently zero the results.
-
-`validate_filtering_qualifiers` rejects a qualifier naming an unknown group, a duplicate id, a
-filtering term that would collide with the reserved `qualifiers` field, and an id or value containing
-the reserved `:` separator.
-
-A query restricts a qualifier via `BeaconQuery.requestedQualifiers` (`{qualifier id: [values]}`) or,
-on the values/suggestions endpoints, a repeatable `qualifier=<id>:<value>` param. **A qualifier that
-is absent is not filtered on**, so all of its values match — there is no default.
-`validate_requested_qualifiers` checks ids and values, and is shared by the router and the loader.
 
 ### API layer & routes
 
@@ -423,7 +391,6 @@ their own service from by path.
 | `GET /filtering_terms` | Available filter definitions |
 | `GET /filtering_groups` | UI groupings of filtering terms |
 | `GET /filtering_scopes` | Available scopes (e.g. `clinical` / `non_clinical`) |
-| `GET /filtering_qualifiers` | Available qualifiers of the values in a nested group |
 | `POST /datasets` | Beacon V2 search, images aggregated into their datasets |
 | `POST /images` | Beacon V2 search, one result per matching image |
 | `POST /ai/datasets` | Natural-language dataset search (gated by `FEATURE_AI`) |
@@ -444,10 +411,9 @@ rather than erroring, so the endpoint still answers before `index create` has be
 is a term lookup, so nothing here scales with the number of documents — except the pending
 counts, which read one row per document still awaiting sync.
 
-`values` and `suggestions` both accept `scope=<id>` and repeatable `qualifier=<id>:<value>`, and
-restrict their counts by both. Neither has a default: omitting one does not filter on it. A scope the
-field does not declare is a `400` rather than an empty list, since the field is never indexed for
-those documents (`validate_field_scope`).
+`values` and `suggestions` both accept `scope=<id>` and restrict their counts by it. Omitting it
+does not filter on it — there is no default. A scope the field does not declare is a `400` rather
+than an empty list, since the field is never indexed for those documents (`validate_field_scope`).
 
 Admin routes (`api/admin/routes.py`, `/admin` prefix, mounted only when `ADMIN_KEY` set, SNOMED-specific):
 `/admin/snomed/reload`, `/admin/snomed/refresh`, `/admin/snomed/fields/{field_id}/invalid_concepts`,
@@ -480,8 +446,8 @@ no deployment needs to subclass it just to answer `/status`/`/health`/`/values`/
 Bigpicture's `Domain.beacon_service_factory` builds one directly.
 `OpenSearchQueryBeaconService(OpenSearchBeaconService, BeaconQueryService[S])` adds query
 construction and boolean/count/record dispatch on top of it — the `OpenSearchBeaconService` side
-supplies `client`/`index_name`/`filtering_scopes`/`_qualifier_clauses_by_group` for genuine code
-reuse, unrelated to what `BeaconQueryService` itself declares. Bigpicture provides two concrete
+supplies `client`/`index_name`/`filtering_scopes` for genuine code reuse, unrelated to what
+`BeaconQueryService` itself declares. Bigpicture provides two concrete
 query services (`api/bigpicture/opensearch.py`), one per entity endpoint:
 `BigpictureDatasetBeaconService` (`OpenSearchQueryBeaconService[BigpictureBeaconDatasetResult]`)
 groups images into datasets; `BigpictureImageBeaconService`
@@ -519,10 +485,10 @@ branches reduce to one flat query, which is what is emitted instead. The corolla
 `requestedScope` set to a scope it does not cover leaves that scope unconstrained.
 
 Filters mapping to multiple OpenSearch fields are combined with `build_or_clause`; filters on a nested
-group (`specimen`, `staining`, `diagnosis`, `finding`) are wrapped in nested queries. A requested
-qualifier adds a `terms` clause **inside** the nested query of each group it qualifies, so it must
-hold for the very nested item that matched rather than for any item in the group. A group that no
-filter targets gets no nested query, so a qualifier alone never constrains it.
+group (`specimen`, `staining`, `observation`) are wrapped in nested queries — every filter on fields
+of the same group lands in **one** nested query, so it must hold for the very item that matched
+rather than for any item in the group. Filtering `diagnosis` and `observation_type` together, for
+example, only matches an image whose *same* observation item carries both.
 
 **`_get_count(query_clause)` and `_get_records(query_clause)`** are the two seams left abstract by
 `OpenSearchQueryBeaconService`: given the finished query clause, answer a count or list every
@@ -561,28 +527,19 @@ no title/description fetch at all.
 `BigpictureBeaconImageResult` per `_source` directly.
 
 `get_value_counts` serves `ValueCounts` from a plain dict on the service, keyed by
-`ValueCountsKey` (`api/models.py`) — the field, the scope and the qualifier, frozen so it can key a
-dict. Its
-`qualifiers` is a `frozenset` of `<id>:<value>` strings, the same encoding the index and the
-`qualifier=` parameter use, so the order a request names them in is not part of the key.
-`ValueCountsKey.of(field_id, scope, qualifiers)` builds one from the `{id: [values]}` a request
-carries, and `qualifier_values_by_id` converts back. Nothing expires;
-`ValueCountsUpdater` (`services/value_counts.py`) owns what is in there, clearing it and refilling
-when `max(document.synced_at)` moves, polled every `VALUE_COUNT_CACHE_REFRESH` seconds. Every key is
-counted concurrently, each in its own task so one failing does not stop the rest. The requests
-are enumerable — every valued field, against its own scopes, against each value of a qualifier over
-its group, which is 62 for Bigpicture — so `_value_count_keys()` yields them as keys, derived from
-the deployment's config rather than guessing what a client will ask for. One qualifier value at a
-time, since a nested item carries one value of a qualifier and a request names one. A request it did not
-anticipate is counted on the way through and kept, so only the first one pays for it. Nothing is
-filled until a document has been synced: counting an index no load has reached would cache one empty
-answer per request.
+`ValueCountsKey` (`api/models.py`) — the field and the scope, frozen so it can key a dict.
+Nothing expires; `ValueCountsUpdater` (`services/value_counts.py`) owns what is in there, clearing
+it and refilling when `max(document.synced_at)` moves, polled every `VALUE_COUNT_CACHE_REFRESH`
+seconds. Every key is counted concurrently, each in its own task so one failing does not stop the
+rest. The requests are enumerable — every valued field, against its own scopes, which is 41 for
+Bigpicture — so `_value_count_keys()` yields them as keys, derived from the deployment's config
+rather than guessing what a client will ask for. A request it did not anticipate is counted on the
+way through and kept, so only the first one pays for it. Nothing is filled until a document has been
+synced: counting an index no load has reached would cache one empty answer per request.
 
-`get_value_counts(field_id, scope, qualifiers)` applies the scope and the qualifier to the facet
-aggregation so counts match what the equivalent query returns: `scope` becomes the aggregation's
-document `query`, and the qualifier clause becomes `fetch_indexed_keywords`'s `group_item_filter`. Counts
-therefore never overlap — with neither given everything is counted, and a qualifier is only applied
-to the groups that declare it, so it cannot zero an unqualified group's counts.
+`get_value_counts(field_id, scope)` applies the scope to the facet aggregation so counts match what
+the equivalent query returns: `scope` becomes the aggregation's document `query`. With no scope
+given, everything is counted.
 
 **Counts are document counts.** A bucket inside a `nested` aggregation counts group items, so a
 `reverse_nested` sub-aggregation (`documents`) climbs back to the documents holding them and its
@@ -781,8 +738,7 @@ runs. The route itself reads its own service out of `get_beacon_query_services()
 
 ### OpenSearch index mapping highlights
 
-- `specimen`, `staining`, `diagnosis` and `finding` are **nested** types, each with a
-  multivalued `qualifiers` keyword field
+- `specimen`, `staining` and `observation` are **nested** types
 - All code/keyword fields are `keyword` (support array values natively)
 - `age_at_extraction` is `integer_range` — stored as `{gte: <days>, lte: <days>}` (1 year = 365
   days, 1 month = 30 days; invalid input logged and dropped)

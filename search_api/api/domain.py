@@ -10,7 +10,6 @@ from fastapi import FastAPI
 from search_api.ai.models import AISearchResult
 from search_api.api.beacon.models import (
     BeaconFilteringGroup,
-    BeaconFilteringQualifier,
     BeaconFilteringScope,
     BeaconResultSetsResponse,
 )
@@ -23,7 +22,6 @@ from search_api.api.opensearch.models import (
 from search_api.api.opensearch.client import create_search
 from search_api.conf import cache_config
 from search_api.database.repository import close_pool, open_pool
-from search_api.api.qualifiers import qualifier_fields
 from search_api.api.scopes import scope_field
 from search_api.services.ontology.service import (
     get_ontology_id_by_field,
@@ -73,7 +71,6 @@ class Domain:
     filtering_terms: Sequence[OpenSearchBeaconFilteringTerm]
     filtering_groups: Sequence[BeaconFilteringGroup]
     filtering_scopes: Sequence[BeaconFilteringScope]
-    filtering_qualifiers: Sequence[BeaconFilteringQualifier]
     non_filtering_fields: Sequence[OpenSearchField]
     loader: Loader[Any]
     beacon_service_factory: Callable[[Any], BeaconService]
@@ -85,24 +82,13 @@ class Domain:
     replace_concepts: bool = True
 
     @property
-    def nested_groups(self) -> set[str]:
-        """The nested groups the filtering terms place fields in."""
-        return {term.group for term in self.filtering_terms if term.group is not None}
-
-    @property
     def opensearch_fields(self) -> list[OpenSearchField]:
         """Every field indexed for this deployment.
 
-        Filtering terms, index-only fields, the scope field, and
-        the qualifiers field of every nested group.
+        Filtering terms, index-only fields, and the scope field.
         """
         scope = [scope_field()] if self.filtering_scopes else []
-        return [
-            *scope,
-            *self.non_filtering_fields,
-            *self.filtering_terms,
-            *qualifier_fields(self.nested_groups),
-        ]
+        return [*scope, *self.non_filtering_fields, *self.filtering_terms]
 
     @property
     def ontology_id_by_field(self) -> dict[str, str]:

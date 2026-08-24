@@ -19,8 +19,7 @@ from search_api.api.opensearch.models import OpenSearchOntologyOrValue
 from search_api.api.bigpicture.extract import (
     BigpictureCodeAttributeValue,
     BigpictureFields,
-    BigpictureDiagnosisFields,
-    BigpictureFindingFields,
+    BigpictureObservationFields,
     BigpictureSpecimenFields,
     BigpictureStainingFields,
 )
@@ -31,8 +30,7 @@ _GROUP_MODELS = {
     "": BigpictureFields,
     "specimen": BigpictureSpecimenFields,
     "staining": BigpictureStainingFields,
-    "diagnosis": BigpictureDiagnosisFields,
-    "finding": BigpictureFindingFields,
+    "observation": BigpictureObservationFields,
 }
 
 _BP_INDEX_PATH = (
@@ -59,8 +57,7 @@ def test_ontology_model_fields_match_filtering_terms():
     model_field_ids = (
         ontology_field_names(BigpictureSpecimenFields)
         | ontology_field_names(BigpictureStainingFields)
-        | ontology_field_names(BigpictureFindingFields)
-        | ontology_field_names(BigpictureDiagnosisFields)
+        | ontology_field_names(BigpictureObservationFields)
     )
     filtering_term_ids = {
         t.id for t in BP_FILTERING_TERMS if t.type in ("ontology", "ontologyOrValue")

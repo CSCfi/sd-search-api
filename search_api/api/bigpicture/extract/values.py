@@ -340,17 +340,35 @@ def extract_sample_block_fields(
 
 def extract_sample_biological_being_fields(
     xml: Element,
+    *,
+    is_clinical: bool,
 ) -> BigpictureExtractedObject[BigpictureSampleBiologicalBeingFields]:
     logs: list[ExtractLog] = []
     return BigpictureExtractedObject(
         ids=object_ids(xml),
         fields=BigpictureSampleBiologicalBeingFields(
-            animal_species=_extract_code_attribute_value(
-                xml, "animal_species", SNOMED_ONTOLOGY_ID, logs
+            # animal_species and control_terminology are only supported for
+            # non-clinical studies.
+            animal_species=(
+                None
+                if is_clinical
+                else _extract_code_attribute_value(
+                    xml, "animal_species", SNOMED_ONTOLOGY_ID, logs
+                )
             ),
             sex=cast(
                 Literal["Male", "Female", "Not-known", "Other"] | None,
                 _extract_string_attribute_value(xml, "sex", logs=logs),
+            ),
+            control_terminology=(
+                None
+                if is_clinical
+                else cast(
+                    Literal["CONTROL", "TREATED"] | None,
+                    _extract_string_attribute_value(
+                        xml, "control_terminology", logs=logs
+                    ),
+                )
             ),
         ),
         logs=logs,

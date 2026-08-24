@@ -59,7 +59,7 @@ filtering_terms:
     ontologyRestriction:
       concept_ids: [ "410607006" ]  # Organism (organism)
       include_descendants: true
-    ui_group: "subject"
+    ui_group: "non_clinical"
 
   - id: anatomical_site
     type: ontology
@@ -248,6 +248,15 @@ filtering_terms:
     ontologyRestriction:
       concept_ids: [ "C90017" ]  # Microscopic Histopathology Result Category (MIRESCAT)
       include_descendants: true
+    ui_group: "non_clinical"
+
+  - id: control_terminology
+    type: controlledValue
+    group: specimen
+    scopes: [ non_clinical ]
+    label: "Control terminology"
+    description: "Used to identify if the biological being is a control animal or treated animal."
+    controlledValues: [ "CONTROL", "TREATED" ]
     ui_group: "non_clinical"
 
 # Fields that are indexed in OpenSearch but are not filterable.

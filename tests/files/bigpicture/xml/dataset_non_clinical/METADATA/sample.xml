@@ -14,6 +14,10 @@
                 <TAG>sex</TAG>
                 <VALUE>Male</VALUE>
             </STRING_ATTRIBUTE>
+            <STRING_ATTRIBUTE>
+                <TAG>control_terminology</TAG>
+                <VALUE>CONTROL</VALUE>
+            </STRING_ATTRIBUTE>
         </ATTRIBUTES>
     </BIOLOGICAL_BEING>
     <CASE alias="1">

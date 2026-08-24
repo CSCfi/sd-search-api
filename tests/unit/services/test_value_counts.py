@@ -45,7 +45,7 @@ _TYPES_WITHOUT_VALUES = ("text", "iso8601Range", "integer")
 
 # What Bigpicture's configuration currently amounts to. A canary: a field, scope
 # or qualifier added to the configuration changes it.
-_BP_KEY_COUNT = 62
+_BP_KEY_COUNT = 64
 
 
 def test_value_count_keys_are_every_valid_request():

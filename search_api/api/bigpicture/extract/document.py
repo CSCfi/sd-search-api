@@ -365,7 +365,9 @@ def extract_dataset_documents(
 
     for xml in sample_xml.xpath("/BIOLOGICAL_BEING | /SAMPLE_SET/BIOLOGICAL_BEING"):
         # Extract fields from XML.
-        beings.append(extract_sample_biological_being_fields(xml))
+        beings.append(
+            extract_sample_biological_being_fields(xml, is_clinical=is_clinical)
+        )
 
     # Read staining XML.
     #
@@ -405,16 +407,12 @@ def extract_dataset_documents(
             for block_ids in related_ids(
                 specimen_ids.keys, references.specimen_key_to_block_ids
             ):
-                being_values = being.fields.model_dump()
-                if is_clinical:
-                    # Animal species is a non-clinical field only.
-                    being_values["animal_species"] = None
                 block = blocks[block_ids.id]
                 specimen = specimens[specimen_ids.id]
                 specimen_fields = BigpictureSpecimenFields(
                     **block.fields.model_dump(),
                     **specimen.fields.model_dump(),
-                    **being_values,
+                    **being.fields.model_dump(),
                 )
                 specimen_image_ids = references.image_ids_from_blocks(block_ids.keys)
                 for image_id in specimen_image_ids:

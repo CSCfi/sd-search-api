@@ -54,9 +54,10 @@ def test_extract_fields_clinical():
     assert specimen["specimen_type"] == "4"
     assert specimen["age_at_extraction"] == {"gte": 14600, "lte": 14965}
     assert specimen["sex"] == "Male"
-    # Animal species is indexed for non-clinical datasets only, even though the
-    # clinical fixture's sample.xml carries it.
+    # Animal species and control terminology are only indexed for non-clinical
+    # datasets, even though the clinical fixture's sample.xml has them.
     assert "animal_species" not in specimen
+    assert "control_terminology" not in specimen
 
     stain = payload["staining"][0]
     assert stain["staining_procedure"] == "6"
@@ -107,6 +108,7 @@ def test_extract_fields_non_clinical():
     assert specimen["age_at_extraction"] == {"gte": 14600, "lte": 14965}
     assert specimen["animal_species"] == "1"
     assert specimen["sex"] == "Male"
+    assert specimen["control_terminology"] == "CONTROL"
 
     stain = payload["staining"][0]
     assert stain["staining_procedure"] == "6"

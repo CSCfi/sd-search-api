@@ -844,7 +844,7 @@ def test_extract_sample_block_fields():
     assert extracted.logs == []
 
 
-def test_extract_sample_biological_being_fields():
+def test_extract_sample_biological_being_fields_non_clinical():
     xml = etree.fromstring("""
     <BIOLOGICAL_BEING alias="being-1">
         <ATTRIBUTES>
@@ -860,11 +860,15 @@ def test_extract_sample_biological_being_fields():
                 <TAG>sex</TAG>
                 <VALUE>Male</VALUE>
             </STRING_ATTRIBUTE>
+            <STRING_ATTRIBUTE>
+                <TAG>control_terminology</TAG>
+                <VALUE>CONTROL</VALUE>
+            </STRING_ATTRIBUTE>
         </ATTRIBUTES>
     </BIOLOGICAL_BEING>
     """)
 
-    extracted = extract_sample_biological_being_fields(xml)
+    extracted = extract_sample_biological_being_fields(xml, is_clinical=False)
 
     assert extracted.ids == ObjectIds(alias="being-1")
     assert extracted.fields == BigpictureSampleBiologicalBeingFields(
@@ -872,7 +876,47 @@ def test_extract_sample_biological_being_fields():
             code="1", scheme="SNOMED CT", meaning="Cat"
         ),
         sex="Male",
+        control_terminology="CONTROL",
     )
+    assert extracted.logs == []
+
+
+def test_extract_sample_biological_being_fields_clinical():
+    xml = etree.fromstring("""
+    <BIOLOGICAL_BEING alias="being-1">
+        <ATTRIBUTES>
+            <CODE_ATTRIBUTE>
+                <TAG>animal_species</TAG>
+                <VALUE>
+                    <CODE>1</CODE>
+                    <SCHEME>SNOMED CT</SCHEME>
+                    <MEANING>Cat</MEANING>
+                </VALUE>
+            </CODE_ATTRIBUTE>
+            <CODE_ATTRIBUTE>
+                <TAG>animal_species</TAG>
+                <VALUE>
+                    <CODE>2</CODE>
+                    <SCHEME>SNOMED CT</SCHEME>
+                    <MEANING>Dog</MEANING>
+                </VALUE>
+            </CODE_ATTRIBUTE>
+            <STRING_ATTRIBUTE>
+                <TAG>control_terminology</TAG>
+                <VALUE>CONTROL</VALUE>
+            </STRING_ATTRIBUTE>
+            <STRING_ATTRIBUTE>
+                <TAG>control_terminology</TAG>
+                <VALUE>TREATED</VALUE>
+            </STRING_ATTRIBUTE>
+        </ATTRIBUTES>
+    </BIOLOGICAL_BEING>
+    """)
+
+    extracted = extract_sample_biological_being_fields(xml, is_clinical=True)
+
+    assert extracted.fields.animal_species is None
+    assert extracted.fields.control_terminology is None
     assert extracted.logs == []
 
 
@@ -1050,7 +1094,7 @@ def test_extract_sample_biological_being_fields_repeated_sex():
     </BIOLOGICAL_BEING>
     """)
 
-    extracted = extract_sample_biological_being_fields(xml)
+    extracted = extract_sample_biological_being_fields(xml, is_clinical=False)
 
     assert extracted.fields.sex == "Male"
     assert extracted.logs == [repeated_value_log("sex", ["Female"])]

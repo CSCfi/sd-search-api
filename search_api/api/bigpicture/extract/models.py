@@ -28,6 +28,7 @@ class BigpictureSampleBiologicalBeingFields(BaseModel):
 
     animal_species: BigpictureCodeAttributeValue | None = None
     sex: Literal["Male", "Female", "Not-known", "Other"] | None = None
+    control_terminology: Literal["CONTROL", "TREATED"] | None = None
 
 
 class BigpictureSampleSpecimenFields(BaseModel):

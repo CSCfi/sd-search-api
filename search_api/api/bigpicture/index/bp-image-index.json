@@ -52,6 +52,9 @@
           "fixation_type_other": {
             "type": "keyword"
           },
+          "control_terminology": {
+            "type": "keyword"
+          },
           "qualifiers": {
             "type": "keyword"
           }

@@ -177,7 +177,7 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm]):
             build_term_clause(SCOPE_FIELD, scope) if scope is not None else None
         )
         group_clauses = self._qualifier_clauses_by_group(qualifiers).get(
-            term.group or ""
+            term.nested_group or ""
         )
         group_item_filter = (
             {"bool": {"filter": group_clauses}} if group_clauses else None
@@ -230,7 +230,7 @@ class OpenSearchQueryBeaconService(OpenSearchBeaconService, BeaconQueryService[S
     def _nested_path(field: str | OpenSearchOntologyOrValue) -> str | None:
         """Return the OpenSearch nested path for a field, or None for top-level fields.
 
-        The path is ``<group>.<id>``, neither part holding a dot.
+        The path is ``<nested_group>.<id>``, neither part holding a dot.
         """
         field_name = (
             field.concept_value_field

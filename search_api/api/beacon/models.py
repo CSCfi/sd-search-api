@@ -199,11 +199,8 @@ class BeaconFilteringTerm(BaseModel):
     label: str
     # Beacon V2 extension.
     description: str
-    ui_group: str | None = Field(
-        default=None, description="UI group id this term belongs to."
-    )
-    ui_display: bool = Field(
-        default=True, description="Whether to show this term in the UI."
+    group: str | None = Field(
+        default=None, description="Filtering group id this term belongs to."
     )
     ontology: BeaconFilteringOntology | None = Field(
         default=None,

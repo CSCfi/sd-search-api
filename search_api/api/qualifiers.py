@@ -83,7 +83,7 @@ def qualifier_fields(groups: Iterable[str]) -> list[OpenSearchField]:
     """
     return [
         OpenSearchField(
-            id=QUALIFIERS_FIELD, type="keyword", group=group, multivalued=True
+            id=QUALIFIERS_FIELD, type="keyword", nested_group=group, multivalued=True
         )
         for group in sorted(groups)
     ]
@@ -105,7 +105,9 @@ def validate_filtering_qualifiers(
         qualifiers share an id.
     """
     # Groups come from the filtering terms.
-    groups = {term.group for term in filtering_terms if term.group is not None}
+    groups = {
+        term.nested_group for term in filtering_terms if term.nested_group is not None
+    }
 
     unknown = {
         group
@@ -130,9 +132,9 @@ def validate_filtering_qualifiers(
     # indexed field of that id in a group would map to the same path and be
     # silently overwritten when the document is built.
     clashes = sorted(
-        f"{field.group}.{field.id}"
+        f"{field.nested_group}.{field.id}"
         for field in (*filtering_terms, *non_filtering_fields)
-        if field.id == QUALIFIERS_FIELD and field.group is not None
+        if field.id == QUALIFIERS_FIELD and field.nested_group is not None
     )
     if clashes:
         raise ConfigurationException(

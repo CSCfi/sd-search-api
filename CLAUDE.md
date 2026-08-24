@@ -186,12 +186,12 @@ its own values, and the **`qualifiers`** (`{qualifier id: value}`) labelling tha
 per qualifier, so the rule is the model's shape rather than a check. Membership
 is what ties an item's values together, so nothing correlates them positionally and a qualifier
 belongs to the item rather than to any one value. `OpenSearchGroup` rejects a value whose
-`field.group` is not its own, so a misfiled value is an error rather than a misplaced document.
-`all_values` walks both for the callers that want every value regardless of where it sits.
+`field.nested_group` is not its own, so a misfiled value is an error rather than a misplaced
+document. `all_values` walks both for the callers that want every value regardless of where it sits.
 
-A field's indexed path is exactly `<group>.<id>`, and `OpenSearchField` rejects a dot in either part:
-a group nests one level and holds no group of its own, so a second level would be a mapping the
-document builder cannot write and a nested query cannot reach.
+A field's indexed path is exactly `<nested_group>.<id>`, and `OpenSearchField` rejects a dot in
+either part: a group nests one level and holds no group of its own, so a second level would be a
+mapping the document builder cannot write and a nested query cannot reach.
 
 Beyond those, `ExtractedDocument` carries `id`, `modified_at` and **`scope`**. Scope is not a
 filtering term — it partitions documents rather than being searched — so it lives on the document, is
@@ -384,7 +384,7 @@ filtering_qualifiers:
 
 A qualifier is **not** a filtering term, so it is absent from `BP_DOCUMENT_FIELDS`. Every nested
 group holds all of its qualifier values in **one** multivalued `keyword` field,
-`<group>.qualifiers` (`QUALIFIERS_FIELD`), with each value encoded as `<qualifier id>:<value>` by
+`<nested_group>.qualifiers` (`QUALIFIERS_FIELD`), with each value encoded as `<qualifier id>:<value>` by
 `encode_qualifier_value` — e.g. `observation:confirmed`. `Domain.opensearch_fields` emits that field
 for **every** nested group, not only the qualified ones, so declaring a qualifier — or applying an
 existing one to another group — never requires an index recreate.

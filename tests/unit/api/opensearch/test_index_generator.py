@@ -15,7 +15,7 @@ def _filtering_term(field_id, type_, group=None) -> OpenSearchBeaconFilteringTer
     return OpenSearchBeaconFilteringTerm(
         id=field_id,
         type=type_,
-        group=group,
+        nested_group=group,
         scopes=["test"],
         label=field_id,
         description=field_id,
@@ -90,7 +90,9 @@ def test_generate_non_filtering_field_included():
 
 
 def test_generate_non_filtering_field_nested():
-    props = _generate(OpenSearchField(id="image_id", type="keyword", group="blocks"))
+    props = _generate(
+        OpenSearchField(id="image_id", type="keyword", nested_group="blocks")
+    )
     assert props["blocks"] == {
         "type": "nested",
         "properties": {"image_id": {"type": "keyword"}},

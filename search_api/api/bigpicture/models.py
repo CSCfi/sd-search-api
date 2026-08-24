@@ -124,7 +124,7 @@ def _document_fields() -> dict[str, OpenSearchField]:
     def leaf(path: str) -> str:
         return path.rsplit(".", 1)[-1]
 
-    def group(path: str) -> str | None:
+    def nested_group(path: str) -> str | None:
         prefix, _, _ = path.rpartition(".")
         return prefix or None
 
@@ -148,14 +148,14 @@ def _document_fields() -> dict[str, OpenSearchField]:
                 OpenSearchField(
                     id=leaf(osf.concept_value_field),
                     type="ontology",
-                    group=group(osf.concept_value_field),
+                    nested_group=nested_group(osf.concept_value_field),
                 )
             )
             add_field(
                 OpenSearchField(
                     id=leaf(osf.other_value_field),
                     type="keyword",
-                    group=group(osf.other_value_field),
+                    nested_group=nested_group(osf.other_value_field),
                 )
             )
         else:

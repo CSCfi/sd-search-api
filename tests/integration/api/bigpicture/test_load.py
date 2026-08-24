@@ -73,7 +73,6 @@ async def test_load_and_sync_fields():
         term_caches=create_term_caches(BP_DOMAIN.ontology_ids),
         filtering_terms=BP_DOMAIN.filtering_terms,
         filtering_scopes=BP_DOMAIN.filtering_scopes,
-        filtering_qualifiers=BP_DOMAIN.filtering_qualifiers,
     )
 
     async with get_connection() as conn:

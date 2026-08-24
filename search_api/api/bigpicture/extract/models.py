@@ -5,11 +5,8 @@ from typing import Literal, get_args
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from search_api.api.extract_logs import ExtractLog
-
-
-OBSERVATION_QUALIFIER = "observation"
-OBSERVATION_CONFIRMED = "confirmed"
-OBSERVATION_CANDIDATE = "candidate"
+from search_api.api.opensearch.models import OpenSearchBeaconFilteringTerm
+from search_api.exceptions import SystemException
 
 
 class BigpictureCodeAttributeValue(BaseModel):
@@ -80,32 +77,21 @@ class BigpictureStainingFields(BaseModel):
     staining_target: str | None = None
 
 
-class BigpictureDiagnosisFields(BaseModel):
-    """Bigpicture clinical diagnosis search fields.
+class BigpictureObservationFields(BaseModel):
+    """Bigpicture clinical diagnosis and non-clinical finding search fields.
 
-    One instance per distinct diagnosis.
+    One instance per distinct observation.
     """
 
     model_config = ConfigDict(frozen=True)
 
     diagnosis: BigpictureCodeAttributeValue | None = None
-    qualifiers: frozenset[tuple[str, str]] = frozenset()
-
-
-class BigpictureFindingFields(BaseModel):
-    """Bigpicture non-clinical finding search fields.
-
-    One instance per ``Finding`` statement.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
     finding: BigpictureCodeAttributeValue | None = None
     finding_severity: BigpictureCodeAttributeValue | None = None
     finding_chronicity: BigpictureCodeAttributeValue | None = None
     finding_distribution: BigpictureCodeAttributeValue | None = None
     finding_result_category: BigpictureCodeAttributeValue | None = None
-    qualifiers: frozenset[tuple[str, str]] = frozenset()
+    observation_type: Literal["confirmed", "candidate"]
 
 
 class BigpictureFields(BaseModel):
@@ -120,8 +106,7 @@ class BigpictureFields(BaseModel):
     dataset_description: str | None = None
     specimen: set[BigpictureSpecimenFields] = Field(default_factory=set)
     staining: set[BigpictureStainingFields] = Field(default_factory=set)
-    diagnosis: set[BigpictureDiagnosisFields] = Field(default_factory=set)
-    finding: set[BigpictureFindingFields] = Field(default_factory=set)
+    observation: set[BigpictureObservationFields] = Field(default_factory=set)
     # Newest file modification date in the dataset.
     dataset_modified_at: datetime | None = None
 
@@ -138,6 +123,28 @@ def _nested_groups() -> tuple[str, ...]:
 
 
 NESTED_GROUPS = _nested_groups()
+
+
+OBSERVATION_CONFIRMED: Literal["confirmed"] = "confirmed"
+OBSERVATION_CANDIDATE: Literal["candidate"] = "candidate"
+
+
+def validate_observation_types(term: OpenSearchBeaconFilteringTerm) -> None:
+    """Validate fields.yaml observation_type term against observation type constants."""
+    if set(term.controlledValues or []) != {
+        OBSERVATION_CONFIRMED,
+        OBSERVATION_CANDIDATE,
+    }:
+        raise SystemException(
+            f"{term.id}'s controlledValues in fields.yaml must be "
+            f"{{{OBSERVATION_CONFIRMED!r}, {OBSERVATION_CANDIDATE!r}}}, got "
+            f"{term.controlledValues}."
+        )
+    if term.group != "observation":
+        raise SystemException(
+            f"{term.id}'s group in fields.yaml must be 'observation', "
+            f"got {term.group!r}."
+        )
 
 
 class ObjectKey(BaseModel):

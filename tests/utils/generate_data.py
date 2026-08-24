@@ -193,7 +193,6 @@ async def generate_and_load_data(image_cnt: int, dataset_cnt: int) -> None:
         term_caches={},
         filtering_terms=BP_DOMAIN.filtering_terms,
         filtering_scopes=BP_DOMAIN.filtering_scopes,
-        filtering_qualifiers=BP_DOMAIN.filtering_qualifiers,
     )
 
     async with get_connection() as conn:

@@ -30,10 +30,8 @@ def _value(field_id, type_, group, value, multivalued=False) -> OpenSearchFieldV
     )
 
 
-def _group(group, *values, qualifiers=None) -> OpenSearchGroup:
-    return OpenSearchGroup(
-        group=group, values=list(values), qualifiers=qualifiers or {}
-    )
+def _group(group, *values) -> OpenSearchGroup:
+    return OpenSearchGroup(group=group, values=list(values))
 
 
 def test_build_document_fields_at_root():
@@ -143,57 +141,6 @@ def test_build_document_scope_is_written_at_the_root():
 
 def test_build_document_without_scope_omits_it():
     assert "scope" not in _build([_value("image_id", "keyword", None, "img-1")])
-
-
-def test_build_document_writes_every_qualifier_of_an_item_to_one_field():
-    """Every qualifier of an item shares one field, each value carrying its id."""
-    doc = _build(
-        groups=[
-            _group(
-                "diagnosis",
-                _value("diagnosis", "ontology", "diagnosis", ("73211009", None)),
-                qualifiers={"observation": "confirmed", "certainty": "high"},
-            )
-        ]
-    )
-    assert doc == {
-        "diagnosis": [
-            {
-                "diagnosis": "73211009",
-                "qualifiers": ["certainty:high", "observation:confirmed"],
-            }
-        ]
-    }
-
-
-def test_build_document_qualifiers_stay_with_their_own_nested_item():
-    doc = _build(
-        groups=[
-            _group(
-                "diagnosis",
-                _value("diagnosis", "ontology", "diagnosis", ("a", None)),
-                qualifiers={"observation": "confirmed"},
-            ),
-            _group(
-                "diagnosis",
-                _value("diagnosis", "ontology", "diagnosis", ("b", None)),
-                qualifiers={"observation": "candidate"},
-            ),
-        ]
-    )
-    assert doc["diagnosis"] == [
-        {"diagnosis": "a", "qualifiers": ["observation:confirmed"]},
-        {"diagnosis": "b", "qualifiers": ["observation:candidate"]},
-    ]
-
-
-def test_build_document_omits_qualifiers_when_there_are_none():
-    doc = _build(
-        groups=[
-            _group("specimen", _value("sex", "controlledValue", "specimen", "Female"))
-        ]
-    )
-    assert doc == {"specimen": [{"sex": "Female"}]}
 
 
 def test_group_rejects_a_value_of_another_group():

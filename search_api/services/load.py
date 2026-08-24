@@ -5,14 +5,9 @@ from collections.abc import Iterator, Sequence
 
 from psycopg import AsyncCursor
 
-from search_api.api.beacon.models import (
-    BeaconFilteringQualifier,
-    BeaconFilteringScope,
-    BeaconFilteringTerm,
-)
+from search_api.api.beacon.models import BeaconFilteringScope, BeaconFilteringTerm
 from search_api.api.opensearch.document import build_document
 from search_api.api.opensearch.models import ExtractedDocument
-from search_api.api.qualifiers import validate_requested_qualifiers
 from search_api.api.scopes import validate_document_scope
 from search_api.database.document import get_modified_at, upsert_document
 from search_api.database.document_log import delete_document_logs, write_document_log
@@ -48,33 +43,22 @@ class LoadService:
         term_caches: dict[str, OntologyTermCache],
         filtering_terms: Sequence[BeaconFilteringTerm],
         filtering_scopes: Sequence[BeaconFilteringScope] = (),
-        filtering_qualifiers: Sequence[BeaconFilteringQualifier] = (),
         replace_concepts: bool = True,
     ) -> None:
         self._term_caches = term_caches
         self._ontology_bindings = get_ontology_bindings(filtering_terms, term_caches)
         self._filtering_scopes = filtering_scopes
-        self._filtering_qualifiers = filtering_qualifiers
         self._replace_concepts = replace_concepts
 
     def validate_document(self, doc: ExtractedDocument) -> None:
-        """Check an extracted document's scope and qualifiers against the
-        deployment.
+        """Check an extracted document's scope against the deployment.
 
         This is where a deployment's extraction meets the generic service.
 
-        :raises UserException: if the scope or a qualifier value is not declared.
+        :raises UserException: if the scope is not declared.
         """
         try:
             validate_document_scope(doc.scope, self._filtering_scopes)
-            for group in doc.groups:
-                validate_requested_qualifiers(
-                    {
-                        qualifier_id: [value]
-                        for qualifier_id, value in group.qualifiers.items()
-                    },
-                    self._filtering_qualifiers,
-                )
         except UserException as e:
             raise UserException(f"Document '{doc.id}': {e}") from e
 

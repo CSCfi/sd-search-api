@@ -8,7 +8,7 @@ from lxml.etree import _Element as Element, _ElementTree as ElementTree  # noqa
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
 from search_api.api.bigpicture.extract.models import (
     BigpictureCodeAttributeValue,
-    BigpictureFindingFields,
+    BigpictureObservationFields,
     BigpictureSampleBiologicalBeingFields,
     BigpictureSampleBlockFields,
     BigpictureSampleSpecimenFields,
@@ -474,23 +474,26 @@ def extract_staining_fields(
 
 def extract_diagnoses(
     statement: Element,
-) -> tuple[set[BigpictureCodeAttributeValue], list[ExtractLog]]:
-    """Return a ``Diagnosis`` statement's codes, and what was dropped from it."""
+    observation_type: Literal["confirmed", "candidate"],
+) -> tuple[set[BigpictureObservationFields], list[ExtractLog]]:
+    """Return a ``Diagnosis`` statement's observations, and what was dropped from it."""
     logs: list[ExtractLog] = []
     codes = {
         _code_attribute_value(v)
         for v in statement.xpath("CODE_ATTRIBUTES/CODE_ATTRIBUTE/VALUE")
         if not _is_nil(v)
     }
-    return set(
-        _filter_values_by_scheme(codes, SNOMED_ONTOLOGY_ID, "diagnosis", logs)
-    ), logs
+    valid_codes = _filter_values_by_scheme(codes, SNOMED_ONTOLOGY_ID, "diagnosis", logs)
+    return {
+        BigpictureObservationFields(diagnosis=code, observation_type=observation_type)
+        for code in valid_codes
+    }, logs
 
 
 def extract_finding(
     statement: Element,
-    qualifiers: frozenset[tuple[str, str]],
-) -> tuple[BigpictureFindingFields | None, list[ExtractLog]]:
+    observation_type: Literal["confirmed", "candidate"],
+) -> tuple[BigpictureObservationFields | None, list[ExtractLog]]:
     """Return one finding from a ``Finding`` statement, and what was dropped from it.
 
     The finding is None if the statement holds none. If a tag repeats within a statement
@@ -508,7 +511,10 @@ def extract_finding(
     }
     if not any(value is not None for value in values.values()):
         return None, logs
-    return BigpictureFindingFields(**values, qualifiers=qualifiers), logs
+    return (
+        BigpictureObservationFields(**values, observation_type=observation_type),
+        logs,
+    )
 
 
 # Extract scope.

@@ -4,8 +4,6 @@ from typing import Any
 
 from opensearchpy import AsyncOpenSearch
 
-from search_api.exceptions import SystemException
-
 # Names the reverse_nested aggregation that counts documents rather than group items.
 _DOCUMENTS_AGG_NAME = "documents"
 
@@ -19,43 +17,31 @@ def _keyword_aggregation_request(
     after_key: dict[str, Any] | None = None,
     *,
     document_filter: dict[str, Any] | None = None,
-    group_item_filter: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build OpenSearch request body for one page of a keyword aggregation.
 
-    Example for ``field_name="diagnosis.diagnosis"``, called with
-    ``document_filter={"term": {"scope": "clinical"}}`` and
-    ``group_item_filter={"terms": {"diagnosis.qualifiers": ["observation:confirmed"]}}``::
+    Example for ``field_name="observation.diagnosis"``, called with
+    ``document_filter={"term": {"scope": "clinical"}}``::
 
         {"size": 0,                                    # aggregations only, no hits
          "query": {"term": {"scope": "clinical"}},     # document_filter: which documents
-         "aggs": {"group_items": {                     # count over the diagnosis items
-           "nested": {"path": "diagnosis"},
-           "aggs": {"qualified_items": {               # group_item_filter: which items
-             "filter": {"terms": {"diagnosis.qualifiers": ["observation:confirmed"]}},
-             "aggs": {"field_values": {                # one bucket per diagnosis value
-               "composite": {"size": 10000,
-                 "sources": [{"value": {"terms": {"field": "diagnosis.diagnosis"}}}]},
-               "aggs": {"documents": {                 # count documents, not items
-                 "reverse_nested": {}}}}}}}}}}
+         "aggs": {"group_items": {                     # count over the observation items
+           "nested": {"path": "observation"},
+           "aggs": {"field_values": {                  # one bucket per diagnosis value
+             "composite": {"size": 10000,
+               "sources": [{"value": {"terms": {"field": "observation.diagnosis"}}}]},
+             "aggs": {"documents": {                    # count documents, not items
+               "reverse_nested": {}}}}}}}}
 
     :param field_name: Full dotted field path.
     :param page_size: How many distinct values to request per page.
     :param after_key: The previous page's after_key, to advance to the next
         page, or None for the first page.
     :param document_filter: Restricts which documents are included.
-    :param group_item_filter: Restricts which of a group's items within those
-        documents are included. Nested fields only.
     :return: The OpenSearch request body.
-    :raises SystemException: If group_item_filter is given for a field not in a group.
     """
     nested_path, separator, _ = field_name.partition(".")
     is_nested = bool(separator)
-
-    if group_item_filter is not None and not is_nested:
-        raise SystemException(
-            f"Cannot filter the group items of '{field_name}' because the field is not in a group."
-        )
 
     # Aggregations are built from the inside out. A bucket's own doc_count counts
     # group items, so for a field in a group reverse_nested climbs back to the
@@ -70,10 +56,6 @@ def _keyword_aggregation_request(
     if is_nested:
         field_values["aggs"] = {_DOCUMENTS_AGG_NAME: {"reverse_nested": {}}}
     aggregations: dict[str, Any] = {"field_values": field_values}
-    if group_item_filter is not None:
-        aggregations = {
-            "qualified_items": {"filter": group_item_filter, "aggs": aggregations}
-        }
     if is_nested:
         aggregations = {
             "group_items": {"nested": {"path": nested_path}, "aggs": aggregations}
@@ -89,7 +71,6 @@ def _keyword_aggregation_request(
 def _keyword_aggregation_counts(
     response: dict[str, Any],
     field_name: str,
-    group_item_filter: dict[str, Any] | None = None,
 ) -> tuple[dict[str, int], dict[str, Any] | None]:
     """Parse a response to a keyword aggregation request.
 
@@ -97,12 +78,11 @@ def _keyword_aggregation_counts(
 
         {"aggregations": {
           "group_items": {
-           "qualified_items": {
-            "field_values": {
-             "after_key": {"value": "73211009"},
-             "buckets": [{"key": {"value": "73211009"},
-                          "doc_count": 2,               # matching items
-                          "documents": {"doc_count": 1}}]}}}}}
+           "field_values": {
+            "after_key": {"value": "73211009"},
+            "buckets": [{"key": {"value": "73211009"},
+                         "doc_count": 2,               # matching items
+                         "documents": {"doc_count": 1}}]}}}}
 
         ->  ({"73211009": 1}, {"value": "73211009"})
 
@@ -113,8 +93,6 @@ def _keyword_aggregation_counts(
 
     :param response: The raw OpenSearch response.
     :param field_name: The same field_name passed to _keyword_aggregation_request.
-    :param group_item_filter: The same group_item_filter passed to
-        _keyword_aggregation_request.
     :return: This page's value counts, and the after_key to advance to the
         next page (or None if this was the last page).
     """
@@ -122,8 +100,6 @@ def _keyword_aggregation_counts(
     result = response["aggregations"]
     if is_nested:
         result = result["group_items"]
-    if group_item_filter is not None:
-        result = result["qualified_items"]
 
     field_values = result["field_values"]
     counts = {
@@ -143,16 +119,14 @@ async def fetch_indexed_keywords(
     field_name: str,
     *,
     document_filter: dict[str, Any] | None = None,
-    group_item_filter: dict[str, Any] | None = None,
 ) -> dict[str, int]:
-    """Return every distinct value of a keyword field with its count.
+    """Return every distinct value of a keyword field with its count, however
+    many there are. Pages via a composite aggregation.
 
     :param search: OpenSearch client.
     :param index_name: OpenSearch index to query.
     :param field_name: Full dotted field path.
     :param document_filter: Restricts which documents are included.
-    :param group_item_filter: Restricts which of a group's items within those
-        documents are included. Nested fields only.
     :return: Mapping of keyword value to the number of documents carrying it.
     """
     counts: dict[str, int] = {}
@@ -163,12 +137,9 @@ async def fetch_indexed_keywords(
             _KEYWORD_PAGE_SIZE,
             after_key,
             document_filter=document_filter,
-            group_item_filter=group_item_filter,
         )
         response = await search.search(index=index_name, body=body)
-        page_counts, after_key = _keyword_aggregation_counts(
-            response, field_name, group_item_filter
-        )
+        page_counts, after_key = _keyword_aggregation_counts(response, field_name)
         counts.update(page_counts)
         if len(page_counts) < _KEYWORD_PAGE_SIZE:
             break

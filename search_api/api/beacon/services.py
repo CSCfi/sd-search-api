@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Generic, TypeVar
 
@@ -42,14 +42,13 @@ class BeaconService(ABC, Generic[T]):
         self,
         field_id: str,
         scope: str | None = None,
-        qualifiers: Mapping[str, Sequence[str]] | None = None,
     ) -> ValueCounts:
         """Return value counts for the indexed fields mapped to field_id.
 
         For simple fields, only ``counts`` is populated.
         For ``ontologyOrValue`` fields, ``counts`` holds ontology value counts and
         ``other_counts`` holds free-text value counts.
-        ``scope`` and ``qualifiers`` optionally restrict what is counted.
+        ``scope`` optionally restricts what is counted.
         Raises ValueError if field_id is unknown.
         """
         pass
@@ -72,6 +71,5 @@ class BeaconQueryService(ABC, Generic[S]):
         filters: list[BeaconQueryFilter],
         granularity: BeaconQueryGranularity = "record",
         scope: str | None = None,
-        qualifiers: Mapping[str, Sequence[str]] | None = None,
     ) -> BeaconQueryResult[S]:
         pass

@@ -59,7 +59,6 @@ class BeaconQuery(BaseModel):
     requestedGranularity: BeaconQueryGranularity = "count"
     # Beacon V2 extension.
     requestedScope: str | None = None
-    requestedQualifiers: dict[str, list[str]] = Field(default_factory=dict)
 
 
 # https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/requests/beaconRequestBody.json
@@ -290,28 +289,6 @@ class BeaconFilteringScope(BaseModel):
     id: str
     label: str
     description: str = ""
-
-
-class BeaconFilteringQualifier(BaseModel):
-    """A named qualifier that labels values inside a group.
-
-    Where a scope partitions documents, a qualifier labels values inside a
-    group. For example, 'confirmed' and 'candidate' for Bigpicture
-    'observation' qualifier.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    label: str
-    description: str = ""
-    values: list[str] = Field(
-        min_length=1, description="The values for this qualifier."
-    )
-    groups: list[str] = Field(
-        min_length=1,
-        description="The groups this qualifier labels.",
-    )
 
 
 # Beacon V2 info

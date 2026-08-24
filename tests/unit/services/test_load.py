@@ -19,41 +19,32 @@ def _load_service(**overrides) -> LoadService:
         "term_caches": create_term_caches(BP_DOMAIN.ontology_ids),
         "filtering_terms": BP_DOMAIN.filtering_terms,
         "filtering_scopes": BP_DOMAIN.filtering_scopes,
-        "filtering_qualifiers": BP_DOMAIN.filtering_qualifiers,
     }
     kwargs.update(overrides)
     return LoadService(**kwargs)
 
 
-def _document(scope="clinical", qualifiers=None) -> ExtractedDocument:
+def _document(scope="clinical") -> ExtractedDocument:
     return ExtractedDocument(
         id="img-1",
         scope=scope,
         groups=[
             OpenSearchGroup(
-                group="diagnosis",
+                group="observation",
                 values=[
                     OpenSearchFieldValue(
                         field=OpenSearchField(
-                            id="diagnosis", type="ontology", group="diagnosis"
+                            id="diagnosis", type="ontology", group="observation"
                         ),
                         value=("73211009", None),
                     )
                 ],
-                qualifiers=qualifiers or {},
             )
         ],
     )
 
 
-def test_validate_document_accepts_declared_scope_and_qualifiers():
-    _load_service().validate_document(
-        _document(qualifiers={"observation": "confirmed"})
-    )
-
-
-def test_validate_document_accepts_no_qualifiers():
-    """A group item need not carry any qualifier value."""
+def test_validate_document_accepts_declared_scope():
     _load_service().validate_document(_document())
 
 
@@ -70,18 +61,6 @@ def test_validate_document_rejects_missing_scope():
 
 def test_validate_document_allows_missing_scope_without_declared_scopes():
     _load_service(filtering_scopes=()).validate_document(_document(scope=None))
-
-
-def test_validate_document_rejects_unknown_qualifier():
-    with pytest.raises(UserException, match="Unsupported qualifier: 'certainty'"):
-        _load_service().validate_document(_document(qualifiers={"certainty": "known"}))
-
-
-def test_validate_document_rejects_undeclared_qualifier_value():
-    with pytest.raises(UserException, match=r"Unsupported value\(s\) \['known'\]"):
-        _load_service().validate_document(
-            _document(qualifiers={"observation": "known"})
-        )
 
 
 def test_validate_document_names_the_offending_document():

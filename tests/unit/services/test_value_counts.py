@@ -3,11 +3,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from search_api.api.bigpicture.models import (
-    BP_FILTERING_QUALIFIERS,
-    BP_FILTERING_SCOPES,
-    BP_FILTERING_TERMS,
-)
+from search_api.api.bigpicture.models import BP_FILTERING_SCOPES, BP_FILTERING_TERMS
 from search_api.api.bigpicture.opensearch import BigpictureDatasetBeaconService
 from search_api.api.models import ValueCounts, ValueCountsKey
 from search_api.services.value_counts import ValueCountsUpdater
@@ -22,7 +18,6 @@ class _MockBeaconService(BigpictureDatasetBeaconService):
             index_name="idx",
             filtering_terms=BP_FILTERING_TERMS,
             filtering_scopes=BP_FILTERING_SCOPES,
-            filtering_qualifiers=BP_FILTERING_QUALIFIERS,
         )
         self.calls: list[ValueCountsKey] = []
 
@@ -43,30 +38,25 @@ def _service(
 # added to either list has to be considered here too.
 _TYPES_WITHOUT_VALUES = ("text", "iso8601Range", "integer")
 
-# What Bigpicture's configuration currently amounts to. A canary: a field, scope
-# or qualifier added to the configuration changes it.
-_BP_KEY_COUNT = 64
+# What Bigpicture's configuration currently amounts to. A canary: a field or
+# scope added to the configuration changes it.
+_BP_KEY_COUNT = 43
 
 
 def test_value_count_keys_are_every_valid_request():
-    """Every field, in each of its scopes, under each qualifier value of its group.
+    """Every field, in each of its scopes plus unscoped.
 
     Built from Bigpicture's own configuration, so it restates the rule rather than
     proving it. What it catches is the implementation drifting away from the rule.
     """
     keys = set(_service()[0]._value_count_keys())
 
-    expected = set()
-    for term in BP_FILTERING_TERMS:
-        if term.type in _TYPES_WITHOUT_VALUES:
-            continue
-        qualifiers: list[dict[str, list[str]]] = [{}]
-        for qualifier in BP_FILTERING_QUALIFIERS:
-            if term.group in qualifier.groups:
-                qualifiers += [{qualifier.id: [value]} for value in qualifier.values]
-        for scope in (None, *term.scopes):
-            for requested in qualifiers:
-                expected.add(ValueCountsKey.of(term.id, scope, requested))
+    expected = {
+        ValueCountsKey.of(term.id, scope)
+        for term in BP_FILTERING_TERMS
+        if term.type not in _TYPES_WITHOUT_VALUES
+        for scope in (None, *term.scopes)
+    }
 
     assert keys == expected
     assert len(keys) == _BP_KEY_COUNT

@@ -255,8 +255,8 @@ async def test_recreate_rebuilds_the_schema_and_the_index(monkeypatch):
         properties = mapping[BP_DOMAIN.opensearch_index]["mappings"]["properties"]
         assert "stale_field" not in properties
         assert properties["scope"]["type"] == "keyword"
-        assert properties["diagnosis"]["type"] == "nested"
-        assert properties["diagnosis"]["properties"]["qualifiers"]["type"] == "keyword"
+        assert properties["observation"]["type"] == "nested"
+        assert "qualifiers" not in properties["observation"]["properties"]
     finally:
         await search.close()
 
@@ -330,7 +330,7 @@ async def test_index_recreate_rebuilds_the_mapping_and_sync_refills_it(monkeypat
         mapping = await search.indices.get_mapping(index=BP_DOMAIN.opensearch_index)
         properties = mapping[BP_DOMAIN.opensearch_index]["mappings"]["properties"]
         assert "stale_field" not in properties
-        assert properties["diagnosis"]["type"] == "nested"
+        assert properties["observation"]["type"] == "nested"
 
         # Empty, and every document is pending again, so a sync refills it.
         await search.indices.refresh(index=BP_DOMAIN.opensearch_index)

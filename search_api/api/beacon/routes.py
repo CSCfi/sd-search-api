@@ -2,7 +2,6 @@
 
 import asyncio
 import os
-from collections.abc import Mapping, Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 
@@ -14,7 +13,6 @@ from search_api.api.beacon.models import (
     BeaconBooleanResponse,
     BeaconCountResponse,
     BeaconFilteringGroup,
-    BeaconFilteringQualifier,
     BeaconFilteringTerm,
     BeaconFilteringScope,
     BeaconFilteringTerms,
@@ -36,10 +34,6 @@ from search_api.api.models import (
     DocumentCounts,
     FieldValue,
     ScopedCounts,
-)
-from search_api.api.qualifiers import (
-    QUALIFIER_VALUE_SEPARATOR,
-    validate_requested_qualifiers,
 )
 from search_api.conf import feature_config
 from search_api.exceptions import SystemException, UserException
@@ -99,23 +93,6 @@ def make_beacon_router(domain: Domain) -> APIRouter:
             )
         return scope
 
-    def validate_qualifiers(qualifiers: Mapping[str, Sequence[str]]) -> None:
-        validate_requested_qualifiers(qualifiers, domain.filtering_qualifiers)
-
-    def parse_qualifiers(params: Sequence[str]) -> dict[str, list[str]]:
-        """Parse <qualifier id>:<value> params."""
-        parsed: dict[str, list[str]] = {}
-        for item in params:
-            qualifier_id, separator, value = item.partition(QUALIFIER_VALUE_SEPARATOR)
-            if not separator or not value:
-                raise UserException(
-                    f"Invalid qualifier {item!r}; expected "
-                    f"'<qualifier id>{QUALIFIER_VALUE_SEPARATOR}<value>'."
-                )
-            parsed.setdefault(qualifier_id, []).append(value)
-        validate_qualifiers(parsed)
-        return parsed
-
     # The info and filtering_terms responses share the same beacon meta.
     meta = BeaconInfoMeta(
         beaconId=domain.beacon_id,
@@ -158,10 +135,6 @@ def make_beacon_router(domain: Domain) -> APIRouter:
     async def filtering_scopes() -> list[BeaconFilteringScope]:
         return list(domain.filtering_scopes)
 
-    @router.get("/filtering_qualifiers", response_model=list[BeaconFilteringQualifier])
-    async def filtering_qualifiers() -> list[BeaconFilteringQualifier]:
-        return list(domain.filtering_qualifiers)
-
     def register_query_route(endpoint: BeaconQueryEndpoint) -> None:
         """Register one Beacon V2 query endpoint.
 
@@ -189,7 +162,6 @@ def make_beacon_router(domain: Domain) -> APIRouter:
         ):
             beacon_service = beacon_services[endpoint.path]
             validate_scope(request.query.requestedScope)
-            validate_qualifiers(request.query.requestedQualifiers)
 
             ontology_filters = [
                 f for f in request.query.filters if f.id in ontology_id_by_field
@@ -224,7 +196,6 @@ def make_beacon_router(domain: Domain) -> APIRouter:
                 filters=filters,
                 granularity=granularity,
                 scope=request.query.requestedScope,
-                qualifiers=request.query.requestedQualifiers,
             )
             num_results = response.total
             exists = num_results > 0
@@ -319,14 +290,6 @@ def make_beacon_router(domain: Domain) -> APIRouter:
                 "counted when it is not given."
             ),
         ),
-        qualifier: list[str] = Query(
-            default=[],
-            description=(
-                "Restrict a qualifier to the given values, as '<qualifier id>:<value>'. "
-                "Repeat the parameter for several values. A qualifier that is not "
-                "given is not filtered on, so all of its values are counted."
-            ),
-        ),
         beacon_service: BeaconService = Depends(get_beacon_service),
         ontology_term_services: dict[str, OntologyTermCache] = Depends(
             get_ontology_term_services
@@ -360,7 +323,6 @@ def make_beacon_router(domain: Domain) -> APIRouter:
             field_counts = await beacon_service.get_value_counts(
                 field_id,
                 validate_field_scope(filtering_term, scope),
-                parse_qualifiers(qualifier),
             )
             counts = field_counts.counts
             if (
@@ -378,7 +340,6 @@ def make_beacon_router(domain: Domain) -> APIRouter:
         field_counts = await beacon_service.get_value_counts(
             field_id,
             validate_field_scope(filtering_term, scope),
-            parse_qualifiers(qualifier),
         )
         counts = field_counts.counts
         term_service = ontology_term_services[ontology_id_by_field[field_id]]
@@ -428,14 +389,6 @@ def make_beacon_router(domain: Domain) -> APIRouter:
                 "Include values in this scope. All values included when scope is not given."
             ),
         ),
-        qualifier: list[str] = Query(
-            default=[],
-            description=(
-                "Include values labelled with this qualifier, provided as '<qualifier id>:<value>'. "
-                "Repeat the parameter for several values. A qualifier that is not given is "
-                "not filtered on."
-            ),
-        ),
         beacon_service: BeaconService = Depends(get_beacon_service),
         ontology_term_services: dict[str, OntologyTermCache] = Depends(
             get_ontology_term_services
@@ -461,7 +414,6 @@ def make_beacon_router(domain: Domain) -> APIRouter:
         field_counts = await beacon_service.get_value_counts(
             field_id,
             validate_field_scope(filtering_term, scope),
-            parse_qualifiers(qualifier),
         )
         counts = field_counts.counts
 

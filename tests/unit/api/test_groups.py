@@ -62,22 +62,6 @@ def test_multiple_unknown_filtering_groups_reported():
     assert "'y'" in message
 
 
-def test_border_defaults_to_false():
-    """Only a group that asks for one gets a border, so config alone adds it."""
-    assert _group("description").border is False
-
-
-def test_groups_with_border_bigpicture():
-    """A canary: it is the UI that draws them, so a change here is a visual change."""
-    groups = load_groups_config(_BP_GROUPS_CONFIG_PATH).filtering_groups
-
-    assert {group.id for group in groups if group.border} == {
-        "staining",
-        "clinical",
-        "non_clinical",
-    }
-
-
 def test_parent_defaults_to_none():
     """Only a group that asks for one nests, so config alone adds a parent."""
     assert _group("description").parent is None

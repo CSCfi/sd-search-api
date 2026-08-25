@@ -272,10 +272,6 @@ class BeaconFilteringGroup(BaseModel):
     id: str
     label: str
     description: str = ""
-    border: bool = Field(
-        default=False,
-        description="Whether the UI should draw a border around the group.",
-    )
     parent: str | None = Field(
         default=None,
         description="The id of the filtering group this group nests under, if any.",

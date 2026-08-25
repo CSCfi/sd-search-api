@@ -68,3 +68,38 @@ def validate_filtering_groups(
             f"'{source}': filtering terms reference unknown "
             f"group(s) {sorted(unknown)}; defined groups are {sorted(group_ids)}."
         )
+
+
+def validate_filtering_groups_hierarchy(
+    filtering_groups: Sequence[BeaconFilteringGroup],
+    source: str | Path,
+) -> None:
+    """Ensure every group's parent references another defined group, with no cycles.
+
+    :raises ConfigurationException: if a group's parent is unknown, or groups
+        form a circular parent chain.
+    """
+    parent_by_id = {group.id: group.parent for group in filtering_groups}
+    unknown = {
+        group.parent
+        for group in filtering_groups
+        if group.parent is not None and group.parent not in parent_by_id
+    }
+    if unknown:
+        raise ConfigurationException(
+            f"'{source}': filtering groups reference unknown "
+            f"parent group(s) {sorted(unknown)}; defined groups are "
+            f"{sorted(parent_by_id)}."
+        )
+
+    for group in filtering_groups:
+        seen = {group.id}
+        current = group.parent
+        while current is not None:
+            if current in seen:
+                raise ConfigurationException(
+                    f"'{source}': filtering group {group.id!r} has a circular "
+                    "parent chain."
+                )
+            seen.add(current)
+            current = parent_by_id[current]

@@ -276,6 +276,10 @@ class BeaconFilteringGroup(BaseModel):
         default=False,
         description="Whether the UI should draw a border around the group.",
     )
+    parent: str | None = Field(
+        default=None,
+        description="The id of the filtering group this group nests under, if any.",
+    )
 
 
 # Beacon V2 extension.

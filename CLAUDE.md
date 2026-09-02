@@ -30,7 +30,18 @@ docker compose --env-file tests/integration/.env --profile dev up --build
 # acts on that deployment's own stores, its ontology caches included, since each
 # deployment has its own database. `snomed` sits beside the deployments instead, since
 # one Snowstorm is shared by all of them.
-uv run python scripts/admin.py Bigpicture load <dir> --sync   # --dry-run parses only
+uv run python scripts/admin.py Bigpicture load <dir> --sync   # a directory
+uv run python scripts/admin.py Bigpicture fetch --sync        # the submit API instead
+# The two commands are one loop over two sources (see *Reading a source*), so they take the
+# same flags and share one resume point. Either loads only what has changed since the last
+# run; `--full` forgets that and loads everything, and `reset` forgets it without loading.
+# `--dry-run` reads the same resume point, so it reports what a real run would do, and
+# writes nothing at all. `load` infers whether its directory is one dataset directory or a
+# parent of several, and takes the Crypt4GH key from configuration rather than the command
+# line.
+uv run python scripts/admin.py Bigpicture reset                # only the resume point, no documents
+# `reset` forgets how far loading has got without loading anything, so a load that runs on
+# a schedule is the next full one. `--full` does the same and loads immediately.
 uv run python scripts/admin.py Bigpicture sync                # only the documents pending sync
 uv run python scripts/admin.py Bigpicture index generate      # writes the mapping file, touches no cluster
 uv run python scripts/admin.py Bigpicture index create        # once per environment
@@ -38,6 +49,7 @@ uv run python scripts/admin.py Bigpicture index recreate      # index only; mark
 # A mapping change needs the index dropped, since OpenSearch cannot alter an existing
 # field's type: `index recreate` rebuilds the index alone, `recreate` both stores.
 # Refused when DEPLOYMENT_ENV=prod, as are `clear` and `index recreate`.
+uv run python scripts/admin.py Bigpicture clear                # documents, terms and the resume point
 uv run python scripts/admin.py Bigpicture recreate
 # `<deployment> refresh <id>` refreshes the preferred terms that deployment caches,
 # updating the ontology from its source first if the database caches it whole
@@ -66,8 +78,12 @@ search_api/
 ├── api/                # HTTP layer + per-deployment packages
 │   ├── {admin,auth,beacon,opensearch}/      # generic routers and services
 │   └── bigpicture/     # everything Bigpicture-specific lives here, nowhere else:
-│       ├── domain.py models.py ai.py opensearch.py
-│       ├── extract/    # XML in, one document per image out:
+│       ├── domain.py models.py ai.py opensearch.py conf.py
+│       ├── local.py remote.py      # its two DocumentSources
+│       ├── extract/    # XML in, one document per image out. Holds only what both
+│       │               # sources use: extract_dataset_documents, dataset_files,
+│       │               # get_last_modification_time, to_opensearch_values.
+│       │               # Walking a tree and dating a dataset are local.py's own.
 │       │               # models.py refs.py values.py document.py
 │       ├── config/     # hand-edited fields/groups/scopes YAML
 │       ├── index/      # GENERATED OpenSearch mapping (`index generate` writes it)
@@ -78,10 +94,12 @@ search_api/
 │   │   └── cache/      # one whole small ontology in memory:
 │   │                   # models.py source.py store.py service.py
 │   ├── auth.py session.py
+│   ├── fetch.py          # DocumentSource (ABC) + SdSubmitFetchClient
 │   └── load.py sync.py poller.py value_counts.py validate.py
 ├── database/           # every line of SQL, one module per table:
 │   │                   # repository.py (connection) models.py (rows)
 │   │                   # document.py document_log.py terms_cache.py ontology_cache.py
+│   │                   # load.py — the load history, how far loading has got
 │   └── schema/         # create.sql drop.sql
 ├── utils/              # stateless helpers: crypt.py dir.py xml.py
 ├── ai/  conf.py  exceptions.py  main.py
@@ -107,7 +125,7 @@ which files are hand-edited and which are generated.
 ```
 name, opensearch_index, beacon_id, beacon_name, schemas
 filtering_terms, filtering_groups, filtering_scopes, non_filtering_fields   # field config
-loader: Loader[…]                              # how source data is ingested
+local_source, remote_source: DocumentSource | None  # where documents come from
 beacon_service_factory                         # one shared service: health, status, value counts
 query_endpoints: Sequence[BeaconQueryEndpoint] # /datasets, /images: service, response shape, AI persona
 replace_concepts = True                        # substitute a retired concept at load
@@ -128,8 +146,9 @@ endpoint's records are shaped (see *BeaconService* below).
 - `Domain.ontology_ids` → distinct `ontology.id`s referenced by the filtering terms.
 - `make_lifespan` builds **one term cache per ontology** via `create_term_caches(domain.ontology_ids)`
   and stores them as `app.state.ontology_term_services: dict[ontology_id, OntologyTermCache]`.
-- `Loader[LoadOptionsT]` (generic) bundles a deployment's `add_load_options` / `parse_load_options`
-  / `extract` callables for the admin CLI.
+- `local_source` / `remote_source` (`DocumentSource | None`) are where the deployment's
+  documents come from — the `load` and `fetch` commands respectively (see *Reading a source*).
+  Leaving one `None` means that command has nothing to do.
 
 A new deployment = a new `Domain` registered in `DOMAINS` (see `api/bigpicture/domain.py` for the
 pattern: `BP_DOMAIN`, `BP_LOADER`).
@@ -145,6 +164,101 @@ pattern: `BP_DOMAIN`, `BP_LOADER`).
 2. **OpenSearch** (`api/opensearch/index.py`) — the search index (`bp-image-index` for Bigpicture).
    `SyncService` (`services/sync.py`, constructed with the index name) reads unsynced rows, bulk-indexes
    via `index_documents`, then stamps `synced_at`.
+
+### Reading a source (`services/fetch.py`)
+
+A deployment's documents come from a **directory** or from the **submit API**, and the two are one
+contract with two implementations. `admin.py <deployment> load <dir>` and `<deployment> fetch` are the
+same loop in `scripts/admin.py` (`_read_documents`) over `Domain.local_source` and
+`Domain.remote_source`, storing what either yields through the same `LoadService` and recording how
+far it got in the same `load` table.
+
+**`DocumentSource` (ABC) is the whole of what generic code knows about reading.** One abstract method,
+`read(root, marker)`, an async generator yielding `SourceDocuments` — the `marker` reached once those
+documents are stored, and the documents. A source logs what it read
+itself, since it is the one that knows what a unit of its material is. Directories, HTTP clients,
+archives and submissions are all behind it: `_read_documents` reads no configuration, opens no client,
+unzips nothing and does not know a unit is a dataset or a submission. `root` is the one parameter a
+source may ignore — the submit API is where the remote source's material is, so it needs no path.
+
+The two implementations:
+
+- **`BigpictureLocalSource`** (`api/bigpicture/local.py`) walks the tree itself and yields one unit
+  per dataset directory. **Every dataset is dated before any is parsed**, by `_dataset_modified_at`
+  reading modification times alone: that is what orders them oldest first, lets one outside the
+  period be skipped without reading its XML, and keeps one dataset in memory at a time rather than
+  the whole tree. It infers whether the root is one dataset directory or a parent of several from
+  whether the root holds `METADATA/dataset.xml` (encrypted or not), so `--multi-dir` is gone; the
+  Crypt4GH key and passphrase come from `BigpictureLocalConfiguration`, since a passphrase on a command
+  line lands in the process list and the shell history.
+- **`BigpictureRemoteSource`** (`api/bigpicture/remote.py`) yields one unit per published submission,
+  reading `BP_SUBMIT_API_URL` / `BP_SUBMIT_API_KEY` from `BigpictureRemoteConfiguration` per fetch, so no
+  other command needs those settings and the generic `conf.py` stays free of deployment-specific
+  configuration.
+
+**`modified_at` comes from the source, not from the documents.** A fetched document has no file
+modification time worth having — a zip entry's `date_time` is when the submitter built the archive,
+so it is new on every fetch, and `get_last_modification_time` deliberately reads only `mtime` /
+`last_modified` / `LastModified`, leaving
+`ExtractedDocument.modified_at` as `None` — and `LoadService.store_documents` skips a document only
+when both its own and the stored date are set. `BigpictureRemoteSource` therefore stamps every document
+with the submission's publication date, which a published submission being immutable makes the date
+its metadata last changed. Without that stamp every fetch would store and re-sync every document it
+read, which is what the overlap below assumes it does not.
+
+`SourceDocuments.marker` is **not optional**: a unit nothing can place could not be ordered among the
+others, and every read would take it again without ever getting past it. `_dataset_modified_at`
+therefore raises rather than answering `None` — a `SystemException`, since a filesystem reporting no
+times is not something the operator's input can fix. That is exactly what a zip archive is, which is
+why the remote source dates a submission by its publication date instead of by its files, and what
+`tests/unit/api/bigpicture/test_local.py` asserts by dating one.
+
+**The archive is read by the very code that reads a directory.** `_extract_archive` wraps the bytes in
+an fsspec `ZipFileSystem` and hands that to `extract_dataset_documents`, so the fetched path cannot
+drift from the directory path it is an alternative to — which is what
+`tests/unit/api/bigpicture/test_remote.py` asserts by extracting the same dataset both ways and
+comparing the documents. The archive carries files extraction does not read (`datacite.xml`,
+`rems.xml`, `organisation.xml`), and they are ignored rather than rejected.
+
+`SdSubmitFetchClient` is the boundary with the submitter, so it is where its misbehaviour becomes a
+`SystemException` naming it: a non-2xx answer, a listing that is not the expected JSON, and an
+archive response whose media type is not `application/zip` — which is what a proxy in front of the
+submitter answers, and would otherwise surface as a corrupt archive much later. A body that passes
+that check and still is no zip is a `UserException` from `_extract_archive` instead, since by then
+nothing points at the submitter. The client owns its `httpx.AsyncClient` through
+`__aenter__`/`__aexit__` only, so one built outside its context manager raises rather than leaking a
+connection pool.
+
+**Both ends require a UTC offset** on the period. The submitter resolves a date without one in the
+timezone of its own database, which shifts the period silently and drops submissions from a sync the
+client cannot detect — so `get_published_submissions` refuses such a date before the request is
+made.
+
+**Where loading has got is a marker, not a date** (`database/load.py`). The `load` table holds one
+row — `marker` and `updated_at`, on a primary key fixed at 1 so the marker is upserted onto it in one
+statement — or none before the first load, and `_read_documents` passes that
+marker straight back to the source without reading it: only the source knows what it means. Both
+Bigpicture sources use an ISO 8601 date, the local one a dataset's modification time and the remote
+one a submission's publication date, but a source keying on something else would need no change here.
+That is also why the resume point is stored rather than derived: an opaque marker has no `MAX()`.
+
+Nothing can ask for an earlier period, so nothing can move the marker backwards — which is what makes
+the opaque marker safe, and why the `--since`/`--until` flags that could have are gone. The marker is
+written after the whole run, so a run that fails part way records nothing and the next one repeats
+it, which costs only the re-reading: a document not newer than the stored one is skipped. A run that
+loads nothing writes no marker.
+
+The **overlap belongs to the source**, since generic code cannot do arithmetic on an opaque marker.
+`BigpictureRemoteSource` asks from `_FETCH_OVERLAP` before its marker: a submission committed after a
+fetch read its period, but published within it, is invisible to that fetch and is only reached by the
+next one overlapping the period. `BigpictureLocalSource` needs none — a file's modification time is
+not written before the file is.
+
+The **`load_history` table** is the audit trail beside it: one row per completed load, appended, never
+read by the code. `--full`, `reset` and `clear` delete the marker, not the history — without the first a
+deployment could not be reloaded after an extraction change, and without the second a fetch would
+resume from the date the deleted documents reached and load nothing published before it, leaving the
+deployment empty.
 
 ### Database connections (`database/repository.py`)
 
@@ -279,14 +393,19 @@ Four modules, each a step of the same job:
 
 `tests/unit/api/bigpicture/extract/` mirrors the four, one test module each.
 
-**A name is public exactly when another module in the package uses it.** `values.py` exposes its seven
+**A name is public exactly when another module uses it.** `values.py` exposes its seven
 `extract_*` functions and keeps its 21 readers and tables private; `refs.py` exposes
 `BigpictureReferences`, `related_ids`, `object_ids`, `object_keys`, `map_ref` and the observation refs.
-An underscore therefore means *module*-local, and `__init__.py`'s `__all__` is what says which of the
-public names callers outside the package get.
+An underscore therefore means module-local, and that is the whole convention: `__init__.py` holds only
+the package docstring, like every other package here, so a caller imports from the module a name
+lives in rather than through a facade that has to be kept in step with it.
 
-`extract_documents(root, fs, single_dir, c4gh_private_key_file, c4gh_passphrase) → Iterator[ExtractedDocument]`
-walks a directory tree and reads six XML files per dataset:
+`extract_dataset_documents(root, fs, keys) → Iterator[ExtractedDocument]` reads one dataset
+directory's six XML files. Both sources call it: `local.py` once per directory it walks to,
+`remote.py` once per archive. `dataset_files(fs, root)` resolves the same six paths on their own —
+accepting a plain file or a `.c4gh` one, and the observation file being the only optional one — so
+`local.py` can date a dataset without reading it and the two cannot disagree about which files a
+dataset has.
 
 | File | Extracts |
 |---|---|
@@ -614,7 +733,7 @@ Unresolved values are only kept in the prepared filter for `ontologyOrValue` fie
 free-text fallback field downstream); for strict `ontology` fields they're dropped.
 
 **A load resolves its values through the same cascade** (`services/ontology/values.py`,
-`resolve_document`),
+`resolve_concepts`),
 so a value indexed and a value searched for reach the same concept. The code the source coded is tried
 first: it is kept as it is when it is a concept id, and only when it is not does the **meaning**
 carried beside it get resolved — the term is then the only thing left that can name the concept. That
@@ -638,7 +757,7 @@ fills with the free text the source gave — `values.py` never touches it. `Snom
 `_MIN_SEARCH_TERM_LENGTH` (3) characters, which it answers with a `400`; `_fetch_concepts` is cached
 for 30 days like the rest, so a load searches once per distinct term rather than once per document. A registry maps
 an **ontology id** (e.g. `SCTID`) to its provider via `register_ontology_service` /
-`get_ontology_service`, keeping `ontology.py` unaware of concrete providers. A filtering term
+`get_ontology_service`, keeping `service.py` unaware of concrete providers. A filtering term
 selects its provider by `ontology.id`.
 
 **Every provider is registered in `services/ontology/registrations.py`** — both the ontology service and its
@@ -808,6 +927,14 @@ host/db/password defaults). Defaults that exist: `POSTGRES_PORT=5432`,
 endpoints unmounted when unset), plus `OIDC_SCOPE`, `OIDC_SECURE_COOKIE=true`, `JWT_ISSUER` and
 `JWT_ALGORITHM=HS256`. `DEPLOYMENT_TYPE`, `SNOWSTORM_URL`, `LLM_BASE_URL`/`LLM_API_KEY`, the
 `OIDC_*` client settings and `JWT_KEY` (base64, must decode to ≥32 bytes) have no defaults.
+
+**A deployment's own settings live with the deployment**, not here, and **one class per source**:
+`api/bigpicture/conf.py` declares `BigpictureRemoteConfiguration` (`BP_SUBMIT_API_URL` and
+`BP_SUBMIT_API_KEY`, both required) and `BigpictureLocalConfiguration` (`BP_C4GH_KEY_FILE` and
+`BP_C4GH_PASSPHRASE`, both optional). Split because a `BaseSettings` validates every field it
+declares: bundled, a `load <dir>` would demand submit API settings it never uses. The URL carries the submitter's
+API prefix (`http://localhost:5431/api`), because the submitter mounts its sync endpoints outside its
+versioned API, and the key must equal that submitter's own `SYNC_API_KEY`.
 A working set is in `tests/integration/.env`.
 
 ## Tests
@@ -816,12 +943,15 @@ A working set is in `tests/integration/.env`.
 tests/            # mirrors the search_api/ package layout
 ├── unit/          # run by tox; no external services needed
 │   ├── api/{admin,auth,beacon,bigpicture,opensearch}/
-│   ├── services/{ontology/,test_auth.py,test_load.py,test_poller.py,
-│   │              test_session.py,test_validate.py,test_value_counts.py}
+│   ├── api/bigpicture/        # incl. test_local.py + test_remote.py (its two sources)
+│   ├── services/{ontology/,test_auth.py,test_fetch.py,test_load.py,
+│   │              test_poller.py,test_session.py,test_validate.py,
+│   │              test_value_counts.py}   # the client; the sources are under api/
 │   └── utils/                 # crypt, dir, xml
 ├── integration/   # require Postgres/OpenSearch (route tests hit a running server)
 │   ├── api/bigpicture/        # endpoints incl. AI (test_routes_ai.py, @skip — needs Ollama),
-│   │                          # plus extract + load against Postgres
+│   │                          # extract + load against Postgres, and test_remote.py
+│   │                          # against a running submit API
 │   ├── database/              # one module per table, plus test_repository.py (the pool)
 │   ├── scripts/               # test_admin.py (ontology updates) + bigpicture/test_admin.py
 │   └── services/{ontology/,test_load.py,test_poller.py,test_sync.py}
@@ -829,6 +959,16 @@ tests/            # mirrors the search_api/ package layout
 ├── utils/         # test helpers (generate_data.py)
 └── files/bigpicture/xml/dataset_{clinical,non_clinical}/METADATA/   # XML fixtures
 ```
+
+A test needing a running Bigpicture submit API carries `@pytest.mark.requires_submit`, and
+`tests/integration/conftest.py` skips those when `BP_SUBMIT_API_URL` answers nothing or answers
+`404` — probed rather than opted out of, since nothing but a submitter of one's own makes them
+runnable. A `401` is the healthy answer: the route is there and wants the token, while a `404` is a
+submitter with no `SYNC_API_KEY` of its own. A submitter that has published nothing skips them too,
+through the `published_submissions` fixture: nothing on this side can stage a submission, since the
+sync key authorizes reading only. They cover what the mock-transport unit tests
+cannot: that the submitter answers the shape the client parses, honours `publishedStart`, and serves
+archives the extractor reads.
 
 A test needing a reachable Snowstorm carries `@pytest.mark.requires_snowstorm`, and
 `SKIP_SNOWSTORM_TESTS=true` skips those — set in CI, which cannot reach the internal-only Snowstorm

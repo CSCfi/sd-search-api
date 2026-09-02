@@ -18,6 +18,7 @@ from search_api.api.opensearch.client import create_search
 from search_api.api.opensearch.index import create_index
 from search_api.exceptions import SystemException
 from search_api.services.load import LoadService, extraction_logs
+from search_api.services.fetch import DocumentSource
 from search_api.services.sync import SyncService
 from search_api.database.document import count_documents, reset_synced_at
 from search_api.database.document_log import (
@@ -25,6 +26,12 @@ from search_api.database.document_log import (
     log_document_log,
 )
 from search_api.database.repository import get_cursor
+from search_api.database.load import (
+    delete_load_marker,
+    insert_load_history,
+    read_load_marker,
+    write_load_marker,
+)
 from search_api.database.terms_cache import delete_all_terms
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
 from search_api.services.ontology.cache.source import OntologySource
@@ -68,38 +75,115 @@ def _setup(env_file: str | None) -> None:
 
 
 async def _load(domain: Domain, args: argparse.Namespace) -> None:
-    options = domain.loader.parse_load_options(args)
-    docs_iter = domain.loader.extract(options)
+    """Load documents from a local source."""
 
-    if args.dry_run:
-        logging.info("Extracting without writing to the database.")
-        count = 0
-        for doc in docs_iter:
-            logging.info("Would load document %s.", doc.id)
-            # Log extraction messages.
-            for log in extraction_logs(doc):
-                log_document_log(log)
-            count += 1
-        logging.info("%d document(s) extracted without loading them.", count)
-        return
+    await _read_documents(domain, domain.local_source, args, root=args.directory)
 
-    logging.info("Loading documents into the database.")
-    load_service = LoadService(
-        create_term_caches(domain.ontology_ids),
-        domain.filtering_terms,
-        domain.filtering_scopes,
-        domain.filtering_qualifiers,
-        domain.replace_concepts,
+
+async def _fetch(domain: Domain, args: argparse.Namespace) -> None:
+    """Load documents from a remote source."""
+
+    await _read_documents(domain, domain.remote_source, args)
+
+
+async def _read_documents(
+    domain: Domain,
+    source: DocumentSource | None,
+    args: argparse.Namespace,
+    root: str | None = None,
+) -> None:
+    """
+    Read documents for indexing.
+
+    :param domain: The deployment configuration.
+    :param source: The source to read, or None if the deployment declares none.
+    :param args: The command arguments.
+    :param root: The directory to read, if supported by the document source.
+    """
+
+    if source is None:
+        raise SystemException(
+            f"The {domain.name} deployment has no source to {args.command}."
+        )
+
+    marker = await _load_marker(args)
+    load_service = (
+        None
+        if args.dry_run
+        else LoadService(
+            create_term_caches(domain.ontology_ids),
+            domain.filtering_terms,
+            domain.filtering_scopes,
+            domain.filtering_qualifiers,
+            domain.replace_concepts,
+        )
     )
-    await load_service.store_documents(docs_iter)
 
-    if args.sync:
-        sync_service = SyncService(domain.opensearch_index)
-        try:
-            async with get_cursor() as cur:
-                await sync_service.sync_fields(cur)
-        finally:
-            await sync_service.search.close()
+    count = 0
+    read_marker = None
+    async for itr in source.read(root, marker):
+        count += len(itr.documents)
+
+        if load_service is None:
+            for doc in itr.documents:
+                logging.info("Would load document %s.", doc.id)
+                for log in extraction_logs(doc):
+                    log_document_log(log)
+            continue
+
+        logging.info("Loading %d document(s).", len(itr.documents))
+        await load_service.store_documents(iter(itr.documents))
+        # Update incremental load marker.
+        read_marker = itr.marker
+
+    logging.info(
+        "%d document(s) %s.",
+        count,
+        "read without loading them" if load_service is None else "loaded",
+    )
+
+    if read_marker is not None:
+        await write_load_marker(read_marker)
+        await insert_load_history(read_marker)
+
+    if args.sync and not args.dry_run:
+        await _sync(domain)
+
+
+async def _load_marker(args: argparse.Namespace) -> str | None:
+    """
+    Return the stored incremental load position.
+
+    :param args: The command arguments.
+    :return: The stored incremental load position, or None to read all documents.
+    """
+
+    if args.full:
+        if not args.dry_run:
+            # The marker is deleted before loading, so that an interrupted load
+            # does not leave the old marker.
+            await delete_load_marker()
+            logging.info("Full load requested, removing incremental load marker.")
+        return None
+
+    marker = await read_load_marker()
+    if marker is None:
+        logging.info("No incremental load marker. Loading all documents.")
+        return None
+
+    logging.info("Loading documents after the incremental marker %s.", marker)
+    return marker
+
+
+async def _reset(domain: Domain) -> None:
+    """Remove the incremental load marker, so the next load reads everything again."""
+
+    await delete_load_marker()
+    logging.info(
+        "Removed the incremental load marker of the %s deployment. "
+        "The next load will be a full one.",
+        domain.name,
+    )
 
 
 async def _sync(domain: Domain) -> None:
@@ -138,6 +222,10 @@ async def _clear(domain: Domain, args: argparse.Namespace) -> None:
         # The terms are cleared after the documents.
         term_count = await delete_all_terms()
         logging.info("Deleted %d cached preferred term(s).", term_count)
+
+        # The incremental load marker is cleared.
+        await delete_load_marker()
+        logging.info("Deleted the incremental load marker.")
     finally:
         await sync_service.search.close()
 
@@ -290,25 +378,45 @@ if __name__ == "__main__":
         #
 
         load_parser = commands.add_parser(
-            "load", help="Load data from source files into the database."
+            "load", help="Load documents from a directory."
         )
         load_parser.add_argument(
-            "--dry-run",
-            action="store_true",
-            default=False,
-            help=(
-                "Parse and validate the sources, reporting what would be loaded, "
-                "without writing anything to the database."
-            ),
+            "directory",
+            help="Directory to load the documents from.",
         )
-        load_parser.add_argument(
-            "--sync",
-            action="store_true",
-            default=False,
-            help="Sync loaded data to OpenSearch after loading.",
+
+        fetch_parser = commands.add_parser(
+            "fetch",
+            help=("Load documents from a remote source."),
         )
-        # Deployment-specific load flags.
-        domain.loader.add_load_options(load_parser)
+
+        for source_parser in (load_parser, fetch_parser):
+            source_parser.add_argument(
+                "--full",
+                action="store_true",
+                default=False,
+                help="Reset the incremental load marker and load all documents.",
+            )
+            source_parser.add_argument(
+                "--dry-run",
+                action="store_true",
+                default=False,
+                help=(
+                    "Read and validate the documents, reporting what would be loaded, "
+                    "without writing anything to the database."
+                ),
+            )
+            source_parser.add_argument(
+                "--sync",
+                action="store_true",
+                default=False,
+                help="Sync loaded data to OpenSearch after loading.",
+            )
+
+        commands.add_parser(
+            "reset",
+            help="Reset the incremental load marker, so the next load is a full one.",
+        )
 
         commands.add_parser(
             "sync",
@@ -415,8 +523,12 @@ if __name__ == "__main__":
         raise SystemExit(0)
 
     domain = DOMAINS[args.group]
-    if args.command == "load":
+    if args.command == "fetch":
+        asyncio.run(_fetch(domain, args))
+    elif args.command == "load":
         asyncio.run(_load(domain, args))
+    elif args.command == "reset":
+        asyncio.run(_reset(domain))
     elif args.command == "sync":
         asyncio.run(_sync(domain))
     elif args.command == "index":

@@ -11,12 +11,12 @@ from pathlib import Path
 
 from search_api.api.bigpicture.models import BP_OPENSEARCH_INDEX
 from search_api.api.opensearch.models import ExtractedDocument
-from search_api.api.bigpicture.extract import (
-    BigpictureFields,
+from search_api.api.bigpicture.extract.document import to_opensearch_values
+from search_api.api.bigpicture.extract.models import (
     BigpictureCodeAttributeValue,
-    BigpictureStainingFields,
+    BigpictureFields,
     BigpictureSpecimenFields,
-    to_opensearch_values,
+    BigpictureStainingFields,
 )
 from search_api.services.sync import SyncService
 from search_api.database.document import DOCUMENT_TABLE

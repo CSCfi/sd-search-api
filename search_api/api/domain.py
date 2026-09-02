@@ -1,9 +1,8 @@
-import argparse
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Generic, TypeVar
+from typing import Any
 
 from fastapi import FastAPI
 
@@ -15,8 +14,8 @@ from search_api.api.beacon.models import (
     BeaconResultSetsResponse,
 )
 from search_api.api.beacon.services import BeaconQueryService, BeaconService
+from search_api.services.fetch import DocumentSource
 from search_api.api.opensearch.models import (
-    ExtractedDocument,
     OpenSearchBeaconFilteringTerm,
     OpenSearchField,
 )
@@ -38,17 +37,6 @@ from search_api.services.ontology.term_cache import (
 # Imported for its side effects: populates the ontology service and term cache
 # registries that this module looks up below.
 import search_api.services.ontology.registrations  # noqa: F401
-
-LoadOptionsT = TypeVar("LoadOptionsT")
-
-
-@dataclass(frozen=True)
-class Loader(Generic[LoadOptionsT]):
-    """How a deployment loads its source data, parameterised by its options."""
-
-    add_load_options: Callable[[argparse.ArgumentParser], None]
-    parse_load_options: Callable[[argparse.Namespace], LoadOptionsT]
-    extract: Callable[[LoadOptionsT], Iterator[ExtractedDocument]]
 
 
 @dataclass(frozen=True)
@@ -75,7 +63,6 @@ class Domain:
     filtering_scopes: Sequence[BeaconFilteringScope]
     filtering_qualifiers: Sequence[BeaconFilteringQualifier]
     non_filtering_fields: Sequence[OpenSearchField]
-    loader: Loader[Any]
     beacon_service_factory: Callable[[Any], BeaconService]
     query_endpoints: Sequence[BeaconQueryEndpoint]
     beacon_id: str
@@ -83,6 +70,8 @@ class Domain:
     schemas: Sequence[str]  # Beacon entity types (returnedSchemas).
     # Whether to replace retired concepts with an active one.
     replace_concepts: bool = True
+    local_source: DocumentSource | None = None
+    remote_source: DocumentSource | None = None
 
     @property
     def nested_groups(self) -> set[str]:

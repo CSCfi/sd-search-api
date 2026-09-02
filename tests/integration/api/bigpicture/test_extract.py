@@ -1,5 +1,6 @@
 import io
 import os
+from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -18,7 +19,7 @@ from search_api.services.ontology.service import (
     register_ontology_service,
 )
 from search_api.services.ontology.term_cache import OntologyTermCache
-from search_api.api.bigpicture.extract import extract_documents
+from search_api.api.bigpicture.local import BigpictureLocalSource
 from search_api.database.document import DOCUMENT_TABLE, get_document
 from search_api.database.repository import get_connection
 from search_api.services.load import LoadService
@@ -54,6 +55,20 @@ _EXPECTED_DOCUMENTS = {
         for image_id in _NON_CLINICAL_IMAGE_IDS
     },
 }
+
+
+async def _documents(root: str, c4gh_key_file: str | None = None) -> Iterator:
+    if c4gh_key_file is not None:
+        os.environ["BP_C4GH_KEY_FILE"] = c4gh_key_file
+    else:
+        os.environ.pop("BP_C4GH_KEY_FILE", None)
+
+    documents = [
+        document
+        async for source in BigpictureLocalSource().read(root)
+        for document in source.documents
+    ]
+    return iter(documents)
 
 
 def _mock_term_caches() -> dict[str, OntologyTermCache]:
@@ -129,7 +144,7 @@ async def test_extract_and_load_fields_plain():
         filtering_terms=BP_DOMAIN.filtering_terms,
         filtering_scopes=BP_DOMAIN.filtering_scopes,
         filtering_qualifiers=BP_DOMAIN.filtering_qualifiers,
-    ).store_documents(extract_documents(root=str(_XML_DIR), single_dir=False))
+    ).store_documents(await _documents(str(_XML_DIR)))
 
     async with get_connection() as conn:
         async with conn.cursor() as cur:
@@ -170,13 +185,7 @@ async def test_extract_and_load_fields_c4gh(tmp_path):
         filtering_terms=BP_DOMAIN.filtering_terms,
         filtering_scopes=BP_DOMAIN.filtering_scopes,
         filtering_qualifiers=BP_DOMAIN.filtering_qualifiers,
-    ).store_documents(
-        extract_documents(
-            root=str(tmp_path),
-            single_dir=False,
-            c4gh_private_key_file=str(seckey_path),
-        )
-    )
+    ).store_documents(await _documents(str(tmp_path), c4gh_key_file=str(seckey_path)))
 
     async with get_connection() as conn:
         async with conn.cursor() as cur:

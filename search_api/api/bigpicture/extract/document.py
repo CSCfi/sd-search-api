@@ -8,7 +8,7 @@ from typing import Any
 
 import fsspec  # type: ignore
 from lxml.etree import _Element as Element, _ElementTree as ElementTree  # noqa
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from search_api.api.bigpicture.models import BP_DOCUMENT_FIELDS
 from search_api.api.bigpicture.extract.values import (
@@ -53,8 +53,7 @@ from search_api.api.opensearch.models import (
 )
 from search_api.api.qualifiers import QUALIFIERS_FIELD
 from search_api.exceptions import SystemException
-from search_api.utils.crypt import load_c4gh_keys, read_file, resolve_path
-from search_api.utils.dir import list_directories
+from search_api.utils.crypt import read_file, resolve_path
 from search_api.utils.xml import get_xml_value, parse_xml, validate_xml
 
 
@@ -142,7 +141,7 @@ STAINING_XML_SCHEMA_FILE = "BP.staining.xsd"
 OBSERVATION_XML_SCHEMA_FILE = "BP.observation.xsd"
 
 
-def _get_last_modification_time(
+def get_last_modification_time(
     fs: fsspec.AbstractFileSystem, file_paths: list[str]
 ) -> datetime | None:
     """Return the last modification time across the given file paths, or None on error."""
@@ -170,43 +169,38 @@ def _get_last_modification_time(
     return max(mtimes) if mtimes else None
 
 
-def extract_documents(
-    root: str = "/",
-    fs: fsspec.AbstractFileSystem | None = None,
-    single_dir: bool = False,
-    c4gh_private_key_file: str | None = None,
-    c4gh_passphrase: str | None = None,
-) -> Iterator[ExtractedDocument]:
-    """
-    Extract search fields from Bigpicture XML directories under the root path.
+class DatasetFiles(BaseModel):
+    """The metadata files of one dataset directory, plain or Crypt4GH-encrypted."""
 
-    :param root: Root directory or bucket path.
-    :param fs: Optional fsspec filesystem. If None, a local filesystem is used.
-    :param single_dir: If True, treat root as a single dataset directory instead of
-        a parent directory containing multiple dataset directories.
-    :param c4gh_private_key_file: Path to a Crypt4GH private key file (.sec) for
-        decrypting ``.c4gh`` files. If None, only plain files are accepted.
-    :param c4gh_passphrase: Passphrase protecting the private key, or None for an
-        unprotected key.
-    """
-    if fs is None:
-        # Use local filesystem.
-        fs = fsspec.filesystem("file")
+    model_config = ConfigDict(frozen=True)
 
-    keys = (
-        load_c4gh_keys(c4gh_private_key_file, c4gh_passphrase)
-        if c4gh_private_key_file
-        else None
+    dataset: str
+    image: str
+    policy: str
+    sample: str
+    staining: str
+    observation: str | None
+
+    @property
+    def paths(self) -> list[str]:
+        """Get every file path of the dataset."""
+        return [path for path in self.model_dump().values() if path is not None]
+
+
+def dataset_files(fs: fsspec.AbstractFileSystem, root: str) -> DatasetFiles:
+    """Get the metadata files of one dataset directory.
+
+    :param fs: The filesystem.
+    :param root: Dataset directory path.
+    """
+    return DatasetFiles(
+        dataset=resolve_path(fs, f"{root}/{DATASET_XML_FILE}"),
+        image=resolve_path(fs, f"{root}/{IMAGE_XML_FILE}"),
+        policy=resolve_path(fs, f"{root}/{POLICY_XML_FILE}"),
+        sample=resolve_path(fs, f"{root}/{SAMPLE_XML_FILE}"),
+        staining=resolve_path(fs, f"{root}/{STAINING_XML_FILE}"),
+        observation=resolve_path(fs, f"{root}/{OBSERVATION_XML_FILE}", optional=True),
     )
-
-    dirs = [root] if single_dir else list_directories(root=root, fs=fs)
-
-    for d in dirs:
-        try:
-            yield from extract_dataset_documents(d, fs, keys)
-        except Exception:
-            logging.error("Failed to extract fields from dataset %s.", d, exc_info=True)
-            raise
 
 
 def extract_dataset_documents(
@@ -226,30 +220,8 @@ def extract_dataset_documents(
         # Use local filesystem.
         fs = fsspec.filesystem("file")
 
-    dataset_file_path = resolve_path(fs, f"{root}/{DATASET_XML_FILE}")
-    image_file_path = resolve_path(fs, f"{root}/{IMAGE_XML_FILE}")
-    policy_file_path = resolve_path(fs, f"{root}/{POLICY_XML_FILE}")
-    sample_file_path = resolve_path(fs, f"{root}/{SAMPLE_XML_FILE}")
-    staining_file_path = resolve_path(fs, f"{root}/{STAINING_XML_FILE}")
-    observation_file_path = resolve_path(
-        fs, f"{root}/{OBSERVATION_XML_FILE}", optional=True
-    )
-
-    dataset_modified_at = _get_last_modification_time(
-        fs,
-        [
-            file_path
-            for file_path in (
-                dataset_file_path,
-                image_file_path,
-                policy_file_path,
-                sample_file_path,
-                staining_file_path,
-                observation_file_path,
-            )
-            if file_path is not None
-        ],
-    )
+    files = dataset_files(fs, root)
+    modified_at = get_last_modification_time(fs, files.paths)
 
     # Map other ids to image ids.
 
@@ -272,7 +244,7 @@ def extract_dataset_documents(
     # Read dataset XML.
     #
 
-    dataset_xml = parse_xml(read_file(fs, dataset_file_path, keys))
+    dataset_xml = parse_xml(read_file(fs, files.dataset, keys))
     validate_xml(dataset_xml, XML_SCHEMA_DIR, DATASET_XML_SCHEMA_FILE)
     # The dataset is identified by its accession.
     dataset_id = get_xml_value(
@@ -282,7 +254,7 @@ def extract_dataset_documents(
     )
     if dataset_id is None:
         raise ValueError(
-            f"Failed to extract dataset accession from {str(dataset_file_path)}"
+            f"Failed to extract dataset accession from {str(files.dataset)}"
         )
     dataset_short_name = get_xml_value(
         "/DATASET/DESCRIPTION | /DATASET_SET/DATASET/SHORT_NAME",
@@ -300,7 +272,7 @@ def extract_dataset_documents(
     # Read image XML.
     #
 
-    image_xml = parse_xml(read_file(fs, image_file_path, keys))
+    image_xml = parse_xml(read_file(fs, files.image, keys))
     validate_xml(image_xml, XML_SCHEMA_DIR, IMAGE_XML_SCHEMA_FILE)
 
     for xml in image_xml.xpath("/IMAGE | /IMAGE_SET/IMAGE"):
@@ -320,15 +292,15 @@ def extract_dataset_documents(
     # Read policy XML.
     #
 
-    policy_xml = parse_xml(read_file(fs, policy_file_path, keys))
+    policy_xml = parse_xml(read_file(fs, files.policy, keys))
     validate_xml(policy_xml, XML_SCHEMA_DIR, POLICY_XML_SCHEMA_FILE)
-    scope = extract_scope(policy_xml, policy_file_path)
+    scope = extract_scope(policy_xml, files.policy)
     is_clinical = scope == "clinical"
 
     # Read sample XML.
     #
 
-    sample_xml = parse_xml(read_file(fs, sample_file_path, keys))
+    sample_xml = parse_xml(read_file(fs, files.sample, keys))
     validate_xml(sample_xml, XML_SCHEMA_DIR, SAMPLE_XML_SCHEMA_FILE)
 
     for xml in sample_xml.xpath("/SLIDE | /SAMPLE_SET/SLIDE"):
@@ -372,7 +344,7 @@ def extract_dataset_documents(
     # Read staining XML.
     #
 
-    staining_xml = parse_xml(read_file(fs, staining_file_path, keys))
+    staining_xml = parse_xml(read_file(fs, files.staining, keys))
     validate_xml(staining_xml, XML_SCHEMA_DIR, STAINING_XML_SCHEMA_FILE)
 
     for xml in staining_xml.xpath("/STAINING | /STAINING_SET/STAINING"):
@@ -394,7 +366,7 @@ def extract_dataset_documents(
             dataset_short_name=dataset_short_name if is_clinical else None,
             dataset_title=dataset_title,
             dataset_description=dataset_description,
-            dataset_modified_at=dataset_modified_at,
+            dataset_modified_at=modified_at,
         )
 
     # Add specimen fields. A specimen is extracted from exactly one
@@ -430,8 +402,8 @@ def extract_dataset_documents(
 
     # Add observation fields. A clinical dataset carries diagnoses, a
     # non-clinical one findings; the statement type decides which.
-    if observation_file_path is not None:
-        observation_xml = parse_xml(read_file(fs, observation_file_path, keys))
+    if files.observation is not None:
+        observation_xml = parse_xml(read_file(fs, files.observation, keys))
         validate_xml(observation_xml, XML_SCHEMA_DIR, OBSERVATION_XML_SCHEMA_FILE)
 
         for observation in observation_xml.xpath(

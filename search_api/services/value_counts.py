@@ -46,18 +46,18 @@ class ValueCountsUpdater:
         for term in service.filtering_terms:
             if term.type not in _CACHED_VALUE_TYPES:
                 continue
-            qualifier_values = list(self._valid_qualifier_values(term.group))
+            qualifier_values = list(self._valid_qualifier_values(term.nested_group))
             for scope in (None, *term.scopes):
                 for qualifiers in qualifier_values:
                     yield ValueCountsKey.of(term.id, scope, qualifiers)
 
     def _valid_qualifier_values(
-        self, group: str | None
+        self, nested_group: str | None
     ) -> Iterator[dict[str, list[str]]]:
         """Yield every valid qualifier clause."""
         yield {}  # Requests without qualifiers.
         for qualifier in self._beacon_service.filtering_qualifiers:
-            if group is None or group not in qualifier.groups:
+            if nested_group is None or nested_group not in qualifier.groups:
                 continue  # No group or the qualifier does not apply to it.
             # Requests with qualifier values.
             for value in qualifier.values:

@@ -35,7 +35,7 @@ def _document(scope="clinical", qualifiers=None) -> ExtractedDocument:
                 values=[
                     OpenSearchFieldValue(
                         field=OpenSearchField(
-                            id="diagnosis", type="ontology", group="diagnosis"
+                            id="diagnosis", type="ontology", nested_group="diagnosis"
                         ),
                         value=("73211009", None),
                     )

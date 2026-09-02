@@ -34,8 +34,8 @@ class OpenSearchOntologyOrValue(BaseModel):
 class OpenSearchField(BaseModel):
     """A field that is indexed in OpenSearch and searchable.
 
-    The indexed path is ``<group>.<id>`` when ``group`` names a nested container
-    (e.g. ``blocks`` ), or just ``<id>`` for a top-level field.
+    The indexed path is ``<nested_group>.<id>`` when ``nested_group`` names a
+    nested container (e.g. ``blocks`` ), or just ``<id>`` for a top-level field.
     """
 
     # Reject unknown keys so config typos surface as errors.
@@ -45,15 +45,15 @@ class OpenSearchField(BaseModel):
     type: OpenSearchFieldType
 
     # Excluded from responses.
-    group: str | None = Field(default=None, exclude=True)
+    nested_group: str | None = Field(default=None, exclude=True)
     multivalued: bool = Field(default=False, exclude=True)
 
     @property
     def opensearch_field(self) -> str:
-        """The full indexed path: ``<group>.<id>``, or ``id`` at the top level."""
-        return f"{self.group}.{self.id}" if self.group else self.id
+        """The full indexed path: ``<nested_group>.<id>``, or ``id`` at the top level."""
+        return f"{self.nested_group}.{self.id}" if self.nested_group else self.id
 
-    # Indexed path is <group>.<id>, with no dots allowed in <group> or <id>.
+    # Indexed path is <nested_group>.<id>, with no dots allowed in either part.
 
     @field_validator("id")
     @classmethod
@@ -62,11 +62,11 @@ class OpenSearchField(BaseModel):
             raise ValueError(f"Field id '{value}' contains a dot.")
         return value
 
-    @field_validator("group")
+    @field_validator("nested_group")
     @classmethod
-    def validate_group(cls, value: str | None) -> str | None:
+    def validate_nested_group(cls, value: str | None) -> str | None:
         if value is not None and "." in value:
-            raise ValueError(f"Field group '{value}' contains a dot.")
+            raise ValueError(f"Field nested_group '{value}' contains a dot.")
         return value
 
 
@@ -79,7 +79,7 @@ class OpenSearchBeaconFilteringTerm(BeaconFilteringTerm, OpenSearchField):
     @property
     def opensearch_field(self) -> str | OpenSearchOntologyOrValue:  # type: ignore[override]
         # ontologyOrValue terms span two physical fields: the concept-id field
-        # (<group>.<id>) and the free-text field (<group>.<id>_other).
+        # (<nested_group>.<id>) and the free-text field (<nested_group>.<id>_other).
         base = super().opensearch_field
         if self.type == "ontologyOrValue":
             return OpenSearchOntologyOrValue(
@@ -140,7 +140,9 @@ class OpenSearchGroup(BaseModel):
     @model_validator(mode="after")
     def validate_group(self) -> "OpenSearchGroup":
         misplaced = sorted(
-            value.field.id for value in self.values if value.field.group != self.group
+            value.field.id
+            for value in self.values
+            if value.field.nested_group != self.group
         )
         if misplaced:
             raise ValueError(

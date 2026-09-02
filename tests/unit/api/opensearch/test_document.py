@@ -23,7 +23,7 @@ def _value(field_id, type_, group, value, multivalued=False) -> OpenSearchFieldV
         field=OpenSearchField(
             id=field_id,
             type=type_,
-            group=group,
+            nested_group=group,
             multivalued=multivalued,
         ),
         value=value,

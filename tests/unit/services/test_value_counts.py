@@ -62,7 +62,7 @@ def test_value_count_keys_are_every_valid_request():
             continue
         qualifiers: list[dict[str, list[str]]] = [{}]
         for qualifier in BP_FILTERING_QUALIFIERS:
-            if term.group in qualifier.groups:
+            if term.nested_group in qualifier.groups:
                 qualifiers += [{qualifier.id: [value]} for value in qualifier.values]
         for scope in (None, *term.scopes):
             for requested in qualifiers:

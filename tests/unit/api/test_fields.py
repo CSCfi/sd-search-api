@@ -111,7 +111,7 @@ def test_unquoted_numeric_concept_id_is_rejected(tmp_path):
         filtering_terms:
           - id: animal_species
             type: ontology
-            group: blocks
+            nested_group: blocks
             scopes: [biological_being]
             label: "Species"
             description: "Species"
@@ -134,7 +134,7 @@ def test_ontology_or_value_rejects_multivalued(tmp_path):
         filtering_terms:
           - id: fixation_type
             type: ontologyOrValue
-            group: blocks
+            nested_group: blocks
             scopes: [specimen]
             label: "Fixation"
             description: "Fixation"
@@ -168,7 +168,7 @@ def test_field_id_cannot_contain_dot(tmp_path):
         load_fields_config(path)
 
 
-def test_field_group_cannot_contain_dot(tmp_path):
+def test_field_nested_group_cannot_contain_dot(tmp_path):
     path = _write(
         tmp_path,
         """\
@@ -178,10 +178,10 @@ def test_field_group_cannot_contain_dot(tmp_path):
             scopes: [dataset]
             label: "Origin"
             description: "The origin"
-            group: blocks.tissue
+            nested_group: blocks.tissue
         """,
     )
     with pytest.raises(
-        ConfigurationException, match="group 'blocks.tissue' contains a dot"
+        ConfigurationException, match="nested_group 'blocks.tissue' contains a dot"
     ):
         load_fields_config(path)

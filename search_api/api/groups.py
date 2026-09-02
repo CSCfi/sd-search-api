@@ -53,18 +53,18 @@ def validate_filtering_groups(
     filtering_groups: Sequence[BeaconFilteringGroup],
     source: str | Path,
 ) -> None:
-    """Ensure every term's ui_group references a defined filtering group.
+    """Ensure every term's group references a defined filtering group.
 
-    :raises ConfigurationException: if any term references an unknown ui_group.
+    :raises ConfigurationException: if any term references an unknown group.
     """
     group_ids = {group.id for group in filtering_groups}
     unknown = {
-        term.ui_group
+        term.group
         for term in filtering_terms
-        if term.ui_group is not None and term.ui_group not in group_ids
+        if term.group is not None and term.group not in group_ids
     }
     if unknown:
         raise ConfigurationException(
             f"'{source}': filtering terms reference unknown "
-            f"ui_group(s) {sorted(unknown)}; defined groups are {sorted(group_ids)}."
+            f"group(s) {sorted(unknown)}; defined groups are {sorted(group_ids)}."
         )

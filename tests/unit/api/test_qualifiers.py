@@ -27,7 +27,7 @@ def _qualifier(**overrides) -> BeaconFilteringQualifier:
 
 
 def _field(id_: str, group: str | None = None) -> OpenSearchField:
-    return OpenSearchField(id=id_, type="keyword", group=group)
+    return OpenSearchField(id=id_, type="keyword", nested_group=group)
 
 
 _DIAGNOSIS_TERM = _field("diagnosis", "diagnosis")

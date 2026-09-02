@@ -4,12 +4,12 @@ import uuid
 import pytest
 
 from search_api.api.opensearch.models import ExtractedDocument
-from search_api.api.bigpicture.extract import (
+from search_api.api.bigpicture.extract.document import to_opensearch_values
+from search_api.api.bigpicture.extract.models import (
     BigpictureCodeAttributeValue,
     BigpictureFields,
-    BigpictureStainingFields,
     BigpictureSpecimenFields,
-    to_opensearch_values,
+    BigpictureStainingFields,
 )
 from search_api.api.bigpicture.domain import BP_DOMAIN
 from search_api.services.ontology.term_cache import create_term_caches

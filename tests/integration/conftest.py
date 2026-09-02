@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 import pytest_asyncio
 from dotenv import load_dotenv
@@ -17,9 +18,23 @@ from tests.integration.mockauth import MockAuthProvider  # noqa: E402
 
 bp_search = create_search()
 
+_SUBMIT_MARKER = "requires_submit"
 _SNOWSTORM_MARKER = "requires_snowstorm"
 _SKIP_SNOWSTORM_ENV = "SKIP_SNOWSTORM_TESTS"
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
+
+
+def _submit_available() -> bool:
+    """Whether the SD submit API is available."""
+
+    url = os.environ.get("BP_SUBMIT_API_URL", "").strip()
+    if not url:
+        return False
+    try:
+        response = httpx.get(f"{url.rstrip('/')}/sync/submissions", timeout=2.0)
+    except httpx.HTTPError:
+        return False
+    return response.status_code == 401
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -33,26 +48,36 @@ def pytest_configure(config: pytest.Config) -> None:
         f"{_SNOWSTORM_MARKER}: needs a reachable Snowstorm, so it is skipped "
         f"when {_SKIP_SNOWSTORM_ENV} is set.",
     )
+    config.addinivalue_line(
+        "markers",
+        f"{_SUBMIT_MARKER}: needs a reachable SD submit API, so it is "
+        "skipped when BP_SUBMIT_API_URL answers nothing.",
+    )
 
 
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item]
 ) -> None:
-    """Skip the tests needing a live Snowstorm when the environment has none.
+    """Skip the tests whose external service is not available.
 
     GitHub Actions runners can't reach the internal-only Snowstorm route that
     tests/integration/.env points SNOWSTORM_URL at, so CI sets this env var to
     skip those tests there while still running them locally.
     """
-    if os.environ.get(_SKIP_SNOWSTORM_ENV, "").strip().lower() not in _TRUE_VALUES:
-        return
+    skips = {}
+    if os.environ.get(_SKIP_SNOWSTORM_ENV, "").strip().lower() in _TRUE_VALUES:
+        skips[_SNOWSTORM_MARKER] = pytest.mark.skip(
+            reason=f"Requires a live Snowstorm, and {_SKIP_SNOWSTORM_ENV} is set"
+        )
+    if not _submit_available():
+        skips[_SUBMIT_MARKER] = pytest.mark.skip(
+            reason="Requires a reachable Bigpicture submit API"
+        )
 
-    skip_snowstorm = pytest.mark.skip(
-        reason=f"Requires a live Snowstorm, and {_SKIP_SNOWSTORM_ENV} is set"
-    )
     for item in items:
-        if item.get_closest_marker(_SNOWSTORM_MARKER) is not None:
-            item.add_marker(skip_snowstorm)
+        for marker, skip in skips.items():
+            if item.get_closest_marker(marker) is not None:
+                item.add_marker(skip)
 
 
 @pytest.fixture(scope="session", autouse=True)

@@ -11,12 +11,13 @@ filtering_groups:
   - id: staining
     label: "Staining"
     description: ""
-    border: true
   - id: clinical
     label: "Clinical"
     description: ""
-    border: true
   - id: non_clinical
     label: "Non-clinical"
     description: ""
-    border: true
+  - id: finding_details
+    label: "Finding details"
+    description: ""
+    parent: non_clinical

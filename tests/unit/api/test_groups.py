@@ -4,7 +4,11 @@ from search_api.api.beacon.models import BeaconFilteringGroup, BeaconFilteringTe
 from search_api.api.bigpicture.models import (
     _GROUPS_CONFIG_PATH as _BP_GROUPS_CONFIG_PATH,
 )
-from search_api.api.groups import load_groups_config, validate_filtering_groups
+from search_api.api.groups import (
+    load_groups_config,
+    validate_filtering_groups,
+    validate_filtering_groups_hierarchy,
+)
 from search_api.exceptions import ConfigurationException
 
 
@@ -19,8 +23,8 @@ def _term(field_id: str, group: str | None) -> BeaconFilteringTerm:
     )
 
 
-def _group(group_id: str) -> BeaconFilteringGroup:
-    return BeaconFilteringGroup(id=group_id, label=group_id)
+def _group(group_id: str, parent: str | None = None) -> BeaconFilteringGroup:
+    return BeaconFilteringGroup(id=group_id, label=group_id, parent=parent)
 
 
 def test_all_filtering_groups_defined():
@@ -58,17 +62,46 @@ def test_multiple_unknown_filtering_groups_reported():
     assert "'y'" in message
 
 
-def test_border_defaults_to_false():
-    """Only a group that asks for one gets a border, so config alone adds it."""
-    assert _group("description").border is False
+def test_parent_defaults_to_none():
+    """Only a group that asks for one nests, so config alone adds a parent."""
+    assert _group("description").parent is None
 
 
-def test_bigpicture_groups_with_border():
-    """A canary: it is the UI that draws them, so a change here is a visual change."""
+def test_group_hierarchy_valid():
+    groups = [_group("non_clinical"), _group("finding_details", "non_clinical")]
+    # Should not raise.
+    validate_filtering_groups_hierarchy(groups, "groups.yaml")
+
+
+def test_group_hierarchy_unknown_parent():
+    groups = [_group("finding_details", "missing")]
+    with pytest.raises(ConfigurationException) as exc:
+        validate_filtering_groups_hierarchy(groups, "groups.yaml")
+    message = str(exc.value)
+    assert "groups.yaml" in message
+    assert "missing" in message
+    assert "finding_details" in message
+
+
+def test_group_hierarchy_self_parent():
+    groups = [_group("a", "a")]
+    with pytest.raises(ConfigurationException) as exc:
+        validate_filtering_groups_hierarchy(groups, "groups.yaml")
+    assert "circular" in str(exc.value)
+
+
+def test_group_hierarchy_circular():
+    groups = [_group("a", "b"), _group("b", "c"), _group("c", "a")]
+    with pytest.raises(ConfigurationException) as exc:
+        validate_filtering_groups_hierarchy(groups, "groups.yaml")
+    assert "circular" in str(exc.value)
+
+
+def test_group_hierarchy_bigpicture():
     groups = load_groups_config(_BP_GROUPS_CONFIG_PATH).filtering_groups
+    # Should not raise.
+    validate_filtering_groups_hierarchy(groups, _BP_GROUPS_CONFIG_PATH)
 
-    assert {group.id for group in groups if group.border} == {
-        "staining",
-        "clinical",
-        "non_clinical",
+    assert {group.id: group.parent for group in groups if group.parent} == {
+        "finding_details": "non_clinical",
     }

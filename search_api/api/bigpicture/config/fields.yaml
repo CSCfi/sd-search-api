@@ -207,7 +207,7 @@ filtering_terms:
     ontologyRestriction:
       concept_ids: [ "C90000" ]  # SEND Severity (SEV)
       include_descendants: true
-    group: "non_clinical"
+    group: "finding_details"
 
   - id: finding_chronicity
     type: ontology
@@ -220,7 +220,7 @@ filtering_terms:
     ontologyRestriction:
       concept_ids: [ "C120529" ]  # Chronicity (CHRNCTY)
       include_descendants: true
-    group: "non_clinical"
+    group: "finding_details"
 
   - id: finding_distribution
     type: ontology
@@ -233,7 +233,7 @@ filtering_terms:
     ontologyRestriction:
       concept_ids: [ "C120530" ]  # Distribution (DSTRBN)
       include_descendants: true
-    group: "non_clinical"
+    group: "finding_details"
 
   - id: finding_result_category
     type: ontology
@@ -246,7 +246,7 @@ filtering_terms:
     ontologyRestriction:
       concept_ids: [ "C90017" ]  # Microscopic Histopathology Result Category (MIRESCAT)
       include_descendants: true
-    group: "non_clinical"
+    group: "finding_details"
 
   - id: control_terminology
     type: controlledValue

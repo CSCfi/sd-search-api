@@ -17,7 +17,11 @@ from search_api.api.beacon.models import (
     BeaconInfo,
 )
 from search_api.api.fields import load_fields_config
-from search_api.api.groups import load_groups_config, validate_filtering_groups
+from search_api.api.groups import (
+    load_groups_config,
+    validate_filtering_groups,
+    validate_filtering_groups_hierarchy,
+)
 from search_api.api.qualifiers import (
     load_qualifiers_config,
     validate_filtering_qualifiers,
@@ -106,6 +110,7 @@ BP_FILTERING_QUALIFIERS: list[BeaconFilteringQualifier] = load_qualifiers_config
 
 
 validate_filtering_groups(BP_FILTERING_TERMS, BP_FILTERING_GROUPS, _FIELDS_CONFIG_PATH)
+validate_filtering_groups_hierarchy(BP_FILTERING_GROUPS, _GROUPS_CONFIG_PATH)
 validate_filtering_scopes(BP_FILTERING_TERMS, BP_FILTERING_SCOPES, _FIELDS_CONFIG_PATH)
 validate_filtering_qualifiers(
     BP_FILTERING_TERMS,

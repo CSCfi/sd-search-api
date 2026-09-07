@@ -2,6 +2,7 @@
 
 import json
 from datetime import datetime, timezone
+from itertools import count
 
 import httpx
 import pytest
@@ -14,7 +15,7 @@ from search_api.services.fetch import (
 )
 
 SD_SUBMIT_API_URL = "https://submitter.example/api"
-SD_SUBMIT_API_KEY = "sync_api_key"
+SD_SUBMIT_TOKEN = "sync_token"
 
 SINCE = datetime(2026, 1, 1, tzinfo=timezone.utc)
 UNTIL = datetime(2026, 2, 1, tzinfo=timezone.utc)
@@ -55,8 +56,13 @@ def _mock_sd_submit_client(
         requests.append(request)
         return response
 
+    # Signed per request.
+    tokens = count()
+
     client = SdSubmitFetchClient(
-        SD_SUBMIT_API_URL, SD_SUBMIT_API_KEY, transport=httpx.MockTransport(handler)
+        SD_SUBMIT_API_URL,
+        lambda: f"{SD_SUBMIT_TOKEN}-{next(tokens)}",
+        transport=httpx.MockTransport(handler),
     )
     return client, requests
 
@@ -74,7 +80,23 @@ async def test_sd_submit_get_published_submissions() -> None:
 
     assert submissions == published
     assert requests[0].url.path.endswith(_SD_SUBMIT_SYNC_PATH)
-    assert requests[0].headers["authorization"] == f"Bearer {SD_SUBMIT_API_KEY}"
+    assert requests[0].headers["authorization"] == f"Bearer {SD_SUBMIT_TOKEN}-0"
+
+
+@pytest.mark.asyncio
+async def test_sd_submit_token_signed_per_request() -> None:
+    """A JWT token is created and signed for each request."""
+
+    client, requests = _mock_sd_submit_client(_mock_submissions_response())
+
+    async with client:
+        await client.get_published_submissions()
+        await client.get_published_submissions()
+
+    assert [request.headers["authorization"] for request in requests] == [
+        f"Bearer {SD_SUBMIT_TOKEN}-0",
+        f"Bearer {SD_SUBMIT_TOKEN}-1",
+    ]
 
 
 @pytest.mark.parametrize(

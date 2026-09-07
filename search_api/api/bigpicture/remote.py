@@ -5,6 +5,7 @@ import logging
 import zipfile
 from collections.abc import AsyncIterator, Iterator
 from datetime import datetime, timedelta
+from functools import partial
 from typing import override
 
 from fsspec.implementations.zip import ZipFileSystem  # type: ignore
@@ -13,8 +14,12 @@ from search_api.api.bigpicture.conf import bigpicture_remote_config
 from search_api.api.bigpicture.extract.document import extract_dataset_documents
 from search_api.api.opensearch.models import ExtractedDocument
 from search_api.exceptions import UserException
-from search_api.services.fetch import DocumentSource, SourceDocuments
-from search_api.services.fetch import SdSubmitFetchClient
+from search_api.services.fetch import (
+    DocumentSource,
+    SdSubmitFetchClient,
+    SourceDocuments,
+)
+from search_api.utils.token import sign_service_token
 
 
 def _extract_archive(archive: bytes) -> Iterator[ExtractedDocument]:
@@ -67,9 +72,13 @@ class BigpictureRemoteSource(DocumentSource):
         )
 
         config = bigpicture_remote_config()
-        async with SdSubmitFetchClient(
-            config.BP_SUBMIT_API_URL, config.BP_SUBMIT_API_KEY
-        ) as client:
+        token = partial(
+            sign_service_token,
+            private_key=config.BP_SUBMIT_PRIVATE_KEY,
+            issuer=config.BP_SUBMIT_ISSUER,
+            audience=config.BP_SUBMIT_AUDIENCE,
+        )
+        async with SdSubmitFetchClient(config.BP_SUBMIT_API_URL, token) as client:
             submissions = await client.get_published_submissions(published_since)
             logging.info(
                 "%d submission(s) published %s.",

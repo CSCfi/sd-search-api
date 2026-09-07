@@ -101,7 +101,7 @@ search_api/
 │   │                   # document.py document_log.py terms_cache.py ontology_cache.py
 │   │                   # load.py — the load history, how far loading has got
 │   └── schema/         # create.sql drop.sql
-├── utils/              # stateless helpers: crypt.py dir.py xml.py
+├── utils/              # stateless helpers: crypt.py dir.py token.py xml.py
 ├── ai/  conf.py  exceptions.py  main.py
 ```
 
@@ -192,9 +192,9 @@ The two implementations:
   Crypt4GH key and passphrase come from `BigpictureLocalConfiguration`, since a passphrase on a command
   line lands in the process list and the shell history.
 - **`BigpictureRemoteSource`** (`api/bigpicture/remote.py`) yields one unit per published submission,
-  reading `BP_SUBMIT_API_URL` / `BP_SUBMIT_API_KEY` from `BigpictureRemoteConfiguration` per fetch, so no
-  other command needs those settings and the generic `conf.py` stays free of deployment-specific
-  configuration.
+  reading `BigpictureRemoteConfiguration` per fetch, so no other command needs those settings and the
+  generic `conf.py` stays free of deployment-specific configuration. It binds the configured signing
+  material into the token callable the client signs each request with (see *Authenticating a fetch*).
 
 **`modified_at` comes from the source, not from the documents.** A fetched document has no file
 modification time worth having — a zip entry's `date_time` is when the submitter built the archive,
@@ -228,6 +228,30 @@ that check and still is no zip is a `UserException` from `_extract_archive` inst
 nothing points at the submitter. The client owns its `httpx.AsyncClient` through
 `__aenter__`/`__aexit__` only, so one built outside its context manager raises rather than leaking a
 connection pool.
+
+### Authenticating a fetch (`utils/token.py`)
+
+A fetch **signs a token per request** rather than sending a token both sides hold. The private key
+stays here, the submit API holds the public key of the same pair, so it can verify a request came
+from this service but cannot issue one itself — with a shared secret its configuration is enough to
+impersonate us. This is `private_key_jwt` (RFC 7523): `iss` and `sub` name this service, `aud` names
+the API the token is for, `exp` is 60 seconds out, and `jti` is unique per token.
+
+`aud` is the claim that does the work. Without it a token is a credential at every service that
+trusts the key, so one signed for a staging submitter would drive production, and one recorded in a
+log anywhere would be replayable here. `jti` is issued for a receiver that remembers the ids it has
+seen; nothing does yet, and a 60-second token leaves little to replay.
+
+**No `kid` header, so no key id to configure.** A receiver replacing a key holds both public keys
+for the window and verifies against each until one answers, which costs one failed verification of
+microseconds. `kid` would only spare it that, and a key id both sides must agree on is a setting
+that can disagree.
+
+`sign_service_token` (`utils/token.py`) is generic and stateless — it takes the key, the claims and a
+lifetime — so it sits with `crypt.py` rather than with a deployment. `SdSubmitFetchClient` takes a
+`Callable[[], str]`, not a token, and calls it inside `_request`: a token signed once in
+`__aenter__` would expire during a long fetch, and it keeps the HTTP client free of the signing. The
+deployment binds the two together, since the key is the deployment's own configuration.
 
 **Both ends require a UTC offset** on the period. The submitter resolves a date without one in the
 timezone of its own database, which shifts the period silently and drops submissions from a sync the
@@ -884,13 +908,19 @@ endpoints unmounted when unset), plus `OIDC_SCOPE`, `OIDC_SECURE_COOKIE=true`, `
 `OIDC_*` client settings and `JWT_KEY` (base64, must decode to ≥32 bytes) have no defaults.
 
 **A deployment's own settings live with the deployment**, not here, and **one class per source**:
-`api/bigpicture/conf.py` declares `BigpictureRemoteConfiguration` (`BP_SUBMIT_API_URL` and
-`BP_SUBMIT_API_KEY`, both required) and `BigpictureLocalConfiguration` (`BP_C4GH_KEY_FILE` and
+`api/bigpicture/conf.py` declares `BigpictureRemoteConfiguration` (`BP_SUBMIT_API_URL`,
+`BP_SUBMIT_PRIVATE_KEY` and `BP_SUBMIT_AUDIENCE` required, `BP_SUBMIT_ISSUER=sd-search-api`
+defaulted) and `BigpictureLocalConfiguration` (`BP_C4GH_KEY_FILE` and
 `BP_C4GH_PASSPHRASE`, both optional). Split because a `BaseSettings` validates every field it
 declares: bundled, a `load <dir>` would demand submit API settings it never uses. The URL carries the submitter's
 API prefix (`http://localhost:5431/api`), because the submitter mounts its sync endpoints outside its
-versioned API, and the key must equal that submitter's own `SYNC_API_KEY`.
-A working set is in `tests/integration/.env`.
+versioned API.
+
+`BP_SUBMIT_PRIVATE_KEY` is a base64-encoded PEM EC private key, and its validator **parses** it as
+well as decoding it, so a key that cannot sign is reported before a fetch starts rather than by the
+first request it makes. `BP_SUBMIT_AUDIENCE` must be the audience the submitter expects.
+A working set is in `tests/integration/.env`, whose comment carries the public key of the pair it
+signs with — the value the submitter of that deployment must be configured with.
 
 ## Tests
 
@@ -899,10 +929,11 @@ tests/            # mirrors the search_api/ package layout
 ├── unit/          # run by tox; no external services needed
 │   ├── api/{admin,auth,beacon,bigpicture,opensearch}/
 │   ├── api/bigpicture/        # incl. test_local.py + test_remote.py (its two sources)
+│   │                          # and test_conf.py (the signing key is parsed, not just decoded)
 │   ├── services/{ontology/,test_auth.py,test_fetch.py,test_load.py,
 │   │              test_poller.py,test_session.py,test_validate.py,
 │   │              test_value_counts.py}   # the client; the sources are under api/
-│   └── utils/                 # crypt, dir, xml
+│   └── utils/                 # crypt, dir, token, xml
 ├── integration/   # require Postgres/OpenSearch (route tests hit a running server)
 │   ├── api/bigpicture/        # endpoints incl. AI (test_routes_ai.py, @skip — needs Ollama),
 │   │                          # extract + load against Postgres, and test_remote.py
@@ -910,18 +941,27 @@ tests/            # mirrors the search_api/ package layout
 │   ├── database/              # one module per table, plus test_repository.py (the pool)
 │   ├── scripts/               # test_admin.py (ontology updates) + bigpicture/test_admin.py
 │   └── services/{ontology/,test_load.py,test_poller.py,test_sync.py}
+├── performance/   # locust load tests
+├── utils/         # test helpers (generate_data.py, keys.py)
 └── files/bigpicture/xml/dataset_{clinical,non_clinical}/METADATA/   # XML fixtures
 ```
 
 A test needing a running Bigpicture submit API carries `@pytest.mark.requires_submit`, and
 `tests/integration/conftest.py` skips those when `BP_SUBMIT_API_URL` answers nothing or answers
 `404` — probed rather than opted out of, since nothing but a submitter of one's own makes them
-runnable. A `401` is the healthy answer: the route is there and wants the token, while a `404` is a
-submitter with no `SYNC_API_KEY` of its own. A submitter that has published nothing skips them too,
+runnable. A `404` is a submitter with no `SYNC_PUBLIC_KEY` of its own, which mounts no sync
+endpoints at all. **Any other answer counts as available, deliberately.** Requiring the `401` an
+unauthenticated request should get would have skipped the whole module against a submitter that had
+stopped authenticating — a green run for the one failure the tests most need to catch. That answer
+is asserted by `test_no_token_is_rejected` instead, which is the only test here that sends no token:
+without it the module would pass against an open submitter, since every other test carries one.
+A submitter that has published nothing skips them too,
 through the `published_submissions` fixture: nothing on this side can stage a submission, since the
-sync key authorizes reading only. They cover what the mock-transport unit tests
-cannot: that the submitter answers the shape the client parses, honours `publishedStart`, and serves
-archives the extractor reads.
+sync token authorizes reading only. They cover what the mock-transport unit tests
+cannot: that the submitter answers the shape the client parses, honours `publishedStart`, serves
+archives the extractor reads, and verifies the token as this side signs it — `test_token_is_rejected`
+covering a token signed by another key, issued for another audience and issued by another issuer,
+each of which the submitter must refuse while the configured one works.
 
 A test needing a reachable Snowstorm carries `@pytest.mark.requires_snowstorm`, and
 `SKIP_SNOWSTORM_TESTS=true` skips those — set in CI, which cannot reach the internal-only Snowstorm

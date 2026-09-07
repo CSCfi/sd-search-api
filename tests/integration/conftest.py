@@ -34,7 +34,8 @@ def _submit_available() -> bool:
         response = httpx.get(f"{url.rstrip('/')}/sync/submissions", timeout=2.0)
     except httpx.HTTPError:
         return False
-    return response.status_code == 401
+    # 404 is returned when sync endpoints are not mounted.
+    return response.status_code != 404
 
 
 def pytest_configure(config: pytest.Config) -> None:

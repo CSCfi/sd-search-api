@@ -1,24 +1,50 @@
 """Tests for fetching Bigpicture submissions from a SD submit API."""
 
 from datetime import timedelta
+from functools import partial
 
+import httpx
 import pytest
 import pytest_asyncio
 
-from search_api.api.bigpicture.conf import bigpicture_remote_config
+from search_api.api.bigpicture.conf import (
+    BigpictureRemoteConfiguration,
+    bigpicture_remote_config,
+)
 from search_api.api.bigpicture.remote import BigpictureRemoteSource, _extract_archive
 from search_api.exceptions import SystemException
-from search_api.services.fetch import SdSubmitFetchClient, SdSubmitPublishedSubmission
+from search_api.services.fetch import (
+    _SD_SUBMIT_SYNC_PATH,
+    SdSubmitFetchClient,
+    SdSubmitPublishedSubmission,
+)
+from search_api.utils.token import sign_service_token
+from tests.utils.keys import pem_key_pair
 
 pytestmark = pytest.mark.requires_submit
+
+
+def _token(config: BigpictureRemoteConfiguration, **overrides: str):
+    """
+    Sign the JWT service token of one client.
+
+    :param config: The configuration the token is signed from.
+    :param overrides: What to sign instead of the configured key, issuer or audience.
+    :return: The callable signing one token per request.
+    """
+
+    signed = {
+        "private_key": config.BP_SUBMIT_PRIVATE_KEY,
+        "issuer": config.BP_SUBMIT_ISSUER,
+        "audience": config.BP_SUBMIT_AUDIENCE,
+    }
+    return partial(sign_service_token, **(signed | overrides))
 
 
 @pytest_asyncio.fixture
 async def sd_submit_api():
     config = bigpicture_remote_config()
-    async with SdSubmitFetchClient(
-        config.BP_SUBMIT_API_URL, config.BP_SUBMIT_API_KEY
-    ) as client:
+    async with SdSubmitFetchClient(config.BP_SUBMIT_API_URL, _token(config)) as client:
         yield client
 
 
@@ -78,11 +104,32 @@ async def test_get_submission_objects(sd_submit_api, published_submissions):
     assert all(document.id for document in documents)
 
 
-@pytest.mark.asyncio
-async def test_invalid_api_key():
+def test_no_token():
     config = bigpicture_remote_config()
+    url = f"{config.BP_SUBMIT_API_URL.rstrip('/')}{_SD_SUBMIT_SYNC_PATH}"
+
+    assert httpx.get(url).status_code == 401
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"private_key": pem_key_pair()[0]},
+        {"audience": "https://elsewhere.example/api/sync"},
+        {"issuer": "someone-else"},
+    ],
+    ids=[
+        "signed by another key",
+        "issued for another audience",
+        "issued by another issuer",
+    ],
+)
+@pytest.mark.asyncio
+async def test_token_rejected(overrides):
+    config = bigpicture_remote_config()
+
     async with SdSubmitFetchClient(
-        config.BP_SUBMIT_API_URL, "not the sync api key"
+        config.BP_SUBMIT_API_URL, _token(config, **overrides)
     ) as client:
         with pytest.raises(SystemException, match="401"):
             await client.get_published_submissions()

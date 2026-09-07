@@ -11,6 +11,7 @@ from search_api.api.bigpicture.extract.document import extract_dataset_documents
 from search_api.api.bigpicture.remote import BigpictureRemoteSource, _extract_archive
 from search_api.exceptions import UserException
 from search_api.services.fetch import SdSubmitFetchClient, SdSubmitPublishedSubmission
+from tests.utils.keys import base64_pem_private_key
 
 CLINICAL_DATASET_DIR = (
     Path(__file__).parent.parent.parent.parent
@@ -72,7 +73,8 @@ def mock_sd_submit_api(monkeypatch):
         return _clinical_dataset_archive()
 
     monkeypatch.setenv("BP_SUBMIT_API_URL", "test")
-    monkeypatch.setenv("BP_SUBMIT_API_KEY", "test")
+    monkeypatch.setenv("BP_SUBMIT_PRIVATE_KEY", base64_pem_private_key())
+    monkeypatch.setenv("BP_SUBMIT_AUDIENCE", "test")
     monkeypatch.setattr(
         SdSubmitFetchClient, "get_published_submissions", get_published_submissions
     )

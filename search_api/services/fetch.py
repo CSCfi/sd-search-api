@@ -5,7 +5,7 @@ Includes an implementation that uses the SD Submit API sync API.
 
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import TracebackType
@@ -77,18 +77,18 @@ class SdSubmitFetchClient:
     def __init__(
         self,
         url: str,
-        api_key: str,
+        token: Callable[[], str],
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         """
         Fetches published submissions from the SD submit API.
 
         :param url: The SD submit API base URL.
-        :param api_key: The bearer token of the sync service account.
+        :param token: Callback that returns the JWT bearer token authenticating one request.
         :param transport: The HTTP transport, for answering the requests in tests.
         """
         self._url = url.rstrip("/")
-        self._api_key = api_key
+        self._token = token
         self._transport = transport
         # Managed by the context manager.
         self._client: httpx.AsyncClient | None = None
@@ -96,7 +96,6 @@ class SdSubmitFetchClient:
     async def __aenter__(self) -> "SdSubmitFetchClient":
         """Open the HTTP client."""
         self._client = httpx.AsyncClient(
-            headers={"Authorization": f"Bearer {self._api_key}"},
             timeout=_SD_SUBMIT_TIMEOUT,
             transport=self._transport,
         )
@@ -195,8 +194,11 @@ class SdSubmitFetchClient:
             )
 
         url = f"{self._url}{path}"
+        headers = {"Authorization": f"Bearer {self._token()}"}
         try:
-            response = await self._client.request(method, url, params=params)
+            response = await self._client.request(
+                method, url, params=params, headers=headers
+            )
         except httpx.HTTPError as ex:
             raise SystemException(f"SD submit API request to '{url}' failed.") from ex
 

@@ -6,6 +6,7 @@ import jwt
 import pytest
 
 from search_api.utils.token import (
+    public_key_jwk,
     SERVICE_TOKEN_ALGORITHM,
     SERVICE_TOKEN_LIFETIME,
     sign_service_token,
@@ -105,3 +106,13 @@ def test_sign_service_token_expires() -> None:
 
     with pytest.raises(jwt.ExpiredSignatureError):
         _verify(token, public_key)
+
+
+def test_public_key_id_identifies_the_key() -> None:
+    """The key id is derived from the key, so the same key has the same id."""
+
+    private_key, _ = pem_key_pair()
+    other_key, _ = pem_key_pair()
+
+    assert public_key_jwk(private_key)["kid"] == public_key_jwk(private_key)["kid"]
+    assert public_key_jwk(private_key)["kid"] != public_key_jwk(other_key)["kid"]

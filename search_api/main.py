@@ -6,6 +6,7 @@ from search_api.api.admin.routes import router as admin_router
 from search_api.api.auth.routes import router as auth_router
 from search_api.api.beacon.routes import make_beacon_router
 from search_api.api.deployments import get_domain
+from search_api.api.jwk.routes import make_jwk_router
 from search_api.api.domain import make_lifespan
 from search_api.api.exception_handlers import register_exception_handlers
 from search_api.api.middlewares import AuthMiddleware
@@ -32,6 +33,7 @@ app.add_middleware(AuthMiddleware)
 
 app.include_router(make_beacon_router(_domain))
 app.include_router(auth_router)
+app.include_router(make_jwk_router(_domain.public_jwks))
 register_exception_handlers(app)
 
 if admin_config().ADMIN_KEY:

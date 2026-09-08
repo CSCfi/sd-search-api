@@ -2,8 +2,10 @@
 
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import jwt
+from joserfc.jwk import ECKey
 
 # A JWT token is created for each request, so only a short lifetime is required.
 SERVICE_TOKEN_LIFETIME = timedelta(seconds=60)
@@ -44,3 +46,19 @@ def sign_service_token(
         "jti": uuid.uuid4().hex,
     }
     return jwt.encode(claims, private_key, algorithm=SERVICE_TOKEN_ALGORITHM)
+
+
+def public_key_jwk(private_key: str) -> dict[str, Any]:
+    """
+    Derive the public key of a signing key as a JWK.
+
+    :param private_key: The PEM-encoded EC private key the tokens are signed with.
+    :raises ValueError: if the key is not an EC private key.
+    :return: The public key as a JWK, named by its RFC 7638 thumbprint.
+    """
+
+    key = ECKey.import_key(private_key, {"alg": SERVICE_TOKEN_ALGORITHM, "use": "sig"})
+
+    # Only the public key is published.
+    jwk: dict[str, Any] = key.as_dict(private=False)
+    return {**jwk, "kid": key.thumbprint()}

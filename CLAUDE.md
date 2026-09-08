@@ -76,7 +76,7 @@ search) is currently the only deployment.
 ```
 search_api/
 ├── api/                # HTTP layer + per-deployment packages
-│   ├── {admin,auth,beacon,opensearch}/      # generic routers and services
+│   ├── {admin,auth,beacon,jwk,opensearch}/  # generic routers and services
 │   └── bigpicture/     # everything Bigpicture-specific lives here, nowhere else:
 │       ├── domain.py models.py ai.py opensearch.py conf.py
 │       ├── local.py remote.py      # its two DocumentSources
@@ -246,6 +246,17 @@ seen; nothing does yet, and a 60-second token leaves little to replay.
 for the window and verifies against each until one answers, which costs one failed verification of
 microseconds. `kid` would only spare it that, and a key id both sides must agree on is a setting
 that can disagree.
+
+**`GET /jwk` publishes the public key** (`api/jwk/routes.py`), as a JWK Set, so the service being
+called can be configured with it rather than someone passing it along by hand — the shape REMS
+serves at its own `/api/jwk`. The key is derived from the configured private key by
+`public_key_jwk`, so there is no second setting to disagree with the first, and its `kid` is the
+RFC 7638 thumbprint, which names the key without anything having to agree on a name for it. The
+path is in `PUBLIC_PATHS`: a public key verifies a signature and can do nothing else. `Domain`
+carries `public_jwks`, since which key a deployment signs with is the deployment's own business;
+a deployment that signs nothing declares none and the route is mounted but answers that it signs
+no requests. Publishing the key means the **server** needs the signing key configured, not only
+the `fetch` command that uses it.
 
 `sign_service_token` (`utils/token.py`) is generic and stateless — it takes the key, the claims and a
 lifetime — so it sits with `crypt.py` rather than with a deployment. `SdSubmitFetchClient` takes a

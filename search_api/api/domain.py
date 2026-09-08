@@ -69,6 +69,8 @@ class Domain:
     replace_concepts: bool = True
     local_source: DocumentSource | None = None
     remote_source: DocumentSource | None = None
+    # Public keys for verifying signed JWTs.
+    public_jwks: Callable[[], list[dict[str, Any]]] | None = None
 
     @property
     def nested_groups(self) -> set[str]:

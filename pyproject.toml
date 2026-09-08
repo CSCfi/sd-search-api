@@ -32,6 +32,7 @@ dependencies = [
     "crypt4gh>=1.7",
     "pyyaml>=6.0",
     "types-pyyaml>=6.0",
+    "joserfc>=1.4.1",
     "pyjwt[crypto]>=2.13.0",
     "idpyoidc>=5.0.0",
     "python-stdnum>=2.2",

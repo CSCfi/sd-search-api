@@ -1,6 +1,7 @@
 """The Bigpicture deployment as a Domain."""
 
 from pathlib import Path
+from typing import Any
 
 from search_api.api.bigpicture.models import (
     BP_BEACON_ID,
@@ -34,6 +35,9 @@ from search_api.api.bigpicture.extract import extract_documents
 from search_api.api.bigpicture.extract.models import validate_observation_types
 from search_api.api.bigpicture.local import BigpictureLocalSource
 from search_api.api.bigpicture.remote import BigpictureRemoteSource
+from search_api.api.bigpicture.conf import bigpicture_remote_config
+from search_api.utils.token import public_key_jwk
+from pydantic import ValidationError
 
 # Validate fields.yaml observation_type configuration against extract
 # models.
@@ -42,6 +46,15 @@ validate_observation_types(BP_FILTERING_TERM_BY_ID["observation_type"])
 
 BP_LOCAL_SOURCE = BigpictureLocalSource()
 BP_REMOTE_SOURCE = BigpictureRemoteSource()
+
+
+def bp_public_jwks() -> list[dict[str, Any]]:
+    try:
+        config = bigpicture_remote_config()
+    except ValidationError:
+        return []
+    return [public_key_jwk(config.BP_SUBMIT_PRIVATE_KEY)]
+
 
 BP_DOMAIN = Domain(
     name=BP_DOMAIN_NAME,
@@ -90,4 +103,5 @@ BP_DOMAIN = Domain(
     schemas=BP_SCHEMAS,
     local_source=BP_LOCAL_SOURCE,
     remote_source=BP_REMOTE_SOURCE,
+    public_jwks=bp_public_jwks,
 )

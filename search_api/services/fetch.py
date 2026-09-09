@@ -60,7 +60,7 @@ def _validate_utc_offset(name: str, value: datetime | None) -> None:
         raise UserException(f"The '{name}' date must specify a UTC offset.")
 
 
-_SD_SUBMIT_SYNC_PATH = "/sync/submissions"
+_SD_SUBMIT_SYNC_PATH = "/sync"
 _SD_SUBMIT_TIMEOUT = 300.0
 _SD_SUBMIT_ARCHIVE_MEDIA_TYPE = "application/zip"
 

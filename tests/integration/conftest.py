@@ -31,7 +31,7 @@ def _submit_available() -> bool:
     if not url:
         return False
     try:
-        response = httpx.get(f"{url.rstrip('/')}/sync/submissions", timeout=2.0)
+        response = httpx.get(f"{url.rstrip('/')}/sync", timeout=2.0)
     except httpx.HTTPError:
         return False
     # 404 is returned when sync endpoints are not mounted.

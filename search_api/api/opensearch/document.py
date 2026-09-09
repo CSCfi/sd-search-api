@@ -6,7 +6,6 @@ from search_api.api.opensearch.models import (
     OpenSearchGroup,
 )
 from search_api.api.opensearch.clauses import iso8601_duration_to_days
-from search_api.api.qualifiers import QUALIFIERS_FIELD, encode_qualifier_value
 from search_api.api.scopes import SCOPE_FIELD
 
 
@@ -47,20 +46,10 @@ def _add_field_value(target: dict[str, Any], value: OpenSearchFieldValue) -> Non
 
 
 def _build_group_item(group: OpenSearchGroup) -> dict[str, Any]:
-    """Build one item of a nested group.
-
-    The item's qualifiers go into one multivalued field, each value carrying its
-    qualifier id, sorted so a document's payload is deterministic.
-    """
+    """Build one item of a nested group."""
     item: dict[str, Any] = {}
     for value in group.values:
         _add_field_value(item, value)
-    qualifiers = sorted(
-        encode_qualifier_value(qualifier_id, qualifier_value)
-        for qualifier_id, qualifier_value in group.qualifiers.items()
-    )
-    if qualifiers:
-        item[QUALIFIERS_FIELD] = qualifiers
     return item
 
 
@@ -72,8 +61,7 @@ def build_document(document: ExtractedDocument) -> dict[str, Any]:
 
         {"scope": "clinical",
          "image_id": "img-1",
-         "diagnosis": [{"diagnosis": "73211009",
-                        "qualifiers": ["observation:confirmed"]}]}
+         "observation": [{"diagnosis": "73211009", "observation_type": "confirmed"}]}
     """
     result: dict[str, Any] = {}
 
@@ -85,11 +73,9 @@ def build_document(document: ExtractedDocument) -> dict[str, Any]:
     for value in document.values:
         _add_field_value(result, value)
 
-    # A nested group is skipped if it holds nothing but its qualifiers,
-    # which _build_group_item always write.
     for group in document.groups:
         item = _build_group_item(group)
-        if any(key != QUALIFIERS_FIELD for key in item):
+        if item:
             result.setdefault(group.group, []).append(item)
 
     return result

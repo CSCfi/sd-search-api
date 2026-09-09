@@ -10,9 +10,9 @@ from search_api.api.bigpicture.models import (
     BP_BEACON_NAME,
     BP_DOMAIN_NAME,
     BP_FILTERING_GROUPS,
-    BP_FILTERING_QUALIFIERS,
     BP_FILTERING_SCOPES,
     BP_FILTERING_TERMS,
+    BP_FILTERING_TERM_BY_ID,
     BP_NON_FILTERING_FIELDS,
     BP_OPENSEARCH_INDEX,
     BP_SCHEMAS,
@@ -34,6 +34,11 @@ from search_api.api.domain import BeaconQueryEndpoint, Domain, Loader
 from search_api.api.opensearch.beacon import OpenSearchBeaconService
 from search_api.api.opensearch.models import ExtractedDocument
 from search_api.api.bigpicture.extract import extract_documents
+from search_api.api.bigpicture.extract.models import validate_observation_types
+
+# Validate fields.yaml observation_type configuration against extract
+# models.
+validate_observation_types(BP_FILTERING_TERM_BY_ID["observation_type"])
 
 
 @dataclass(frozen=True)
@@ -102,7 +107,6 @@ BP_DOMAIN = Domain(
     filtering_terms=BP_FILTERING_TERMS,
     filtering_groups=BP_FILTERING_GROUPS,
     filtering_scopes=BP_FILTERING_SCOPES,
-    filtering_qualifiers=BP_FILTERING_QUALIFIERS,
     non_filtering_fields=BP_NON_FILTERING_FIELDS,
     loader=BP_LOADER,
     beacon_service_factory=lambda search: OpenSearchBeaconService(
@@ -110,7 +114,6 @@ BP_DOMAIN = Domain(
         BP_OPENSEARCH_INDEX,
         BP_FILTERING_TERMS,
         BP_FILTERING_SCOPES,
-        BP_FILTERING_QUALIFIERS,
     ),
     query_endpoints=[
         BeaconQueryEndpoint(
@@ -120,7 +123,6 @@ BP_DOMAIN = Domain(
                 BP_OPENSEARCH_INDEX,
                 BP_FILTERING_TERMS,
                 BP_FILTERING_SCOPES,
-                BP_FILTERING_QUALIFIERS,
             ),
             result_sets_response_model=BigpictureBeaconDatasetResultSetsResponse,
             ai_assistant_description=BP_AI_ASSISTANT_DESCRIPTION,
@@ -134,7 +136,6 @@ BP_DOMAIN = Domain(
                 BP_OPENSEARCH_INDEX,
                 BP_FILTERING_TERMS,
                 BP_FILTERING_SCOPES,
-                BP_FILTERING_QUALIFIERS,
             ),
             result_sets_response_model=BigpictureBeaconImageResultSetsResponse,
             ai_assistant_description=BP_AI_ASSISTANT_DESCRIPTION,

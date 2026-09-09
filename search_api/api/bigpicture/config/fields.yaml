@@ -11,7 +11,7 @@
 #
 #     Grouping follows the source XML hierarchy but nested groups are created only
 #     when needed. A nested group is required when an object can repeat within
-#     an image and has several correlated fields or uses qualifiers.
+#     an image and has several correlated fields.
 #     Objects meeting this requirement:
 #       - specimen: a block can be sampled from many specimens, and a specimen has
 #         several correlated fields. A specimen is extracted from exactly one
@@ -19,10 +19,10 @@
 #         the specimen. The block has a single field (block_preparation)
 #         with nothing to correlate and can also be flattened in the specimen.
 #       - staining: a slide carries several stains, each with correlated fields.
-#       - finding: an image can have several non-clinical findings, each with
-#         several correlated fields.
-#       - diagnosis: an image can have several clinical diagnoses. Nested group
-#         is required so each diagnosis can have qualifiers.
+#       - observation: an image can have several clinical diagnoses and several
+#         non-clinical findings, each with several correlated fields plus its own
+#         observation_type (confirmed/candidate). Diagnosis and finding never
+#         coexist in one document, since a document has exactly one scope.
 #     The slide and case have no searchable fields and do not need to be
 #     represented as nested groups.
 #   - "group" is the filtering group id this term belongs to.
@@ -175,7 +175,7 @@ filtering_terms:
 
   - id: diagnosis
     type: ontology
-    nested_group: diagnosis
+    nested_group: observation
     scopes: [ clinical ]
     label: "Diagnosis"
     description: "Diagnosis known to apply to one more image linked to an observation."
@@ -188,7 +188,7 @@ filtering_terms:
 
   - id: finding
     type: ontology
-    nested_group: finding
+    nested_group: observation
     scopes: [ non_clinical ]
     label: "Finding"
     description: "Microscopic finding (MISTRESC)."
@@ -198,7 +198,7 @@ filtering_terms:
 
   - id: finding_severity
     type: ontology
-    nested_group: finding
+    nested_group: observation
     scopes: [ non_clinical ]
     label: "Severity"
     description: "Severity of the microscopic finding (MISEV)."
@@ -211,7 +211,7 @@ filtering_terms:
 
   - id: finding_chronicity
     type: ontology
-    nested_group: finding
+    nested_group: observation
     scopes: [ non_clinical ]
     label: "Chronicity"
     description: "Chronicity of the microscopic finding (MICHRON)."
@@ -224,7 +224,7 @@ filtering_terms:
 
   - id: finding_distribution
     type: ontology
-    nested_group: finding
+    nested_group: observation
     scopes: [ non_clinical ]
     label: "Distribution"
     description: "Distribution of the microscopic finding (MIDISTR)."
@@ -237,7 +237,7 @@ filtering_terms:
 
   - id: finding_result_category
     type: ontology
-    nested_group: finding
+    nested_group: observation
     scopes: [ non_clinical ]
     label: "Result category"
     description: "Result category (MIRESCAT)."
@@ -256,6 +256,19 @@ filtering_terms:
     description: "Used to identify if the biological being is a control animal or treated animal."
     controlledValues: [ "CONTROL", "TREATED" ]
     group: "non_clinical"
+
+  - id: observation_type
+    type: controlledValue
+    nested_group: observation
+    scopes: [ clinical, non_clinical ]
+    label: "Observation type"
+    description: >-
+      How an observation is linked to the image. A confirmed observation is
+      known to apply to the image. A candidate observation is known to apply
+      to at least one image in a set of images, but not necessarily to all
+      of them.
+    controlledValues: [ confirmed, candidate ]
+    group: "description"
 
 # Fields that are indexed in OpenSearch but are not filterable.
 # All are top-level (no group).

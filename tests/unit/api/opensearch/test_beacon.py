@@ -7,7 +7,6 @@ from search_api.api.opensearch.beacon import (
     build_filtering_term_clause,
 )
 from search_api.api.bigpicture.models import (
-    BP_FILTERING_QUALIFIERS,
     BP_FILTERING_SCOPES,
     BP_FILTERING_TERMS,
 )
@@ -539,99 +538,61 @@ def _service() -> OpenSearchQueryBeaconService:
         index_name="test",
         filtering_terms=BP_FILTERING_TERMS,
         filtering_scopes=BP_FILTERING_SCOPES,
-        filtering_qualifiers=BP_FILTERING_QUALIFIERS,
     )
 
 
-def test_qualifier_clauses_absent_qualifier_is_not_filtered():
-    """An absent or empty qualifier contributes no clause, so it filters nothing."""
-    service = _service()
-    assert service._qualifier_clauses_by_group(None) == {}
-    assert service._qualifier_clauses_by_group({}) == {}
-    assert service._qualifier_clauses_by_group({"observation": []}) == {}
+def test_get_query_clause_diagnosis_and_finding():
+    query = get_query_clause(("diagnosis", "73211009"), ("finding", "abc"))
 
-
-def test_qualifier_clauses_cover_every_group_the_qualifier_names():
-    """One requested qualifier yields one clause per group it qualifies."""
-    clauses = _service()._qualifier_clauses_by_group({"observation": ["confirmed"]})
-    assert clauses == {
-        "diagnosis": [{"terms": {"diagnosis.qualifiers": ["observation:confirmed"]}}],
-        "finding": [{"terms": {"finding.qualifiers": ["observation:confirmed"]}}],
-    }
-
-
-def test_get_query_clause_qualifier_joins_the_filter_inside_the_nested_query():
-    service = _service()
-    query = service._get_query_clause(
-        [BeaconQueryFilter(id="diagnosis", value="73211009")],
-        qualifiers={"observation": ["confirmed"]},
-    )
-    # diagnosis is clinical-only
-    nested = _clauses_for_scope(query, "clinical")[0]["nested"]
-    assert nested["path"] == "diagnosis"
-    assert nested["query"]["bool"]["filter"] == [
+    clinical = _clauses_for_scope(query, "clinical")
+    assert clinical == [
         {
-            "bool": {
-                "should": [{"terms": {"diagnosis.diagnosis": ["73211009"]}}],
-                "minimum_should_match": 1,
+            "nested": {
+                "path": "observation",
+                "query": {
+                    "bool": {
+                        "filter": [
+                            {
+                                "bool": {
+                                    "should": [
+                                        {
+                                            "terms": {
+                                                "observation.diagnosis": ["73211009"]
+                                            }
+                                        }
+                                    ],
+                                    "minimum_should_match": 1,
+                                }
+                            }
+                        ]
+                    }
+                },
             }
-        },
-        {"terms": {"diagnosis.qualifiers": ["observation:confirmed"]}},
+        }
     ]
 
-
-def test_get_query_clause_qualifier_alone_does_not_constrain_an_unfiltered_group():
-    service = _service()
-    query = service._get_query_clause(
-        [BeaconQueryFilter(id="dataset_title", value="cancer")],
-        qualifiers={"observation": ["candidate"]},
-    )
-    assert not any("nested" in clause for clause in query["bool"]["filter"])
-
-
-# Test count values filters.
-#
-
-
-def _count_values_filters(
-    field_id: str, scope=None, qualifiers=None
-) -> tuple[dict | None, dict | None]:
-    return _service()._count_values_filters(get_term(field_id), scope, qualifiers)
-
-
-def test_count_values_filters_from_scope_and_qualifier():
-    document_filter, group_item_filter = _count_values_filters(
-        "diagnosis", scope="clinical", qualifiers={"observation": ["confirmed"]}
-    )
-
-    assert document_filter == {"term": {"scope": "clinical"}}
-    assert group_item_filter == {
-        "bool": {
-            "filter": [{"terms": {"diagnosis.qualifiers": ["observation:confirmed"]}}]
+    non_clinical = _clauses_for_scope(query, "non_clinical")
+    assert non_clinical == [
+        {
+            "nested": {
+                "path": "observation",
+                "query": {
+                    "bool": {
+                        "filter": [
+                            {
+                                "bool": {
+                                    "should": [
+                                        {"terms": {"observation.finding": ["abc"]}}
+                                    ],
+                                    "minimum_should_match": 1,
+                                }
+                            }
+                        ]
+                    }
+                },
+            }
         }
-    }
-
-
-def test_count_values_filters_without_scope_or_qualifier():
-    assert _count_values_filters("diagnosis") == (None, None)
-
-
-def test_count_values_filters_scope_top_level_field():
-    document_filter, group_item_filter = _count_values_filters(
-        "dataset_title", scope="non_clinical"
-    )
-
-    assert document_filter == {"term": {"scope": "non_clinical"}}
-    assert group_item_filter is None
-
-
-def test_count_values_filters_qualifier_ignored():
-    _, group_item_filter = _count_values_filters(
-        "sex", qualifiers={"observation": ["confirmed"]}
-    )
-
-    # observation qualifier does not apply to sex field.
-    assert group_item_filter is None
+    ]
 
 
 # Test value counts.

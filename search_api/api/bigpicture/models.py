@@ -5,7 +5,6 @@ from pydantic import Field
 
 from search_api.api.beacon.models import (
     BeaconFilteringGroup,
-    BeaconFilteringQualifier,
     BeaconFilteringScope,
     BeaconFilteringTermsResponse,
     BeaconFilteringTerms,
@@ -21,10 +20,6 @@ from search_api.api.groups import (
     load_groups_config,
     validate_filtering_groups,
     validate_filtering_groups_hierarchy,
-)
-from search_api.api.qualifiers import (
-    load_qualifiers_config,
-    validate_filtering_qualifiers,
 )
 from search_api.api.scopes import load_scopes_config, validate_filtering_scopes
 from search_api.exceptions import SystemException
@@ -103,21 +98,9 @@ BP_FILTERING_SCOPES: list[BeaconFilteringScope] = load_scopes_config(
     _SCOPES_CONFIG_PATH
 ).filtering_scopes
 
-_QUALIFIERS_CONFIG_PATH = Path(__file__).resolve().parent / "config" / "qualifiers.yaml"
-BP_FILTERING_QUALIFIERS: list[BeaconFilteringQualifier] = load_qualifiers_config(
-    _QUALIFIERS_CONFIG_PATH
-).filtering_qualifiers
-
-
 validate_filtering_groups(BP_FILTERING_TERMS, BP_FILTERING_GROUPS, _FIELDS_CONFIG_PATH)
 validate_filtering_groups_hierarchy(BP_FILTERING_GROUPS, _GROUPS_CONFIG_PATH)
 validate_filtering_scopes(BP_FILTERING_TERMS, BP_FILTERING_SCOPES, _FIELDS_CONFIG_PATH)
-validate_filtering_qualifiers(
-    BP_FILTERING_TERMS,
-    BP_NON_FILTERING_FIELDS,
-    BP_FILTERING_QUALIFIERS,
-    _QUALIFIERS_CONFIG_PATH,
-)
 
 # Filtering term lookup by id.
 BP_FILTERING_TERM_BY_ID = {term.id: term for term in BP_FILTERING_TERMS}

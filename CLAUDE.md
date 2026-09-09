@@ -780,8 +780,6 @@ tests/            # mirrors the search_api/ package layout
 │   ├── database/              # one module per table, plus test_repository.py (the pool)
 │   ├── scripts/               # test_admin.py (ontology updates) + bigpicture/test_admin.py
 │   └── services/{ontology/,test_load.py,test_poller.py,test_sync.py}
-├── performance/   # locust load tests
-├── utils/         # test helpers (generate_data.py)
 └── files/bigpicture/xml/dataset_{clinical,non_clinical}/METADATA/   # XML fixtures
 ```
 

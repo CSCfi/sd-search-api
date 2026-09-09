@@ -140,9 +140,9 @@ def validate_observation_types(term: OpenSearchBeaconFilteringTerm) -> None:
             f"{{{OBSERVATION_CONFIRMED!r}, {OBSERVATION_CANDIDATE!r}}}, got "
             f"{term.controlledValues}."
         )
-    if term.group != "observation":
+    if term.nested_group != "observation":
         raise SystemException(
-            f"{term.id}'s group in fields.yaml must be 'observation', "
+            f"{term.id}'s nested_group in fields.yaml must be 'observation', "
             f"got {term.group!r}."
         )
 

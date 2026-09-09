@@ -175,7 +175,7 @@ filtering_terms:
 
   - id: diagnosis
     type: ontology
-    nested_group: diagnosis
+    nested_group: observation
     scopes: [ clinical ]
     label: "Diagnosis"
     description: "Diagnosis known to apply to one more image linked to an observation."
@@ -188,7 +188,7 @@ filtering_terms:
 
   - id: finding
     type: ontology
-    nested_group: finding
+    nested_group: observation
     scopes: [ non_clinical ]
     label: "Finding"
     description: "Microscopic finding (MISTRESC)."
@@ -198,7 +198,7 @@ filtering_terms:
 
   - id: finding_severity
     type: ontology
-    nested_group: finding
+    nested_group: observation
     scopes: [ non_clinical ]
     label: "Severity"
     description: "Severity of the microscopic finding (MISEV)."
@@ -211,7 +211,7 @@ filtering_terms:
 
   - id: finding_chronicity
     type: ontology
-    nested_group: finding
+    nested_group: observation
     scopes: [ non_clinical ]
     label: "Chronicity"
     description: "Chronicity of the microscopic finding (MICHRON)."
@@ -224,7 +224,7 @@ filtering_terms:
 
   - id: finding_distribution
     type: ontology
-    nested_group: finding
+    nested_group: observation
     scopes: [ non_clinical ]
     label: "Distribution"
     description: "Distribution of the microscopic finding (MIDISTR)."
@@ -237,7 +237,7 @@ filtering_terms:
 
   - id: finding_result_category
     type: ontology
-    nested_group: finding
+    nested_group: observation
     scopes: [ non_clinical ]
     label: "Result category"
     description: "Result category (MIRESCAT)."
@@ -259,7 +259,7 @@ filtering_terms:
 
   - id: observation_type
     type: controlledValue
-    group: observation
+    nested_group: observation
     scopes: [ clinical, non_clinical ]
     label: "Observation type"
     description: >-
@@ -268,6 +268,7 @@ filtering_terms:
       to at least one image in a set of images, but not necessarily to all
       of them.
     controlledValues: [ confirmed, candidate ]
+    group: "description"
 
 # Fields that are indexed in OpenSearch but are not filterable.
 # All are top-level (no group).

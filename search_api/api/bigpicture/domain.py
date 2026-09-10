@@ -30,8 +30,6 @@ from search_api.api.bigpicture.opensearch import (
 )
 from search_api.api.domain import BeaconQueryEndpoint, Domain
 from search_api.api.opensearch.beacon import OpenSearchBeaconService
-from search_api.api.opensearch.models import ExtractedDocument
-from search_api.api.bigpicture.extract import extract_documents
 from search_api.api.bigpicture.extract.models import validate_observation_types
 from search_api.api.bigpicture.local import BigpictureLocalSource
 from search_api.api.bigpicture.remote import BigpictureRemoteSource

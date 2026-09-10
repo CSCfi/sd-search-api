@@ -79,11 +79,9 @@ _SENTINEL_ONTOLOGY_ID = "TEST-clear"
 def _args(**kwargs) -> argparse.Namespace:
     defaults = dict(
         directory=str(_XML_DIR),
-        multi_dir=True,
+        full=False,
         dry_run=False,
         sync=False,
-        c4gh_key_file=None,
-        c4gh_passphrase=None,
     )
     return argparse.Namespace(**{**defaults, **kwargs})
 
@@ -152,7 +150,7 @@ async def test_load_plain_files():
 
 @pytest.mark.requires_snowstorm
 @pytest.mark.asyncio
-async def test_load_c4gh_files(tmp_path):
+async def test_load_c4gh_files(tmp_path, monkeypatch):
     """The load command decrypts Crypt4GH-encrypted XML files and inserts them into the database."""
     seckey_path = tmp_path / "key.sec"
     pubkey_path = tmp_path / "key.pub"
@@ -174,13 +172,9 @@ async def test_load_c4gh_files(tmp_path):
                 outfile,
             )
 
-    await _load(
-        BP_DOMAIN,
-        _args(
-            directory=str(tmp_path),
-            c4gh_key_file=str(seckey_path),
-        ),
-    )
+    monkeypatch.setenv("BP_C4GH_KEY_FILE", str(seckey_path))
+
+    await _load(BP_DOMAIN, _args(directory=str(tmp_path)))
 
     async with get_connection() as conn:
         async with conn.cursor() as cur:

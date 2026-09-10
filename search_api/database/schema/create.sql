@@ -41,3 +41,16 @@ CREATE TABLE document_log (
 );
 
 CREATE INDEX idx_document_log_document_id ON document_log (document_id);
+
+-- Marker indicates the position of the previous incremental load.
+CREATE TABLE load (
+    id         INT         NOT NULL PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+    marker     TEXT        NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE load_history (
+    id         BIGINT      GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    marker     TEXT        NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

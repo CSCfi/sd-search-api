@@ -14,6 +14,7 @@ PUBLIC_PATHS = frozenset(
     {
         "/health",
         "/info",
+        "/jwk",
         "/login",
         "/callback",
         "/logout",

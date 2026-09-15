@@ -2,6 +2,7 @@ import base64
 from typing import Literal
 from urllib.parse import urljoin, urlparse
 
+from cryptography.hazmat.primitives.serialization import load_pem_private_key
 from pydantic import Field, computed_field, field_validator
 from pydantic_settings import BaseSettings
 
@@ -192,6 +193,47 @@ class JWTConfiguration(BaseSettings):
         return key
 
 
+class SdSubmitSyncConfiguration(BaseSettings):
+    """Configuration for syncing published submissions from the SD Submit API."""
+
+    SD_SUBMIT_API_URL: str = Field(description="SD Submit API base URL.")
+    SD_SUBMIT_PRIVATE_KEY: str = Field(
+        description=(
+            "Base64-encoded PEM EC private key to sign the SD Submit API JWT token. "
+            "The submit API has the public key to verify the JWT token."
+        )
+    )
+    SD_SUBMIT_AUDIENCE: str = Field(
+        description=(
+            "Audience of the SD Submit API JWT tokens. Must be the audience "
+            "the API expects, or the JWT token is rejected."
+        )
+    )
+    SD_SUBMIT_ISSUER: str = Field(
+        default="sd-search-api",
+        description="Issuer of the SD Submit API tokens, naming this service.",
+    )
+
+    @field_validator("SD_SUBMIT_PRIVATE_KEY")
+    @classmethod
+    def decode_private_key(cls, value: str) -> str:
+        """Decode and parse the base64-encoded PEM private key."""
+        try:
+            key = base64.b64decode(value, validate=True)
+        except Exception as ex:
+            raise ValueError(
+                "SD_SUBMIT_PRIVATE_KEY must be a valid base64-encoded string"
+            ) from ex
+        # Parse the key here to report errors when the configuration is loaded.
+        try:
+            load_pem_private_key(key, password=None)
+        except Exception as ex:
+            raise ValueError(
+                "SD_SUBMIT_PRIVATE_KEY must decode to an unencrypted PEM private key"
+            ) from ex
+        return key.decode("utf-8")
+
+
 def deployment_config() -> DeploymentConfiguration:
     """Get deployment configuration."""
     return DeploymentConfiguration()
@@ -240,3 +282,8 @@ def oidc_config() -> OIDCConfiguration:
 def jwt_config() -> JWTConfiguration:
     """Get JWT configuration."""
     return JWTConfiguration()
+
+
+def sd_submit_sync_config() -> SdSubmitSyncConfiguration:
+    """Get the SD Submit API sync configuration."""
+    return SdSubmitSyncConfiguration()

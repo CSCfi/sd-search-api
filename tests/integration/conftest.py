@@ -27,7 +27,7 @@ _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 def _submit_available() -> bool:
     """Whether the SD submit API is available."""
 
-    url = os.environ.get("BP_SUBMIT_API_URL", "").strip()
+    url = os.environ.get("SD_SUBMIT_API_URL", "").strip()
     if not url:
         return False
     try:
@@ -52,7 +52,7 @@ def pytest_configure(config: pytest.Config) -> None:
     config.addinivalue_line(
         "markers",
         f"{_SUBMIT_MARKER}: needs a reachable SD submit API, so it is "
-        "skipped when BP_SUBMIT_API_URL answers nothing.",
+        "skipped when SD_SUBMIT_API_URL answers nothing.",
     )
 
 

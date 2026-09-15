@@ -10,7 +10,7 @@ from typing import override
 
 from fsspec.implementations.zip import ZipFileSystem  # type: ignore
 
-from search_api.api.bigpicture.conf import bigpicture_remote_config
+from search_api.conf import sd_submit_sync_config
 from search_api.api.bigpicture.extract.document import extract_dataset_documents
 from search_api.api.opensearch.models import ExtractedDocument
 from search_api.exceptions import UserException
@@ -71,14 +71,14 @@ class BigpictureRemoteSource(DocumentSource):
             datetime.fromisoformat(marker) - _FETCH_OVERLAP if marker else None
         )
 
-        config = bigpicture_remote_config()
+        config = sd_submit_sync_config()
         token = partial(
             sign_service_token,
-            private_key=config.BP_SUBMIT_PRIVATE_KEY,
-            issuer=config.BP_SUBMIT_ISSUER,
-            audience=config.BP_SUBMIT_AUDIENCE,
+            private_key=config.SD_SUBMIT_PRIVATE_KEY,
+            issuer=config.SD_SUBMIT_ISSUER,
+            audience=config.SD_SUBMIT_AUDIENCE,
         )
-        async with SdSubmitFetchClient(config.BP_SUBMIT_API_URL, token) as client:
+        async with SdSubmitFetchClient(config.SD_SUBMIT_API_URL, token) as client:
             submissions = await client.get_published_submissions(published_since)
             logging.info(
                 "%d submission(s) published %s.",

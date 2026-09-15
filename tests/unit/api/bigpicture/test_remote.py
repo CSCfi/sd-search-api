@@ -72,9 +72,9 @@ def mock_sd_submit_api(monkeypatch):
         assert submission_id == SUBMISSION_ID
         return _clinical_dataset_archive()
 
-    monkeypatch.setenv("BP_SUBMIT_API_URL", "test")
-    monkeypatch.setenv("BP_SUBMIT_PRIVATE_KEY", base64_pem_private_key())
-    monkeypatch.setenv("BP_SUBMIT_AUDIENCE", "test")
+    monkeypatch.setenv("SD_SUBMIT_API_URL", "test")
+    monkeypatch.setenv("SD_SUBMIT_PRIVATE_KEY", base64_pem_private_key())
+    monkeypatch.setenv("SD_SUBMIT_AUDIENCE", "test")
     monkeypatch.setattr(
         SdSubmitFetchClient, "get_published_submissions", get_published_submissions
     )

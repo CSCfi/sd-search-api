@@ -192,9 +192,11 @@ The two implementations:
   Crypt4GH key and passphrase come from `BigpictureLocalConfiguration`, since a passphrase on a command
   line lands in the process list and the shell history.
 - **`BigpictureRemoteSource`** (`api/bigpicture/remote.py`) yields one unit per published submission,
-  reading `BigpictureRemoteConfiguration` per fetch, so no other command needs those settings and the
-  generic `conf.py` stays free of deployment-specific configuration. It binds the configured signing
-  material into the token callable the client signs each request with (see *Authenticating a fetch*).
+  reading `SdSubmitSyncConfiguration` per fetch, so no other command needs those settings. That class is
+  generic (`conf.py`), like the `SdSubmitFetchClient` it configures: what it describes is the submit API
+  being called, not the deployment calling it, so a second deployment syncing from a submitter reuses it
+  rather than declaring its own. It binds the configured signing material into the token callable the
+  client signs each request with (see *Authenticating a fetch*).
 
 **`modified_at` comes from the source, not from the documents.** A fetched document has no file
 modification time worth having — a zip entry's `date_time` is when the submitter built the archive,
@@ -918,18 +920,20 @@ endpoints unmounted when unset), plus `OIDC_SCOPE`, `OIDC_SECURE_COOKIE=true`, `
 `JWT_ALGORITHM=HS256`. `DEPLOYMENT_TYPE`, `SNOWSTORM_URL`, `LLM_BASE_URL`/`LLM_API_KEY`, the
 `OIDC_*` client settings and `JWT_KEY` (base64, must decode to ≥32 bytes) have no defaults.
 
-**A deployment's own settings live with the deployment**, not here, and **one class per source**:
-`api/bigpicture/conf.py` declares `BigpictureRemoteConfiguration` (`BP_SUBMIT_API_URL`,
-`BP_SUBMIT_PRIVATE_KEY` and `BP_SUBMIT_AUDIENCE` required, `BP_SUBMIT_ISSUER=sd-search-api`
-defaulted) and `BigpictureLocalConfiguration` (`BP_C4GH_KEY_FILE` and
-`BP_C4GH_PASSPHRASE`, both optional). Split because a `BaseSettings` validates every field it
-declares: bundled, a `load <dir>` would demand submit API settings it never uses. The URL carries the submitter's
-API prefix (`http://localhost:5431/api`), because the submitter mounts its sync endpoints outside its
-versioned API.
+**A deployment's own settings live with the deployment**, not here, and there is **one class per
+source**. `SdSubmitSyncConfiguration` is here rather than with a deployment (`SD_SUBMIT_API_URL`,
+`SD_SUBMIT_PRIVATE_KEY` and `SD_SUBMIT_AUDIENCE` required, `SD_SUBMIT_ISSUER=sd-search-api`
+defaulted), because it describes the submit API being called rather than the deployment calling it —
+the same reason `SdSubmitFetchClient` sits in `services/fetch.py`. `api/bigpicture/conf.py` declares
+only what is Bigpicture's own: `BigpictureLocalConfiguration` (`BP_C4GH_KEY_FILE` and
+`BP_C4GH_PASSPHRASE`, both optional). They stay separate classes because a `BaseSettings` validates
+every field it declares: bundled, a `load <dir>` would demand submit API settings it never uses. The
+URL carries the submitter's API prefix (`http://localhost:5431/api`), because the submitter mounts its
+sync endpoints outside its versioned API.
 
-`BP_SUBMIT_PRIVATE_KEY` is a base64-encoded PEM EC private key, and its validator **parses** it as
+`SD_SUBMIT_PRIVATE_KEY` is a base64-encoded PEM EC private key, and its validator **parses** it as
 well as decoding it, so a key that cannot sign is reported before a fetch starts rather than by the
-first request it makes. `BP_SUBMIT_AUDIENCE` must be the audience the submitter expects.
+first request it makes. `SD_SUBMIT_AUDIENCE` must be the audience the submitter expects.
 A working set is in `tests/integration/.env`, whose comment carries the public key of the pair it
 signs with — the value the submitter of that deployment must be configured with.
 
@@ -940,7 +944,7 @@ tests/            # mirrors the search_api/ package layout
 ├── unit/          # run by tox; no external services needed
 │   ├── api/{admin,auth,beacon,bigpicture,opensearch}/
 │   ├── api/bigpicture/        # incl. test_local.py + test_remote.py (its two sources)
-│   │                          # and test_conf.py (the signing key is parsed, not just decoded)
+│   │                          # (test_conf.py is generic: tests/unit/test_conf.py)
 │   ├── services/{ontology/,test_auth.py,test_fetch.py,test_load.py,
 │   │              test_poller.py,test_session.py,test_validate.py,
 │   │              test_value_counts.py}   # the client; the sources are under api/
@@ -958,7 +962,7 @@ tests/            # mirrors the search_api/ package layout
 ```
 
 A test needing a running Bigpicture submit API carries `@pytest.mark.requires_submit`, and
-`tests/integration/conftest.py` skips those when `BP_SUBMIT_API_URL` answers nothing or answers
+`tests/integration/conftest.py` skips those when `SD_SUBMIT_API_URL` answers nothing or answers
 `404` — probed rather than opted out of, since nothing but a submitter of one's own makes them
 runnable. A `404` is a submitter with no `SYNC_PUBLIC_KEY` of its own, which mounts no sync
 endpoints at all. **Any other answer counts as available, deliberately.** Requiring the `401` an

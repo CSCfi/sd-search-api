@@ -33,7 +33,7 @@ from search_api.api.opensearch.beacon import OpenSearchBeaconService
 from search_api.api.bigpicture.extract.models import validate_observation_types
 from search_api.api.bigpicture.local import BigpictureLocalSource
 from search_api.api.bigpicture.remote import BigpictureRemoteSource
-from search_api.api.bigpicture.conf import bigpicture_remote_config
+from search_api.conf import sd_submit_sync_config
 from search_api.utils.token import public_key_jwk
 from pydantic import ValidationError
 
@@ -48,10 +48,10 @@ BP_REMOTE_SOURCE = BigpictureRemoteSource()
 
 def bp_public_jwks() -> list[dict[str, Any]]:
     try:
-        config = bigpicture_remote_config()
+        config = sd_submit_sync_config()
     except ValidationError:
         return []
-    return [public_key_jwk(config.BP_SUBMIT_PRIVATE_KEY)]
+    return [public_key_jwk(config.SD_SUBMIT_PRIVATE_KEY)]
 
 
 BP_DOMAIN = Domain(

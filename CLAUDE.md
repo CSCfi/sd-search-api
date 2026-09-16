@@ -78,7 +78,7 @@ search_api/
 ├── api/                # HTTP layer + per-deployment packages
 │   ├── {admin,auth,beacon,jwk,opensearch}/  # generic routers and services
 │   └── bigpicture/     # everything Bigpicture-specific lives here, nowhere else:
-│       ├── domain.py models.py ai.py opensearch.py conf.py
+│       ├── domain.py models.py ai.py opensearch.py
 │       ├── local.py remote.py      # its two DocumentSources
 │       ├── extract/    # XML in, one document per image out. Holds only what both
 │       │               # sources use: extract_dataset_documents, dataset_files,
@@ -189,8 +189,8 @@ The two implementations:
   period be skipped without reading its XML, and keeps one dataset in memory at a time rather than
   the whole tree. It infers whether the root is one dataset directory or a parent of several from
   whether the root holds `METADATA/dataset.xml` (encrypted or not), so `--multi-dir` is gone; the
-  Crypt4GH key and passphrase come from `BigpictureLocalConfiguration`, since a passphrase on a command
-  line lands in the process list and the shell history.
+  Crypt4GH key and passphrase come from `Crypt4GHConfiguration` (`conf.py`), since a passphrase on a
+  command line lands in the process list and the shell history.
 - **`BigpictureRemoteSource`** (`api/bigpicture/remote.py`) yields one unit per published submission,
   reading `SdSubmitSyncConfiguration` per fetch, so no other command needs those settings. That class is
   generic (`conf.py`), like the `SdSubmitFetchClient` it configures: what it describes is the submit API
@@ -924,11 +924,13 @@ endpoints unmounted when unset), plus `OIDC_SCOPE`, `OIDC_SECURE_COOKIE=true`, `
 source**. `SdSubmitSyncConfiguration` is here rather than with a deployment (`SD_SUBMIT_API_URL`,
 `SD_SUBMIT_PRIVATE_KEY` and `SD_SUBMIT_AUDIENCE` required, `SD_SUBMIT_ISSUER=sd-search-api`
 defaulted), because it describes the submit API being called rather than the deployment calling it —
-the same reason `SdSubmitFetchClient` sits in `services/fetch.py`. `api/bigpicture/conf.py` declares
-only what is Bigpicture's own: `BigpictureLocalConfiguration` (`BP_C4GH_KEY_FILE` and
-`BP_C4GH_PASSPHRASE`, both optional). They stay separate classes because a `BaseSettings` validates
-every field it declares: bundled, a `load <dir>` would demand submit API settings it never uses. The
-URL carries the submitter's API prefix (`http://localhost:5431/api`), because the submitter mounts its
+the same reason `SdSubmitFetchClient` sits in `services/fetch.py`. `Crypt4GHConfiguration`
+(`C4GH_KEY_FILE` and `C4GH_PASSPHRASE`, both optional) is here for the same reason again: what it
+describes is the encryption of the material being read, not the deployment reading it, so a second
+deployment reading Crypt4GH files reuses it. Bigpicture therefore declares no configuration of its
+own at all, and `api/bigpicture/conf.py` is gone. They stay separate classes because a `BaseSettings`
+validates every field it declares: bundled, a `load <dir>` would demand submit API settings it never
+uses. The URL carries the submitter's API prefix (`http://localhost:5431/api`), because the submitter mounts its
 sync endpoints outside its versioned API.
 
 `SD_SUBMIT_PRIVATE_KEY` is a base64-encoded PEM EC private key, and its validator **parses** it as

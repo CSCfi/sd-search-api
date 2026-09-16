@@ -6,12 +6,12 @@ from datetime import datetime
 
 import fsspec  # type: ignore
 
-from search_api.api.bigpicture.conf import bigpicture_local_config
 from search_api.api.bigpicture.extract.document import (
     dataset_files,
     extract_dataset_documents,
     get_last_modification_time,
 )
+from search_api.conf import crypt4gh_config
 from search_api.exceptions import SystemException, UserException
 from search_api.services.fetch import DocumentSource, SourceDocuments
 from search_api.utils.crypt import load_c4gh_keys
@@ -69,10 +69,10 @@ class BigpictureLocalSource(DocumentSource):
 
         modified_since = datetime.fromisoformat(marker) if marker else None
 
-        config = bigpicture_local_config()
+        config = crypt4gh_config()
         keys = (
-            load_c4gh_keys(config.BP_C4GH_KEY_FILE, config.BP_C4GH_PASSPHRASE)
-            if config.BP_C4GH_KEY_FILE
+            load_c4gh_keys(config.C4GH_KEY_FILE, config.C4GH_PASSPHRASE)
+            if config.C4GH_KEY_FILE
             else None
         )
 

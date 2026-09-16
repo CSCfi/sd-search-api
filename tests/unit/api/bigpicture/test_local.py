@@ -20,8 +20,8 @@ DATASET_DIR = FILES_DIR / "dataset_clinical"
 def unencrypted(monkeypatch):
     """No Crypt4GH key, which is all a directory read is configured by."""
 
-    monkeypatch.delenv("BP_C4GH_KEY_FILE", raising=False)
-    monkeypatch.delenv("BP_C4GH_PASSPHRASE", raising=False)
+    monkeypatch.delenv("C4GH_KEY_FILE", raising=False)
+    monkeypatch.delenv("C4GH_PASSPHRASE", raising=False)
 
 
 async def _read(root: Path, **kwargs) -> list[SourceDocuments]:
@@ -73,7 +73,7 @@ async def test_read_bigpicture_missing_directory(unencrypted) -> None:
 
 @pytest.mark.asyncio
 async def test_read_bigpicture_missing_key_file(unencrypted, monkeypatch) -> None:
-    monkeypatch.setenv("BP_C4GH_KEY_FILE", "/nonexistent.sec")
+    monkeypatch.setenv("C4GH_KEY_FILE", "/nonexistent.sec")
 
     with pytest.raises(Exception) as raised:
         await _read(DATASET_DIR)

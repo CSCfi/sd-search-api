@@ -234,6 +234,22 @@ class SdSubmitSyncConfiguration(BaseSettings):
         return key.decode("utf-8")
 
 
+class Crypt4GHConfiguration(BaseSettings):
+    """Configuration for decrypting Crypt4GH encrypted source material."""
+
+    C4GH_KEY_FILE: str | None = Field(
+        default=None,
+        description=(
+            "Path to a Crypt4GH private key file (.sec) for decrypting .c4gh files. "
+            "Unset when the source material is not encrypted."
+        ),
+    )
+    C4GH_PASSPHRASE: str | None = Field(
+        default=None,
+        description="Passphrase of the Crypt4GH private key, unset for an unprotected key.",
+    )
+
+
 def deployment_config() -> DeploymentConfiguration:
     """Get deployment configuration."""
     return DeploymentConfiguration()
@@ -287,3 +303,8 @@ def jwt_config() -> JWTConfiguration:
 def sd_submit_sync_config() -> SdSubmitSyncConfiguration:
     """Get the SD Submit API sync configuration."""
     return SdSubmitSyncConfiguration()
+
+
+def crypt4gh_config() -> Crypt4GHConfiguration:
+    """Get the Crypt4GH decryption configuration."""
+    return Crypt4GHConfiguration()

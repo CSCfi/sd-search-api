@@ -172,7 +172,7 @@ async def test_load_c4gh_files(tmp_path, monkeypatch):
                 outfile,
             )
 
-    monkeypatch.setenv("BP_C4GH_KEY_FILE", str(seckey_path))
+    monkeypatch.setenv("C4GH_KEY_FILE", str(seckey_path))
 
     await _load(BP_DOMAIN, _args(directory=str(tmp_path)))
 

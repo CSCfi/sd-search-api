@@ -59,9 +59,9 @@ _EXPECTED_DOCUMENTS = {
 
 async def _documents(root: str, c4gh_key_file: str | None = None) -> Iterator:
     if c4gh_key_file is not None:
-        os.environ["BP_C4GH_KEY_FILE"] = c4gh_key_file
+        os.environ["C4GH_KEY_FILE"] = c4gh_key_file
     else:
-        os.environ.pop("BP_C4GH_KEY_FILE", None)
+        os.environ.pop("C4GH_KEY_FILE", None)
 
     documents = [
         document

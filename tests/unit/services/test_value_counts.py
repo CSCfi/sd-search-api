@@ -73,7 +73,11 @@ async def test_refresh_requests_every_key_once():
 
 @pytest.mark.asyncio
 async def test_the_cache_follows_what_has_been_synced(monkeypatch):
-    """Nothing is counted before a load lands, and nothing is recounted after it."""
+    """Nothing is counted before a sync lands, and nothing is recounted after it.
+
+    A sync stamps every document it pushes, a re-push included, so an updated document
+    moves the timestamp just as a new one does.
+    """
     synced_at: datetime | None = None
     service, beacon = _service(refresh_interval=0.01)
     monkeypatch.setattr(service, "_max_synced_at", lambda: _resolved(synced_at))
@@ -93,6 +97,11 @@ async def test_the_cache_follows_what_has_been_synced(monkeypatch):
         beacon.calls.clear()
         await asyncio.sleep(0.05)
         assert beacon.calls == [], "refilled while nothing was synced"
+
+        # Changes to refresh (_max_synced_at moved).
+        synced_at = datetime(2026, 1, 2, tzinfo=timezone.utc)
+        await asyncio.sleep(0.05)
+        assert beacon.calls, "did not refill after a later sync"
     finally:
         service.stop()
 

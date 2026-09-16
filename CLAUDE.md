@@ -531,11 +531,14 @@ The Beacon router is generic, built per domain by `make_beacon_router(domain)`
 (`api/beacon/routes.py`). Dependency providers (`get_beacon_service`, `get_beacon_query_services`,
 `get_ontology_term_services`) resolve services from `app.state` and are module-level so tests can
 override them via `app.dependency_overrides`. `get_beacon_service` returns
-`domain.beacon_service_factory`'s one shared instance, used by every route that only needs the
-generic `BeaconService` behaviour (health, status, value counts) — none of those depend on how a
-query endpoint's records are shaped, so `make_lifespan`'s `ValueCountsUpdater` (which needs one
-persistent instance) does not have to know Bigpicture calls its endpoints `/datasets` and
-`/images`. `get_beacon_query_services` builds this request's `BeaconQueryService` for every endpoint
+**`app.state.beacon_service`**, the one instance `make_lifespan` built from
+`domain.beacon_service_factory`, used by every route that only needs the generic `BeaconService`
+behaviour (health, status, value counts) — none of those depend on how a query endpoint's records
+are shaped, so `ValueCountsUpdater` does not have to know Bigpicture calls its endpoints
+`/datasets` and `/images`. **It has to be that instance and not a new one**: the value counts are
+cached in a dict on the service, and the updater fills that dict in the background, so a
+per-request instance would start empty and recount everything on the way through — the updater's
+work would never be read. `get_beacon_query_services` builds this request's `BeaconQueryService` for every endpoint
 `domain.query_endpoints` declares, keyed by path — cheap, since building one wraps a search client
 and config, no I/O — and is what `/datasets`, `/images`, and their `/ai/*` counterparts each read
 their own service from by path.
@@ -570,9 +573,15 @@ counts, which read one row per document still awaiting sync.
 does not filter on it — there is no default. A scope the field does not declare is a `400` rather
 than an empty list, since the field is never indexed for those documents (`validate_field_scope`).
 
-Admin routes (`api/admin/routes.py`, `/admin` prefix, mounted only when `ADMIN_KEY` set, SNOMED-specific):
-`/admin/snomed/reload`, `/admin/snomed/refresh`, `/admin/snomed/fields/{field_id}/invalid_concepts`,
-`/admin/snomed/fields/{field_id}/unexpected_concepts`.
+Admin routes (`api/admin/routes.py`, `/admin` prefix, mounted only when `ADMIN_KEY` set):
+`POST /admin/caches/reload` reloads every in-memory cache from its store — each ontology's term
+cache and the value counts — and `POST /admin/snomed/refresh` updates the stored SNOMED preferred
+terms and the in-memory cache with them. The caches poll their stores anyway, so `reload` is for
+making a write reach the server *now*, and for the write the polled signal cannot see at all (see
+*BeaconService*). It replaced a SNOMED-only `reload`, which could only ever reload half the
+ontologies. The concept validation routes that stood beside it are gone: a value reaches the index
+only if its ontology's `is_concept_id` accepted it, so the invalid ones could not be there, and the
+unresolvable ones are already recorded per document in `document_log` as a load finds them.
 
 Auth routes (`api/auth/routes.py`, always mounted): `GET /login`, `GET /callback`, `GET /logout` —
 an OIDC relying party (`services/auth.py`) that issues a session JWT cookie. Configured by
@@ -685,12 +694,25 @@ no title/description fetch at all.
 `ValueCountsKey` (`api/models.py`) — the field and the scope, frozen so it can key a dict.
 Nothing expires; `ValueCountsUpdater` (`services/value_counts.py`) owns what is in there, clearing
 it and refilling when `max(document.synced_at)` moves, polled every `VALUE_COUNT_CACHE_REFRESH`
-seconds. Every key is counted concurrently, each in its own task so one failing does not stop the
-rest. The requests are enumerable — every valued field, against its own scopes, which is 41 for
+seconds. `SyncService` stamps every document it pushes, a re-push included, so that moves for an
+updated document as well as for a new one.
+
+**It is a signal about the pipeline, not about the index.** What it cannot see is a document
+reaching OpenSearch without a sync, which leaves the counts as they were —
+`tests/integration/api/bigpicture/test_routes.py` bulk-indexes exactly that way, and calls
+`POST /admin/caches/reload` rather than waiting on a poll that would never fire. Reading the index
+itself instead is tempting and was tried: the document count plus the count deleted but not yet
+merged away is **not** a sound signal, because a merge drops the tombstones an update left, so two
+readings either side of one are identical over changed documents. The sound reading is the primary
+shards' `max_seq_no`, which only grows — at the cost of depending on Lucene sequence-number
+semantics for something the pipeline already knows. Nothing is filled until a document has been
+synced, since counting an index no load has reached would cache one empty answer per key.
+
+Every key is counted concurrently, each in its own task so one failing does not stop the
+rest. The requests are enumerable — every valued field, against its own scopes, which is 43 for
 Bigpicture — so `_value_count_keys()` yields them as keys, derived from the deployment's config
 rather than guessing what a client will ask for. A request it did not anticipate is counted on the
-way through and kept, so only the first one pays for it. Nothing is filled until a document has been
-synced: counting an index no load has reached would cache one empty answer per request.
+way through and kept, so only the first one pays for it.
 
 `get_value_counts(field_id, scope)` applies the scope to the facet aggregation so counts match what
 the equivalent query returns: `scope` becomes the aggregation's document `query`. With no scope

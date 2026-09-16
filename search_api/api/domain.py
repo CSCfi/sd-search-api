@@ -112,7 +112,6 @@ def make_lifespan(domain: Domain) -> Callable[[FastAPI], Any]:
 
         app.state.domain = domain
         app.state.search = create_search()
-        app.state.filtering_terms = domain.filtering_terms
         app.state.beacon_service = domain.beacon_service_factory(app.state.search)
 
         # One term cache per ontology created automatically from the
@@ -137,6 +136,7 @@ def make_lifespan(domain: Domain) -> Callable[[FastAPI], Any]:
             app.state.beacon_service,
             refresh_interval=cache_config().VALUE_COUNT_CACHE_REFRESH,
         )
+        app.state.value_counts = value_counts
         await value_counts.start()
 
         yield

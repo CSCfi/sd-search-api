@@ -45,8 +45,13 @@ from search_api.services.ontology.term_cache import OntologyTermCache
 # via app.dependency_overrides. They resolve the active domain and shared
 # services from app.state, which the lifespan populates.
 def get_beacon_service(request: Request) -> BeaconService:
-    domain: Domain = request.app.state.domain
-    return domain.beacon_service_factory(request.app.state.search)
+    """Return the BeaconService created in the service lifecycle.
+
+    The field value counts are cached in the BeaconService, and
+    kept fresh by the ValueCountsUpdater.
+    """
+    service: BeaconService = request.app.state.beacon_service
+    return service
 
 
 def get_beacon_query_services(request: Request) -> dict[str, BeaconQueryService]:

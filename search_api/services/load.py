@@ -49,6 +49,7 @@ class LoadService:
         self._ontology_bindings = get_ontology_bindings(filtering_terms, term_caches)
         self._filtering_scopes = filtering_scopes
         self._replace_concepts = replace_concepts
+        self._initialised = False
 
     def validate_document(self, doc: ExtractedDocument) -> None:
         """Check an extracted document's scope against the deployment.
@@ -70,6 +71,23 @@ class LoadService:
         self.validate_document(doc)
         await upsert_document(cur, doc.id, build_document(doc), doc.modified_at)
 
+    async def _initialise(self) -> None:
+        """Initialise in-memory caches and ontologies before documents are loaded."""
+        if self._initialised:
+            return
+
+        for cache in self._term_caches.values():
+            await cache.load()
+
+        # The ontologies must be initialised before load to
+        # resolve preferred terms for the terms cache.
+        for ontology in {
+            binding.ontology for binding in self._ontology_bindings.values()
+        }:
+            await ontology.init()
+
+        self._initialised = True
+
     async def store_documents(self, docs_iter: Iterator[ExtractedDocument]) -> None:
         """
         Store extracted documents to the database.
@@ -80,15 +98,7 @@ class LoadService:
 
         :param docs_iter: Iterator of extracted documents.
         """
-        for cache in self._term_caches.values():
-            await cache.load()
-
-        # The ontologies must be initialised before load to
-        # resolve preferred terms for the terms cache.
-        for ontology in {
-            binding.ontology for binding in self._ontology_bindings.values()
-        }:
-            await ontology.init()
+        await self._initialise()
 
         loaded = 0
         skipped = 0

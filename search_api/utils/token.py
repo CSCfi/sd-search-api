@@ -10,7 +10,7 @@ from joserfc.jwk import ECKey
 # A JWT token is created for each request, so only a short lifetime is required.
 SERVICE_TOKEN_LIFETIME = timedelta(seconds=60)
 
-# SIgn the JWT token using a private key. The public key is sent to the recipient.
+# Sign the JWT token using a private key. The public key is sent to the recipient.
 SERVICE_TOKEN_ALGORITHM = "ES256"
 
 

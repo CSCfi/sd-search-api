@@ -366,6 +366,12 @@ def bp_opensearch_index_name() -> str:
     return BP_OPENSEARCH_INDEX
 
 
+@pytest_asyncio.fixture(scope="module", autouse=True)
+async def reload_caches(bp_opensearch_index, client: httpx.Client):
+    # Depends on the bp_opensearch_index fixture.
+    _reload_caches(client)
+
+
 @pytest.fixture(scope="module")
 def client() -> httpx.Client:
     with httpx.Client(
@@ -401,6 +407,13 @@ def client() -> httpx.Client:
         yield c
 
 
+def _reload_caches(client: httpx.Client) -> None:
+    resp = client.post(
+        "/admin/caches/reload", headers={"Authorization": f"Bearer {_ADMIN_KEY}"}
+    )
+    assert resp.status_code == 204
+
+
 @pytest_asyncio.fixture(scope="module")
 async def snomed_terms(client: httpx.Client):
     """Initialise database SNOMED preferred terms cache."""
@@ -420,11 +433,7 @@ async def snomed_terms(client: httpx.Client):
                 ],
             )
 
-    # Reload in-memory cache.
-    resp = client.post(
-        "/admin/snomed/reload", headers={"Authorization": f"Bearer {_ADMIN_KEY}"}
-    )
-    assert resp.status_code == 204
+    _reload_caches(client)
 
     yield
 

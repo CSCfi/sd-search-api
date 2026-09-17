@@ -1,5 +1,7 @@
 """Boundary validation of extracted documents against the deployment's config."""
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from search_api.api.bigpicture.domain import BP_DOMAIN
@@ -66,3 +68,24 @@ def test_validate_document_allows_missing_scope_without_declared_scopes():
 def test_validate_document_names_the_offending_document():
     with pytest.raises(UserException, match="Document 'img-1'"):
         _load_service().validate_document(_document(scope="preclinical"))
+
+
+@pytest.mark.asyncio
+async def test_load_initialises_once(monkeypatch):
+    service = _load_service()
+
+    reads = []
+    for cache in service._term_caches.values():
+        read = AsyncMock()
+        monkeypatch.setattr(cache, "load", read)
+        reads.append(read)
+    for ontology in {b.ontology for b in service._ontology_bindings.values()}:
+        read = AsyncMock()
+        monkeypatch.setattr(ontology, "init", read)
+        reads.append(read)
+
+    for _ in range(3):
+        await service._initialise()
+
+    for read in reads:
+        read.assert_awaited_once_with()

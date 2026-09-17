@@ -7,8 +7,8 @@ import pytest
 
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
 from search_api.api.bigpicture.extract.document import (
-    _get_last_modification_time,
     extract_dataset_documents,
+    get_last_modification_time,
 )
 from search_api.api.extract_logs import invalid_scheme_log
 from search_api.api.opensearch.document import build_document
@@ -234,7 +234,7 @@ def test_get_last_modification_time_mtime(mock_fs):
     expected = datetime.fromtimestamp(ts, tz=timezone.utc)
     fs = mock_fs({"/a": {"mtime": ts}})
 
-    result = _get_last_modification_time(fs, ["/a"])
+    result = get_last_modification_time(fs, ["/a"])
 
     assert result == expected
     assert result.tzinfo == timezone.utc
@@ -245,7 +245,7 @@ def test_get_last_modification_time_last_modified(mock_fs):
     dt = datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
     fs = mock_fs({"/a": {"last_modified": dt}})
 
-    result = _get_last_modification_time(fs, ["/a"])
+    result = get_last_modification_time(fs, ["/a"])
 
     assert result == dt
 
@@ -255,7 +255,7 @@ def test_get_last_modification_time_LastModified(mock_fs):
     naive = datetime(2024, 6, 1, 8, 30, 0)
     fs = mock_fs({"/a": {"LastModified": naive}})
 
-    result = _get_last_modification_time(fs, ["/a"])
+    result = get_last_modification_time(fs, ["/a"])
 
     assert result == naive.replace(tzinfo=timezone.utc)
     assert result.tzinfo == timezone.utc
@@ -267,7 +267,7 @@ def test_get_last_modification_time_returns_max(mock_fs):
     newer = datetime(2024, 6, 1, tzinfo=timezone.utc)
     fs = mock_fs({"/a": {"mtime": older}, "/b": {"mtime": newer}})
 
-    result = _get_last_modification_time(fs, ["/a", "/b"])
+    result = get_last_modification_time(fs, ["/a", "/b"])
 
     assert result == newer
 
@@ -275,7 +275,7 @@ def test_get_last_modification_time_returns_max(mock_fs):
 def test_get_last_modification_time_no_times(mock_fs):
     fs = mock_fs({"/a": {"size": 1234}})
 
-    result = _get_last_modification_time(fs, ["/a"])
+    result = get_last_modification_time(fs, ["/a"])
 
     assert result is None
 
@@ -283,7 +283,7 @@ def test_get_last_modification_time_no_times(mock_fs):
 def test_get_last_modification_time_no_files():
     fs = MagicMock()
 
-    result = _get_last_modification_time(fs, [])
+    result = get_last_modification_time(fs, [])
 
     assert result is None
     fs.info.assert_not_called()

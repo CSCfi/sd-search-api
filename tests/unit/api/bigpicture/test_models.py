@@ -16,7 +16,7 @@ from search_api.api.bigpicture.models import (
 from search_api.api.bigpicture.domain import BP_DOMAIN
 from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorService
 from search_api.api.opensearch.models import OpenSearchOntologyOrValue
-from search_api.api.bigpicture.extract import (
+from search_api.api.bigpicture.extract.models import (
     BigpictureCodeAttributeValue,
     BigpictureFields,
     BigpictureObservationFields,

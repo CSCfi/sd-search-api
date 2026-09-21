@@ -1,6 +1,7 @@
 """Unit tests for SNOMED OntologyService hooks called by ``prepare_ontology_filter`` template method."""
 
 import pytest
+from typing import NamedTuple
 from unittest.mock import AsyncMock, patch
 
 from search_api.api.bigpicture.models import BP_FILTERING_TERM_BY_ID
@@ -15,6 +16,31 @@ from search_api.services.ontology.snomed import (
 
 ANIMAL_SPECIES_TERM = BP_FILTERING_TERM_BY_ID["animal_species"]
 MOCK_SNOWSTORM_URL = "https://snowstorm.example"
+
+# The SNOMED CT concepts these tests name.
+CONCEPT_ID_HOMO_SAPIENS = "337915000"
+CONCEPT_ID_ORGANISM = "410607006"  # the animal_species restriction's root
+CONCEPT_ID_FROZEN_SECTION = "261014004"
+CONCEPT_ID_NONEXISTENT = "999999006"
+
+
+class _Replacement(NamedTuple):
+    """A retired concept id and the active concept id replacing it."""
+
+    retired: str
+    active: str
+
+
+# A concept id replacement named by the type of association.
+REPLACEMENT_VIA_REPLACED_BY = _Replacement(retired="35917007", active="1187332001")
+REPLACEMENT_VIA_SAME_AS = _Replacement(retired="84499006", active="409777003")
+
+# Retired concepts with no active equivalent.
+CONCEPT_ID_RETIRED_POSSIBLY_EQUIVALENT = "11111111000"
+CONCEPT_ID_RETIRED_SEVERAL_REPLACEMENTS = "22222222000"
+CONCEPT_ID_RETIRED_REPLACEMENT_ALSO_RETIRED = "33333333000"
+CONCEPT_ID_RETIRED_REPLACEMENT = "44444444000"
+CONCEPT_ID_RETIRED_NAMING_NOTHING = "55555555000"
 
 
 class MockResponse:
@@ -60,11 +86,11 @@ def service() -> SnomedService:
     "value,expected",
     [
         # Real concept ids, core and extension partitions.
-        ("410607006", True),
-        ("337915000", True),
-        ("35917007", True),
-        # Not digits, or nothing at all.
-        ("Homo sapiens", False),
+        (CONCEPT_ID_ORGANISM, True),
+        (CONCEPT_ID_HOMO_SAPIENS, True),
+        (REPLACEMENT_VIA_REPLACED_BY.retired, True),
+        # Not digits.
+        ("Invalid", False),
         ("", False),
         # Invalid leading zeros.
         ("0410607006", False),
@@ -79,18 +105,18 @@ def service() -> SnomedService:
         ("337915001", False),
     ],
 )
-def test_is_concept_id(service, value, expected):
-    assert service.is_concept_id(value) is expected
+def test_is_well_formed(service, value, expected):
+    assert service.is_well_formed(value) is expected
 
 
 @pytest.mark.asyncio
 async def test_find_concept_ids_passes_the_terms_ecl_to_snowstorm(service):
-    service.find_concept = AsyncMock(return_value=_concept("337915000"))
+    service.find_concept = AsyncMock(return_value=_concept(CONCEPT_ID_HOMO_SAPIENS))
 
     with patch.object(SnomedService, "_describes", new=AsyncMock(return_value=True)):
         result = await service._find_concept_ids("Homo sapiens", ANIMAL_SPECIES_TERM)
 
-    assert result == {"337915000"}
+    assert result == {CONCEPT_ID_HOMO_SAPIENS}
     service.find_concept.assert_awaited_once_with(
         "Homo sapiens", ecl=ANIMAL_SPECIES_TERM.snomed_ecl
     )
@@ -107,7 +133,7 @@ async def test_find_concept_ids_resolves_to_nothing_when_no_concept_matches(serv
 
 @pytest.mark.asyncio
 async def test_find_concept_ids_rejects_a_match_the_value_does_not_describe(service):
-    service.find_concept = AsyncMock(return_value=_concept("261014004"))
+    service.find_concept = AsyncMock(return_value=_concept(CONCEPT_ID_FROZEN_SECTION))
 
     with patch.object(SnomedService, "_describes", new=AsyncMock(return_value=False)):
         result = await service._find_concept_ids("Frozen", ANIMAL_SPECIES_TERM)
@@ -127,12 +153,12 @@ async def test_find_descendant_ids_unions_the_descendants_of_every_concept_id(
             side_effect=[[_concept("111"), _concept("222")], [_concept("222")]]
         ),
     ) as find_descendants:
-        result = await service._find_descendant_ids({"410607006", "888"})
+        result = await service._find_descendant_ids({CONCEPT_ID_ORGANISM, "888"})
 
     assert result == {"111", "222"}
     # Every concept id is looked up, and only those.
     assert sorted(call.args[0] for call in find_descendants.await_args_list) == [
-        "410607006",
+        CONCEPT_ID_ORGANISM,
         "888",
     ]
 
@@ -142,7 +168,7 @@ async def test_find_descendant_ids_resolves_to_nothing_for_a_leaf_concept(servic
     with patch.object(
         SnomedService, "find_descendants", new=AsyncMock(return_value=[])
     ):
-        result = await service._find_descendant_ids({"410607006"})
+        result = await service._find_descendant_ids({CONCEPT_ID_ORGANISM})
 
     assert result == set()
 
@@ -227,14 +253,14 @@ def _mock_fetch_concept(concept_id: str, active: bool, **associations) -> dict:
 @pytest.mark.parametrize(
     "concept_id,expected",
     [
-        ("35917007", "1187332001"),
-        ("84499006", "409777003"),
-        ("410607006", None),  # active, so nothing to replace
-        ("11111111000", None),  # POSSIBLY_EQUIVALENT_TO is not an equivalence
-        ("22222222000", None),  # several replacements, so a human decides
-        ("33333333000", None),  # the replacement is retired in its turn
-        ("55555555000", None),  # retired, naming no replacement
-        ("999999006", None),  # no such concept
+        (REPLACEMENT_VIA_REPLACED_BY.retired, REPLACEMENT_VIA_REPLACED_BY.active),
+        (REPLACEMENT_VIA_SAME_AS.retired, REPLACEMENT_VIA_SAME_AS.active),
+        (CONCEPT_ID_ORGANISM, None),  # active, so nothing to replace
+        (CONCEPT_ID_RETIRED_POSSIBLY_EQUIVALENT, None),
+        (CONCEPT_ID_RETIRED_SEVERAL_REPLACEMENTS, None),
+        (CONCEPT_ID_RETIRED_REPLACEMENT_ALSO_RETIRED, None),
+        (CONCEPT_ID_RETIRED_NAMING_NOTHING, None),
+        (CONCEPT_ID_NONEXISTENT, None),
     ],
 )
 @pytest.mark.asyncio
@@ -242,25 +268,47 @@ async def test_replacement_concept_id(service, monkeypatch, concept_id, expected
     """Test concept id replacement with mock _fetch_concept."""
 
     _mock_fetch_concept_values = {
-        "410607006": _mock_fetch_concept("410607006", active=True),
+        CONCEPT_ID_ORGANISM: _mock_fetch_concept(CONCEPT_ID_ORGANISM, active=True),
         # Retired with active replacement.
-        "35917007": _mock_fetch_concept("35917007", False, REPLACED_BY=["1187332001"]),
-        "1187332001": _mock_fetch_concept("1187332001", active=True),
-        "84499006": _mock_fetch_concept("84499006", False, SAME_AS=["409777003"]),
-        "409777003": _mock_fetch_concept("409777003", active=True),
+        REPLACEMENT_VIA_REPLACED_BY.retired: _mock_fetch_concept(
+            REPLACEMENT_VIA_REPLACED_BY.retired,
+            False,
+            REPLACED_BY=[REPLACEMENT_VIA_REPLACED_BY.active],
+        ),
+        REPLACEMENT_VIA_REPLACED_BY.active: _mock_fetch_concept(
+            REPLACEMENT_VIA_REPLACED_BY.active, active=True
+        ),
+        REPLACEMENT_VIA_SAME_AS.retired: _mock_fetch_concept(
+            REPLACEMENT_VIA_SAME_AS.retired,
+            False,
+            SAME_AS=[REPLACEMENT_VIA_SAME_AS.active],
+        ),
+        REPLACEMENT_VIA_SAME_AS.active: _mock_fetch_concept(
+            REPLACEMENT_VIA_SAME_AS.active, active=True
+        ),
         # Retired with no active replacement.
-        "11111111000": _mock_fetch_concept(
-            "11111111000", False, POSSIBLY_EQUIVALENT_TO=["410607006"]
+        CONCEPT_ID_RETIRED_POSSIBLY_EQUIVALENT: _mock_fetch_concept(
+            CONCEPT_ID_RETIRED_POSSIBLY_EQUIVALENT,
+            False,
+            POSSIBLY_EQUIVALENT_TO=[CONCEPT_ID_ORGANISM],
         ),
-        "22222222000": _mock_fetch_concept(
-            "22222222000", False, REPLACED_BY=["410607006", "409777003"]
+        CONCEPT_ID_RETIRED_SEVERAL_REPLACEMENTS: _mock_fetch_concept(
+            CONCEPT_ID_RETIRED_SEVERAL_REPLACEMENTS,
+            False,
+            REPLACED_BY=[CONCEPT_ID_ORGANISM, REPLACEMENT_VIA_SAME_AS.active],
         ),
-        "33333333000": _mock_fetch_concept(
-            "33333333000", False, REPLACED_BY=["44444444000"]
+        CONCEPT_ID_RETIRED_REPLACEMENT_ALSO_RETIRED: _mock_fetch_concept(
+            CONCEPT_ID_RETIRED_REPLACEMENT_ALSO_RETIRED,
+            False,
+            REPLACED_BY=[CONCEPT_ID_RETIRED_REPLACEMENT],
         ),
         # Retired with a retired replacement.
-        "44444444000": _mock_fetch_concept("44444444000", active=False),
-        "55555555000": _mock_fetch_concept("55555555000", active=False),
+        CONCEPT_ID_RETIRED_REPLACEMENT: _mock_fetch_concept(
+            CONCEPT_ID_RETIRED_REPLACEMENT, active=False
+        ),
+        CONCEPT_ID_RETIRED_NAMING_NOTHING: _mock_fetch_concept(
+            CONCEPT_ID_RETIRED_NAMING_NOTHING, active=False
+        ),
     }
 
     async def mock_fetch_concept(_concept_id: str, _: str) -> dict | None:
@@ -295,9 +343,12 @@ async def test_describes(service, monkeypatch):
         "search_api.services.ontology.snomed._fetch_concept", mock_fetch_concept
     )
 
-    assert await SnomedService._describes("337915000", "human") is True
-    assert await SnomedService._describes("337915000", "Retired synonym") is False
-    assert calls == ["337915000", "337915000"]
+    assert await SnomedService._describes(CONCEPT_ID_HOMO_SAPIENS, "human") is True
+    assert (
+        await SnomedService._describes(CONCEPT_ID_HOMO_SAPIENS, "Retired synonym")
+        is False
+    )
+    assert calls == [CONCEPT_ID_HOMO_SAPIENS, CONCEPT_ID_HOMO_SAPIENS]
 
 
 @pytest.mark.asyncio
@@ -311,6 +362,47 @@ async def test_describes_invalid_concept_id(service, monkeypatch):
         "search_api.services.ontology.snomed._fetch_concept", mock_fetch_concept
     )
 
-    assert await _fetch_descriptions("999999006", "MAIN") == frozenset()
-    assert await SnomedService._describes("999999006", "anything") is False
-    assert await SnomedService._describes("999999006", "999999006") is False
+    assert await _fetch_descriptions(CONCEPT_ID_NONEXISTENT, "MAIN") == frozenset()
+    assert await SnomedService._describes(CONCEPT_ID_NONEXISTENT, "anything") is False
+    assert (
+        await SnomedService._describes(CONCEPT_ID_NONEXISTENT, CONCEPT_ID_NONEXISTENT)
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_is_within_restriction_ontology_restriction(service, monkeypatch):
+    """Test that is_selected_by_ecl is called."""
+    calls: list[tuple[str, str, str]] = []
+
+    async def mock_is_selected_by_ecl(concept_id: str, ecl: str, branch: str) -> bool:
+        calls.append((concept_id, ecl, branch))
+        return True
+
+    monkeypatch.setattr(
+        "search_api.services.ontology.snomed._is_selected_by_ecl",
+        mock_is_selected_by_ecl,
+    )
+
+    assert (
+        await service.is_within_restriction(
+            CONCEPT_ID_HOMO_SAPIENS, ANIMAL_SPECIES_TERM
+        )
+        is True
+    )
+    assert calls == [(CONCEPT_ID_HOMO_SAPIENS, ANIMAL_SPECIES_TERM.snomed_ecl, "MAIN")]
+
+
+@pytest.mark.asyncio
+async def test_is_within_restriction_no_ontology_restriction(service, monkeypatch):
+    """Test that is_selected_by_ecl is not called."""
+    monkeypatch.setattr(
+        "search_api.services.ontology.snomed._is_selected_by_ecl",
+        AsyncMock(side_effect=AssertionError("Snowstorm must not be asked")),
+    )
+    unrestricted = ANIMAL_SPECIES_TERM.model_copy(update={"ontologyRestriction": None})
+
+    assert (
+        await service.is_within_restriction(CONCEPT_ID_HOMO_SAPIENS, unrestricted)
+        is True
+    )

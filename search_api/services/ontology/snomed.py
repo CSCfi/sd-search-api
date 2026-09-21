@@ -9,7 +9,11 @@ from aiocache import cached  # type: ignore[import-untyped]
 from pydantic import BaseModel
 from stdnum import verhoeff
 
-from search_api.api.beacon.models import BeaconFilteringTerm
+from search_api.api.beacon.models import (
+    BeaconFilteringTerm,
+    OntologyRestriction,
+    build_snomed_ecl,
+)
 from search_api.conf import snowstorm_config as _snowstorm_config
 from search_api.exceptions import SystemException
 from search_api.services.ontology.service import OntologyService, normalise_term
@@ -47,7 +51,7 @@ _CONCEPT_ID_MIN_LENGTH = 6
 _CONCEPT_ID_MAX_LENGTH = 18
 
 
-def is_concept_id(value: str) -> bool:
+def is_well_formed_concept_id(value: str) -> bool:
     """Return True if value is a well-formed SNOMED CT concept id.
 
     An SNOMED CT concept id is 6 to 18 digits and never starts with a zero. Its last
@@ -133,6 +137,25 @@ async def _fetch_concept(concept_id: str, branch: str) -> dict | None:
             return None
         resp.raise_for_status()
         return resp.json()
+
+
+@cached(ttl=_CACHE_TTL)
+async def _is_selected_by_ecl(concept_id: str, ecl: str, branch: str) -> bool:
+    """Return True if the ECL expression selects the concept.
+
+    False for a concept id SNOMED CT does not have, and for one it has retired-
+    Retiring a concept strips its relationships, so ``<<`` no longer selects it.
+    """
+    url = f"{_snowstorm_url()}/{branch}/concepts"
+    async with _client() as client:
+        # The concept id filters the expression's results instead of being written
+        # into the expression, which Snowstorm answers with a 400 when the concept
+        # is retired or unknown.
+        resp = await client.get(
+            url, params={"ecl": ecl, "conceptIds": concept_id, "limit": 1}
+        )
+        resp.raise_for_status()
+        return bool(resp.json().get("items", []))
 
 
 @cached(ttl=_CACHE_TTL)
@@ -266,9 +289,13 @@ class SnomedService(OntologyService):
     def __init__(self) -> None:
         pass
 
-    def is_concept_id(self, value: str) -> bool:
-        """Return True if value is a SNOMED CT concept ID."""
-        return is_concept_id(value)
+    def is_well_formed(self, concept_id: str) -> bool:
+        """Return True if the value is shaped like a SNOMED CT concept id."""
+        return is_well_formed_concept_id(concept_id)
+
+    async def is_known(self, concept_id: str, branch: str = "MAIN") -> bool:
+        """Return True if SNOMED CT has the concept, retired or not."""
+        return await _fetch_concept(concept_id, branch) is not None
 
     async def find_concept(
         self,
@@ -305,6 +332,11 @@ class SnomedService(OntologyService):
             Every active concept that is a  descendant of the concept ID.
         """
         return await _fetch_all_concepts(f"< {concept_id}", branch)
+
+    async def is_retired(self, concept_id: str, branch: str = "MAIN") -> bool:
+        """Return True if SNOMED CT has made the concept inactive."""
+        concept = await _fetch_concept(concept_id, branch)
+        return concept is not None and not concept.get("active", True)
 
     async def replacement_concept_id(
         self, concept_id: str, branch: str = "MAIN"
@@ -396,6 +428,22 @@ class SnomedService(OntologyService):
         if not await self._describes(concept.concept_id, value):
             return set()
         return {concept.concept_id}
+
+    async def _is_within_restriction(
+        self,
+        concept_id: str,
+        restriction: OntologyRestriction,
+        branch: str = "MAIN",
+    ) -> bool:
+        """Return True if the concept is in the restricted part of SNOMED CT.
+
+        True for a retired concept, which the expression cannot place. Retiring a
+        concept strips its relationships.
+        """
+        ecl = build_snomed_ecl(restriction)
+        if await _is_selected_by_ecl(concept_id, ecl, branch):
+            return True
+        return await self.is_retired(concept_id, branch)
 
     async def _find_descendant_ids(self, concept_ids: set[str]) -> set[str]:
         """Return every active descendant of the given concept IDs."""

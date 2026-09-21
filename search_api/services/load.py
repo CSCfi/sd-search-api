@@ -131,7 +131,7 @@ class LoadService:
                     cur, doc, self._ontology_bindings, self._replace_concepts
                 )
                 await self.store_document(cur, doc)
-                await cache_concept_terms(cur, doc, self._ontology_bindings)
+                await cache_concept_terms(doc, self._ontology_bindings)
                 loaded += 1
                 logger.debug("Loaded document %s.", doc.id)
 

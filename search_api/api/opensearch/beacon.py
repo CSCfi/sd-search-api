@@ -55,8 +55,8 @@ def build_filtering_term_clause(
             )
         ontology = get_ontology_service(term.ontology.id)
         # Search concept IDs and other values in their respective fields.
-        concept_ids = [v for v in values if ontology.is_concept_id(v)]
-        other_values = [v for v in values if not ontology.is_concept_id(v)]
+        concept_ids = [v for v in values if ontology.is_well_formed(v)]
+        other_values = [v for v in values if not ontology.is_well_formed(v)]
         clauses = []
         if concept_ids:
             clauses.append(build_terms_clause(field.concept_value_field, concept_ids))

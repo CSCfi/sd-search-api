@@ -39,6 +39,9 @@ V1_CONCEPTS = [
 
 V1_ROOT_CONCEPTS: tuple[str, ...] = ("C1", "C2")
 
+# The test concepts are C-codes, like SEND's.
+CONCEPT_ID_PATTERN = r"C\d+"
+
 V2_CONCEPTS = [
     CachedOntologyConcept(concept_id="C6", preferred_term="P6"),
     CachedOntologyConcept(concept_id="C7", preferred_term="P7"),
@@ -128,7 +131,9 @@ def term(
 
 def make_service(concepts: list[CachedOntologyConcept]) -> CachedOntologyService:
     """A service over an empty store, so init fills it from the source."""
-    return CachedOntologyService(MockStore(), MockSource(cached_ontology(concepts)))
+    return CachedOntologyService(
+        MockStore(), MockSource(cached_ontology(concepts)), CONCEPT_ID_PATTERN
+    )
 
 
 @pytest.fixture
@@ -140,8 +145,8 @@ def service() -> CachedOntologyService:
 async def test_init(service):
     """Test that init populates the ontology cache."""
     await service.init()
-    assert service.is_concept_id("C3")
-    assert not service.is_concept_id("P3")
+    assert await service.is_known("C3")
+    assert not await service.is_known("P3")
 
 
 @pytest.mark.asyncio
@@ -221,12 +226,12 @@ async def test_find_descendant_ids(service):
 @pytest.mark.asyncio
 async def test_set_concepts_swaps_table_to_new_version(service):
     await service.init()
-    assert service.is_concept_id("C4")
+    assert await service.is_known("C4")
 
     service._set_concepts(cached_ontology(V2_CONCEPTS, version="v2"))
 
-    assert not service.is_concept_id("C4")
-    assert service.is_concept_id("C7")
+    assert not await service.is_known("C4")
+    assert await service.is_known("C7")
 
 
 @pytest.mark.asyncio
@@ -234,11 +239,11 @@ async def test_init_serves_what_is_stored_without_fetching():
     store = MockStore()
     await store.write(cached_ontology(V1_CONCEPTS))
     source = MockSource(cached_ontology(V2_CONCEPTS, version="v2"))
-    service = CachedOntologyService(store, source)
+    service = CachedOntologyService(store, source, CONCEPT_ID_PATTERN)
 
     await service.init()
 
-    assert service.is_concept_id("C1")
+    assert await service.is_known("C1")
     assert source.fetch_count == 0
     assert store.write_count == 1  # only the test's own write
 
@@ -247,18 +252,20 @@ async def test_init_serves_what_is_stored_without_fetching():
 async def test_init_fetches_and_stores_when_nothing_is_stored():
     store = MockStore()
     source = MockSource(cached_ontology(V1_CONCEPTS))
-    service = CachedOntologyService(store, source)
+    service = CachedOntologyService(store, source, CONCEPT_ID_PATTERN)
 
     await service.init()
 
-    assert service.is_concept_id("C1")
+    assert await service.is_known("C1")
     assert source.fetch_count == 1
     assert store.stored == source.fetched
 
 
 @pytest.mark.asyncio
 async def test_init_propagates_a_fetch_failure_when_nothing_is_stored():
-    service = CachedOntologyService(MockStore(), FailingMockSource())
+    service = CachedOntologyService(
+        MockStore(), FailingMockSource(), CONCEPT_ID_PATTERN
+    )
 
     with pytest.raises(ConnectionError):
         await service.init()
@@ -269,10 +276,13 @@ async def test_reloads_when_another_process_writes_the_store():
     store = MockStore()
     await store.write(cached_ontology(V1_CONCEPTS))
     service = CachedOntologyService(
-        store, MockSource(cached_ontology(V1_CONCEPTS)), refresh_interval=0.01
+        store,
+        MockSource(cached_ontology(V1_CONCEPTS)),
+        CONCEPT_ID_PATTERN,
+        refresh_interval=0.01,
     )
     await service.init()
-    assert service.is_concept_id("C1")
+    assert await service.is_known("C1")
 
     # Another process replaced the stored ontology.
     store.stored = cached_ontology(V2_CONCEPTS, version="v2", sha256="hash2")
@@ -284,8 +294,8 @@ async def test_reloads_when_another_process_writes_the_store():
     finally:
         service.stop()
 
-    assert service.is_concept_id("C6")
-    assert not service.is_concept_id("C1")
+    assert await service.is_known("C6")
+    assert not await service.is_known("C1")
 
 
 @pytest.mark.asyncio
@@ -293,7 +303,10 @@ async def test_does_not_reload_while_the_store_is_unchanged():
     store = MockStore()
     await store.write(cached_ontology(V1_CONCEPTS))
     service = CachedOntologyService(
-        store, MockSource(cached_ontology(V1_CONCEPTS)), refresh_interval=0.01
+        store,
+        MockSource(cached_ontology(V1_CONCEPTS)),
+        CONCEPT_ID_PATTERN,
+        refresh_interval=0.01,
     )
 
     await service.start()
@@ -324,7 +337,7 @@ async def test_require_initialized():
     service = make_service(V1_CONCEPTS)
 
     with pytest.raises(SystemException, match="has not been initialised"):
-        service.is_concept_id("C1")
+        await service.is_known("C1")
     with pytest.raises(SystemException, match="has not been initialised"):
         await service.get_preferred_terms({"C1"})
     with pytest.raises(SystemException, match="has not been initialised"):
@@ -343,7 +356,7 @@ async def test_after_initialized():
 
     await service.init()
 
-    assert service.is_concept_id("C1")
+    assert await service.is_known("C1")
     assert await service.get_preferred_terms({"C1"}) == {"C1": "P1"}
 
 
@@ -351,8 +364,52 @@ async def test_after_initialized():
 async def test_after_reload():
     store = MockStore()
     store.stored = cached_ontology(V1_CONCEPTS)
-    service = CachedOntologyService(store, MockSource(cached_ontology(V1_CONCEPTS)))
+    service = CachedOntologyService(
+        store, MockSource(cached_ontology(V1_CONCEPTS)), CONCEPT_ID_PATTERN
+    )
 
     await service._reload()
 
-    assert service.is_concept_id("C1")
+    assert await service.is_known("C1")
+
+
+@pytest.mark.asyncio
+async def test_is_within_restriction(service):
+    await service.init()
+
+    assert await service.is_within_restriction("C1", term(["C1"])) is True
+    assert await service.is_within_restriction("C3", term(["C1"])) is True
+    assert await service.is_within_restriction("C3", term(["C2"])) is False
+    assert await service.is_within_restriction("C4", term(["C1"])) is True
+    assert await service.is_within_restriction("C4", term(["C2"])) is True
+    assert await service.is_within_restriction("C5", term(["C1"])) is True
+    assert await service.is_within_restriction("C5", term(["C2"])) is False
+    assert await service.is_within_restriction("invalid", term(["C1"])) is False
+
+
+@pytest.mark.asyncio
+async def test_is_within_restriction_no_descendants(service):
+    await service.init()
+    restriction = term(["C1"], restrict_include_descendants=False)
+
+    assert await service.is_within_restriction("C1", restriction) is True
+    assert await service.is_within_restriction("C3", restriction) is False
+
+
+@pytest.mark.asyncio
+async def test_is_within_restriction_cyclic():
+    """A cycle is traversed only once."""
+    service = make_service(
+        [
+            CachedOntologyConcept(
+                concept_id="C1", preferred_term="P1", parent_ids=frozenset({"C2"})
+            ),
+            CachedOntologyConcept(
+                concept_id="C2", preferred_term="P2", parent_ids=frozenset({"C1"})
+            ),
+        ]
+    )
+    await service.init()
+
+    assert await service.is_within_restriction("C1", term(["C2"])) is True
+    assert await service.is_within_restriction("C2", term(["C1"])) is True

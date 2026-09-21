@@ -1,7 +1,8 @@
 import logging
+import re
 from typing import override
 
-from search_api.api.beacon.models import BeaconFilteringTerm
+from search_api.api.beacon.models import BeaconFilteringTerm, OntologyRestriction
 from search_api.exceptions import SystemException
 from search_api.services.ontology.cache.models import (
     CachedOntology,
@@ -27,10 +28,16 @@ class CachedOntologyService(OntologyService):
         self,
         store: OntologyCacheStore,
         source: OntologySource,
+        concept_id_pattern: str,
         refresh_interval: float = 300.0,
     ) -> None:
+        """
+        :param concept_id_pattern: what a concept id of this ontology looks like,
+            matched as a full regular expression.
+        """
         self._store = store
         self._source = source
+        self._concept_id_pattern = re.compile(concept_id_pattern)
         self._poller = UpdatedPoller(
             "ontology",
             lambda: store.updated_at(),
@@ -106,9 +113,13 @@ class CachedOntologyService(OntologyService):
         logger.info("Refreshed the ontology.")
 
     @override
-    def is_concept_id(self, value: str) -> bool:
+    def is_well_formed(self, concept_id: str) -> bool:
+        return bool(self._concept_id_pattern.fullmatch(concept_id))
+
+    @override
+    async def is_known(self, concept_id: str) -> bool:
         self._require_initialised()
-        return value in self._by_id
+        return concept_id in self._by_id
 
     @override
     async def get_preferred_terms(self, concept_ids: set[str]) -> dict[str, str]:
@@ -128,13 +139,42 @@ class CachedOntologyService(OntologyService):
 
         # Keep only the concepts the field is restricted to. An
         # unrestricted field keeps all of them.
-        restriction = filtering_term.ontologyRestriction
-        if restriction is None:
-            return concept_ids
-        permitted = set(restriction.concept_ids)
-        if restriction.include_descendants:
-            permitted |= await self._find_descendant_ids(permitted)
-        return concept_ids & permitted
+        return {
+            concept_id
+            for concept_id in concept_ids
+            if await self.is_within_restriction(concept_id, filtering_term)
+        }
+
+    @override
+    async def _is_within_restriction(
+        self, concept_id: str, restriction: OntologyRestriction
+    ) -> bool:
+        """Return True if the restriction includes the concept.
+
+        Walks up from the concept rather than expanding the restriction downwards.
+        A concept has few ancestors however large the restricted subtree.
+        """
+        self._require_initialised()
+        permitted_concept_ids = set(restriction.concept_ids)
+        if concept_id in permitted_concept_ids:
+            return True
+
+        if not restriction.include_descendants:
+            return False
+
+        seen = {concept_id}
+        pending = [concept_id]
+        while pending:
+            concept = self._by_id.get(pending.pop())
+            if concept is None:
+                continue
+            for parent_id in concept.parent_ids:
+                if parent_id in permitted_concept_ids:
+                    return True
+                if parent_id not in seen:
+                    seen.add(parent_id)
+                    pending.append(parent_id)
+        return False
 
     @override
     async def _find_descendant_ids(self, concept_ids: set[str]) -> set[str]:

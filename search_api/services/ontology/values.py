@@ -7,7 +7,10 @@ from psycopg import AsyncCursor
 from pydantic import BaseModel, ConfigDict
 
 from search_api.api.beacon.models import BeaconFilteringTerm
-from search_api.api.opensearch.models import ExtractedDocument, OpenSearchFieldValue
+from search_api.api.opensearch.models import (
+    ExtractedDocument,
+    OpenSearchFieldValue,
+)
 from search_api.database.document_log import write_document_log
 from search_api.database.models import StoredDocumentLog
 from search_api.exceptions import SystemException
@@ -30,6 +33,11 @@ class OntologyBinding(BaseModel):
     term_cache: OntologyTermCache
 
 
+def _stripped(value: str | None) -> str | None:
+    """Return the value without surrounding space, or None when nothing is left."""
+    return (value or "").strip() or None
+
+
 class OntologyValueWithBinding(BaseModel):
     """Ontology field value with information to resolve it to a valid concept id."""
 
@@ -44,11 +52,11 @@ class OntologyValueWithBinding(BaseModel):
 
     @property
     def concept_id(self) -> str | None:
-        return self._concept_id_and_meaning[0]
+        return _stripped(self._concept_id_and_meaning[0])
 
     @property
     def meaning(self) -> str | None:
-        return self._concept_id_and_meaning[1]
+        return _stripped(self._concept_id_and_meaning[1])
 
     @property
     def _concept_id_and_meaning(self) -> tuple[str | None, str | None]:
@@ -75,19 +83,42 @@ def get_ontology_bindings(
     }
 
 
-async def _resolve_concept_id_by_meaning(
+async def _restrict_concept_ids(
+    binding: OntologyBinding, meaning: str, concept_ids: set[str]
+) -> set[str]:
+    """Return the concept ids that are included in the field's ontology restriction.
+
+    :param binding: The field's filtering term and ontology.
+    :param meaning: The textual concept value.
+    :param concept_ids: The candidate concept ids the meaning named, more than one.
+    :return: The candidates the restriction covers, or every candidate if it
+        covers none.
+    """
+    restricted_concept_ids = await binding.ontology.resolve_concept_ids(
+        meaning, binding.term, None
+    )
+    return (concept_ids & restricted_concept_ids) or concept_ids
+
+
+async def _resolve_concept_id_from_meaning(
     cur: AsyncCursor, document_id: str, ontology_value: OntologyValueWithBinding
 ) -> str | None:
-    """Resolve valid concept id from a textual concept value."""
+    """Resolve one concept id from the meaning.
+
+    Exactly one concept id must have the meaning.
+    """
     binding = ontology_value.binding
-    meaning = (ontology_value.meaning or "").strip()
-    resolved = (
-        await binding.ontology.resolve_concept_ids(
-            meaning, binding.term, binding.term_cache
-        )
-        if meaning
-        else set()
+    meaning = ontology_value.meaning
+    if meaning is None:
+        return None
+
+    resolved = await binding.ontology.resolve_concept_ids(
+        meaning, binding.term, binding.term_cache
     )
+    if len(resolved) > 1:
+        # More than one concept id was found. Restrict concept ids
+        # to the ontology restriction.
+        resolved = await _restrict_concept_ids(binding, meaning, resolved)
 
     if len(resolved) == 1:
         (concept_id,) = resolved
@@ -110,13 +141,67 @@ async def _resolve_concept_id_by_meaning(
             StoredDocumentLog(
                 document_id=document_id,
                 field_id=ontology_value.field_id,
-                severity="WARNING",
+                severity="ERROR",
                 message=f"Textual concept value '{meaning}' resolves to several "
                 f"concept ids for field '{ontology_value.field_id}': "
                 f"{', '.join(sorted(resolved))}.",
             ),
         )
     return None
+
+
+async def _is_valid_concept_id(ontology_value: OntologyValueWithBinding) -> bool:
+    """Return True if the concept id is found in the ontology."""
+
+    concept_id = ontology_value.concept_id
+    ontology = ontology_value.binding.ontology
+    if concept_id is None or not ontology.is_well_formed(concept_id):
+        return False
+    if await _is_indexed_concept_id(ontology_value, concept_id):
+        return True
+    return await ontology.is_known(concept_id)
+
+
+async def _is_indexed_concept_id(
+    ontology_value: OntologyValueWithBinding, concept_id: str
+) -> bool:
+    """Return True if the concept id is already indexed for the field."""
+    return bool(
+        await ontology_value.binding.term_cache.get_terms_by_concept_id(
+            ontology_value.field_id, {concept_id}
+        )
+    )
+
+
+async def _is_within_restriction(
+    cur: AsyncCursor,
+    document_id: str,
+    ontology_value: OntologyValueWithBinding,
+    concept_id: str,
+) -> bool:
+    """Return True if the field's ontology restriction allows the concept id."""
+    binding = ontology_value.binding
+    field_id = ontology_value.field_id
+
+    if await _is_indexed_concept_id(ontology_value, concept_id):
+        # The concept id has been indexed previously.
+        return True
+
+    # Check if the field's ontology restriction allows the concept id.
+    if await binding.ontology.is_within_restriction(concept_id, binding.term):
+        return True
+
+    await write_document_log(
+        cur,
+        StoredDocumentLog(
+            document_id=document_id,
+            field_id=field_id,
+            severity="ERROR",
+            message=f"Concept id '{concept_id}' is not among the ontology "
+            f"'{binding.ontology_id}' concepts allowed for field '{field_id}'.",
+        ),
+    )
+    return False
 
 
 async def _resolve_retired_concept_id(
@@ -153,15 +238,26 @@ async def _resolve_concept_id(
     ontology_value: OntologyValueWithBinding,
     replace_concepts: bool,
 ) -> OpenSearchFieldValue | None:
-    """Resolve a valid concept id and assign it to a copy of the OpenSearch field value."""
+    """Resolve a valid concept id and assign it to a copy of the OpenSearch field value.
+
+    The ``ontology_value`` contains a concept id, meaning or both. The meaning is
+    used if the concept id does not exist.
+
+    :param cur: The cursor the document's log messages are written on.
+    :param document_id: The document the value belongs to, named in its logs.
+    :param ontology_value: An extracted ontology value, with the field's filtering
+        term and ontology.
+    :param replace_concepts: Whether a retired concept id is replaced by the
+        active concept replacing it.
+    :return: A copy of the field value carrying the resolved concept id, or None
+        if no valid concept id could be resolved.
+    """
     binding = ontology_value.binding
     provided_concept_id = ontology_value.concept_id
 
     # Check if the provided concept id resolves to a valid concept id.
     concept_id = (
-        provided_concept_id
-        if provided_concept_id and binding.ontology.is_concept_id(provided_concept_id)
-        else None
+        provided_concept_id if await _is_valid_concept_id(ontology_value) else None
     )
     if provided_concept_id is not None and concept_id is None:
         await write_document_log(
@@ -178,17 +274,20 @@ async def _resolve_concept_id(
 
     if concept_id is None:
         # Check if the provided textual representation resolves to a valid concept id.
-        concept_id = await _resolve_concept_id_by_meaning(
+        concept_id = await _resolve_concept_id_from_meaning(
             cur, document_id, ontology_value
         )
-    if concept_id is not None and replace_concepts:
+    if concept_id is not None:
         # Check if the resolved concept id is retired and resolves to a valid concept id.
-        concept_id = await _resolve_retired_concept_id(
-            cur, document_id, ontology_value, concept_id
+        concept_id = (
+            await _resolve_retired_concept_id(
+                cur, document_id, ontology_value, concept_id
+            )
+            if replace_concepts
+            else concept_id
         )
 
     if concept_id is None:
-        # A valid concept id could not be resolved.
         await write_document_log(
             cur,
             StoredDocumentLog(
@@ -200,6 +299,11 @@ async def _resolve_concept_id(
             ),
         )
         return None
+
+    if not await _is_within_restriction(cur, document_id, ontology_value, concept_id):
+        # Logs if the concept id is not within the restriction.
+        return None
+
     return ontology_value.value.model_copy(update={"resolved_concept_id": concept_id})
 
 
@@ -224,9 +328,8 @@ async def _resolve_concept_ids(
             OntologyValueWithBinding(value=value, binding=binding),
             replace_concepts,
         )
-        # If an concept in 'ontology' or 'ontologyOrValue' can't be resolved
-        # to a valid concept id, the value is dropped.
         if value_with_resolved_id is not None:
+            # The concept id was resolved.
             resolved.append(value_with_resolved_id)
     return resolved
 
@@ -254,7 +357,7 @@ async def resolve_concepts(
 
 
 async def cache_concept_terms(
-    cur: AsyncCursor, doc: ExtractedDocument, bindings: dict[str, OntologyBinding]
+    doc: ExtractedDocument, bindings: dict[str, OntologyBinding]
 ) -> None:
     """Cache the preferred term of every concept in the document.
 
@@ -271,17 +374,6 @@ async def cache_concept_terms(
 
     for field_id, resolved_concept_ids in resolved_concept_ids_by_field.items():
         binding = bindings[field_id]
-        unresolved_concept_ids = await binding.term_cache.cache_preferred_terms(
+        await binding.term_cache.cache_preferred_terms(
             field_id, resolved_concept_ids, binding.ontology
         )
-        for unresolved_concept_id in sorted(unresolved_concept_ids):
-            await write_document_log(
-                cur,
-                StoredDocumentLog(
-                    document_id=doc.id,
-                    field_id=field_id,
-                    severity="ERROR",
-                    message=f"Value '{unresolved_concept_id}' was not found in "
-                    f"ontology '{binding.ontology_id}'.",
-                ),
-            )

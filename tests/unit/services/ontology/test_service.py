@@ -15,6 +15,7 @@ from search_api.api.beacon.models import (
     BeaconFilteringTerm,
     BeaconFilteringTermType,
     BeaconQueryFilter,
+    OntologyRestriction,
 )
 from search_api.services.ontology.service import OntologyService, normalise_term
 
@@ -77,8 +78,12 @@ class MockOntologyService(OntologyService):
         self.find_descendant_calls: list[set[str]] = []
 
     @override
-    def is_concept_id(self, value: str) -> bool:
-        return value.startswith("C")
+    def is_well_formed(self, concept_id: str) -> bool:
+        return concept_id.startswith("C")
+
+    @override
+    async def is_known(self, concept_id: str) -> bool:
+        return concept_id in CONCEPT_IDS_BY_VALUE
 
     @override
     async def get_preferred_terms(self, concept_ids: set[str]) -> dict[str, str]:
@@ -90,6 +95,12 @@ class MockOntologyService(OntologyService):
     ) -> set[str]:
         self.find_concept_calls.append((value, filtering_term))
         return set(CONCEPT_IDS_BY_VALUE.get(value, ()))
+
+    @override
+    async def _is_within_restriction(
+        self, concept_id: str, restriction: OntologyRestriction
+    ) -> bool:
+        return True
 
     @override
     async def _find_descendant_ids(self, concept_ids: set[str]) -> set[str]:

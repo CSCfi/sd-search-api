@@ -189,6 +189,18 @@ class OntologyRestriction(BaseModel):
     )
 
 
+def build_snomed_ecl(restriction: OntologyRestriction) -> str:
+    """Build a SNOMED CT ECL expression from an ontology restriction.
+
+    Each concept id becomes ``<< id`` when descendants are included and ``id``
+    when they are not. Several ids are combined with ``OR``.
+    """
+    prefix = "<< " if restriction.include_descendants else ""
+    return " OR ".join(
+        f"{prefix}{concept_id}" for concept_id in restriction.concept_ids
+    )
+
+
 class BeaconFilteringTerm(BaseModel):
     """Beacon V2 filtering term."""
 
@@ -218,19 +230,13 @@ class BeaconFilteringTerm(BaseModel):
 
     @property
     def snomed_ecl(self) -> str | None:
-        """Build a SNOMED CT ECL expression from ``ontologyRestriction``.
+        """The field's ``ontologyRestriction`` as a SNOMED CT ECL expression.
 
-        Each concept id becomes ``<< id`` when descendants are included and
-        ``id`` when they are not. Several ids are combined with ``OR``.
         None when the field has no restriction, i.e. searches all concepts.
         """
         if self.ontologyRestriction is None:
             return None
-        prefix = "<< " if self.ontologyRestriction.include_descendants else ""
-        return " OR ".join(
-            f"{prefix}{concept_id}"
-            for concept_id in self.ontologyRestriction.concept_ids
-        )
+        return build_snomed_ecl(self.ontologyRestriction)
 
     @model_validator(mode="after")
     def validate_filtering_term(self):

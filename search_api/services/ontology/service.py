@@ -3,7 +3,11 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import Protocol
 
-from search_api.api.beacon.models import BeaconFilteringTerm, BeaconQueryFilter
+from search_api.api.beacon.models import (
+    BeaconFilteringTerm,
+    BeaconQueryFilter,
+    OntologyRestriction,
+)
 from search_api.exceptions import SystemException
 
 
@@ -22,12 +26,28 @@ class OntologyService(ABC):
     """Resolves coded values for one ontology against its terminology service."""
 
     @abstractmethod
-    def is_concept_id(self, value: str) -> bool:
-        """Return True if value is a concept ID in this ontology."""
+    def is_well_formed(self, concept_id: str) -> bool:
+        """Return True if the value is shaped like a concept id of this ontology.
+
+        Answered from the value shape without using the ontology, so a well-formed
+        concept id is not necessarily part of the ontology. Use ``is_known`` to
+        check if the concept ID exists in the ontology.
+        """
+
+    @abstractmethod
+    async def is_known(self, concept_id: str) -> bool:
+        """Return True if the ontology has the concept ID."""
 
     @abstractmethod
     async def get_preferred_terms(self, concept_ids: set[str]) -> dict[str, str]:
-        """Return preferred terms for concept IDs. IDs not found are omitted."""
+        """Return preferred terms for known concept IDs."""
+
+    async def is_retired(self, concept_id: str) -> bool:
+        """Return True if the ontology has retired the concept ID.
+
+        False for an unknown concept ID, or if the ontology does not support retirement.
+        """
+        return False
 
     async def replacement_concept_id(self, concept_id: str) -> str | None:
         """Return the active concept that replaces an inactive one, if there is one.
@@ -47,6 +67,21 @@ class OntologyService(ABC):
     async def _find_descendant_ids(self, concept_ids: set[str]) -> set[str]:
         """Query the ontology for concept id(s)' descendant concept id(s)."""
 
+    @abstractmethod
+    async def _is_within_restriction(
+        self, concept_id: str, restriction: OntologyRestriction
+    ) -> bool:
+        """Return True if the restriction includes the concept id."""
+
+    async def is_within_restriction(
+        self, concept_id: str, filtering_term: BeaconFilteringTerm
+    ) -> bool:
+        """Return True if the concept id is within the field's ontology restriction."""
+        restriction = filtering_term.ontologyRestriction
+        if restriction is None:
+            return True
+        return await self._is_within_restriction(concept_id, restriction)
+
     async def resolve_concept_ids(
         self,
         value: str,
@@ -55,13 +90,13 @@ class OntologyService(ABC):
     ) -> set[str]:
         """Resolve one value to concept id(s) in the following order:
 
-        1. If the value is a concept id then it is returned as given
+        1. If the value is shaped like a concept id then it is returned as given.
         2. If the value is cached for the field then all associated concept id(s)
-           are returned
+           are returned.
         3. Otherwise, the value is resolved against the ontology and any associated
            concept id(s) are returned.
         """
-        if self.is_concept_id(value):
+        if self.is_well_formed(value):
             return {value}
 
         if term_cache is not None:

@@ -11,7 +11,7 @@ from crypt4gh.keys.c4gh import generate as c4gh_generate
 from crypt4gh.lib import encrypt as c4gh_encrypt
 from nacl.public import PrivateKey
 
-from search_api.api.beacon.models import BeaconFilteringTerm
+from search_api.api.beacon.models import BeaconFilteringTerm, OntologyRestriction
 from search_api.api.bigpicture.domain import BP_DOMAIN
 from search_api.services.ontology.service import (
     OntologyService,
@@ -81,7 +81,7 @@ def _mock_term_caches() -> dict[str, OntologyTermCache]:
         ontology_id: MagicMock(
             spec=OntologyTermCache,
             load=AsyncMock(),
-            cache_preferred_terms=AsyncMock(return_value=set()),
+            cache_preferred_terms=AsyncMock(),
             get_concept_ids_by_term=AsyncMock(return_value=set()),
         )
         for ontology_id in BP_DOMAIN.ontology_ids
@@ -91,7 +91,10 @@ def _mock_term_caches() -> dict[str, OntologyTermCache]:
 class _MockOntologyService(OntologyService):
     """An ontology that accepts every concept id and resolves nothing."""
 
-    def is_concept_id(self, value: str) -> bool:
+    def is_well_formed(self, concept_id: str) -> bool:
+        return True
+
+    async def is_known(self, concept_id: str) -> bool:
         return True
 
     async def get_preferred_terms(self, concept_ids: set[str]) -> dict[str, str]:
@@ -104,6 +107,11 @@ class _MockOntologyService(OntologyService):
 
     async def _find_descendant_ids(self, concept_ids: set[str]) -> set[str]:
         return set()
+
+    async def _is_within_restriction(
+        self, concept_id: str, restriction: OntologyRestriction
+    ) -> bool:
+        return True
 
 
 @pytest.fixture(autouse=True)

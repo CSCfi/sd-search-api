@@ -7,7 +7,6 @@ from search_api.api.bigpicture.models import (
     BP_BEACON_ID,
     BP_BEACON_NAME,
     BP_DOMAIN_NAME,
-    BP_FILTERING_GROUPS,
     BP_FILTERING_SCOPES,
     BP_FILTERING_TERMS,
     BP_FILTERING_TERM_BY_ID,
@@ -59,7 +58,6 @@ BP_DOMAIN = Domain(
     opensearch_index=BP_OPENSEARCH_INDEX,
     index_file=Path(__file__).parent / "index" / f"{BP_OPENSEARCH_INDEX}.json",
     filtering_terms=BP_FILTERING_TERMS,
-    filtering_groups=BP_FILTERING_GROUPS,
     filtering_scopes=BP_FILTERING_SCOPES,
     non_filtering_fields=BP_NON_FILTERING_FIELDS,
     beacon_service_factory=lambda search: OpenSearchBeaconService(

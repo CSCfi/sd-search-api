@@ -12,7 +12,6 @@ from search_api.ai.services import AIService
 from search_api.api.beacon.models import (
     BeaconBooleanResponse,
     BeaconCountResponse,
-    BeaconFilteringGroup,
     BeaconFilteringTerm,
     BeaconFilteringScope,
     BeaconFilteringTerms,
@@ -131,10 +130,6 @@ def make_beacon_router(domain: Domain) -> APIRouter:
     )
     async def filtering_terms() -> BeaconFilteringTermsResponse:
         return filtering_terms_response
-
-    @router.get("/filtering_groups", response_model=list[BeaconFilteringGroup])
-    async def filtering_groups() -> list[BeaconFilteringGroup]:
-        return list(domain.filtering_groups)
 
     @router.get("/filtering_scopes", response_model=list[BeaconFilteringScope])
     async def filtering_scopes() -> list[BeaconFilteringScope]:

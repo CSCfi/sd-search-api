@@ -25,7 +25,6 @@
 #         coexist in one document, since a document has exactly one scope.
 #     The slide and case have no searchable fields and do not need to be
 #     represented as nested groups.
-#   - "group" is the filtering group id this term belongs to.
 #   - Quote ontology concept codes (e.g. "410607006"). Unquoted, they are parsed
 #     as integers and validation rejects them.
 #   - "type" is one of: text, keyword, controlledValue, ontology,
@@ -37,14 +36,12 @@ filtering_terms:
     scopes: [ clinical, non_clinical ]
     label: "Dataset title"
     description: "The title of the dataset"
-    group: "description"
 
   - id: dataset_description
     type: text
     scopes: [ clinical, non_clinical ]
     label: "Dataset description"
     description: "The description of the dataset"
-    group: "description"
 
   - id: animal_species
     type: ontology
@@ -57,7 +54,6 @@ filtering_terms:
     ontologyRestriction:
       concept_ids: [ "410607006" ]  # Organism (organism)
       include_descendants: true
-    group: "non_clinical"
 
   - id: anatomical_site
     type: ontology
@@ -74,7 +70,6 @@ filtering_terms:
       concept_ids: [ "123037004" ]  # Body structure (body structure)
       include_descendants: true
     multivalued: true
-    group: "subject"
 
   - id: sex
     type: controlledValue
@@ -83,7 +78,6 @@ filtering_terms:
     label: "Sex"
     description: "The sex of the biological being"
     controlledValues: [ "Male", "Female", "Not-known", "Other" ]
-    group: "subject"
 
   - id: age_at_extraction
     type: iso8601Range
@@ -91,7 +85,6 @@ filtering_terms:
     scopes: [ clinical, non_clinical ]
     label: "Age at extraction"
     description: "The age of the biological being at the time point of extraction of the specimen."
-    group: "subject"
 
   - id: block_preparation
     type: ontology
@@ -111,7 +104,6 @@ filtering_terms:
         - "261712009"  # Acrylic polymer (substance)
       # Exactly these media, not their descendants.
       include_descendants: false
-    group: "sample"
 
   - id: specimen_type
     type: ontology
@@ -124,7 +116,6 @@ filtering_terms:
     ontologyRestriction:
       concept_ids: [ "91720002" ]  # Body substance (substance)
       include_descendants: true
-    group: "sample"
 
   - id: fixation_type
     type: ontologyOrValue
@@ -137,7 +128,6 @@ filtering_terms:
     ontologyRestriction:
       concept_ids: [ "1388477003" ]  # Tissue fixative (product)
       include_descendants: true
-    group: "sample"
 
   - id: staining_target
     type: keyword
@@ -145,7 +135,6 @@ filtering_terms:
     scopes: [ clinical, non_clinical ]
     label: "Staining target"
     description: "The specific target of the stain"
-    group: "staining"
 
   - id: staining_procedure
     type: ontologyOrValue
@@ -158,7 +147,6 @@ filtering_terms:
     ontologyRestriction:
       concept_ids: [ "127790008" ]  # Staining method (procedure)
       include_descendants: true
-    group: "staining"
 
   - id: staining_substance
     type: ontologyOrValue
@@ -171,7 +159,6 @@ filtering_terms:
     ontologyRestriction:
       concept_ids: [ "397165007" ]  # Stain
       include_descendants: true
-    group: "staining"
 
   - id: diagnosis
     type: ontology
@@ -184,7 +171,6 @@ filtering_terms:
     ontologyRestriction:
       concept_ids: [ "138875005" ]  # SNOMED CT Concept (root)
       include_descendants: true
-    group: "clinical"
 
   - id: finding
     type: ontology
@@ -194,7 +180,6 @@ filtering_terms:
     description: "Microscopic finding (MISTRESC)."
     ontology:
       id: SEND
-    group: "non_clinical"
 
   - id: finding_severity
     type: ontology
@@ -207,7 +192,6 @@ filtering_terms:
     ontologyRestriction:
       concept_ids: [ "C90000" ]  # SEND Severity (SEV)
       include_descendants: true
-    group: "finding_details"
 
   - id: finding_chronicity
     type: ontology
@@ -220,7 +204,6 @@ filtering_terms:
     ontologyRestriction:
       concept_ids: [ "C120529" ]  # Chronicity (CHRNCTY)
       include_descendants: true
-    group: "finding_details"
 
   - id: finding_distribution
     type: ontology
@@ -233,7 +216,6 @@ filtering_terms:
     ontologyRestriction:
       concept_ids: [ "C120530" ]  # Distribution (DSTRBN)
       include_descendants: true
-    group: "finding_details"
 
   - id: finding_result_category
     type: ontology
@@ -246,7 +228,6 @@ filtering_terms:
     ontologyRestriction:
       concept_ids: [ "C90017" ]  # Microscopic Histopathology Result Category (MIRESCAT)
       include_descendants: true
-    group: "finding_details"
 
   - id: control_terminology
     type: controlledValue
@@ -255,7 +236,6 @@ filtering_terms:
     label: "Control terminology"
     description: "Used to identify if the biological being is a control animal or treated animal."
     controlledValues: [ "CONTROL", "TREATED" ]
-    group: "non_clinical"
 
   - id: observation_type
     type: controlledValue
@@ -268,10 +248,9 @@ filtering_terms:
       to at least one image in a set of images, but not necessarily to all
       of them.
     controlledValues: [ confirmed, candidate ]
-    group: "description"
 
 # Fields that are indexed in OpenSearch but are not filterable.
-# All are top-level (no group).
+# All are top-level (no nested group).
 non_filtering_fields:
   - id: image_id
     type: keyword

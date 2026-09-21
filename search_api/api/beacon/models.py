@@ -210,9 +210,6 @@ class BeaconFilteringTerm(BaseModel):
     label: str
     # Beacon V2 extension.
     description: str
-    group: str | None = Field(
-        default=None, description="Filtering group id this term belongs to."
-    )
     ontology: BeaconFilteringOntology | None = Field(
         default=None,
         description="The ontology used for the field.",
@@ -266,21 +263,6 @@ class BeaconFilteringTermsResponse(BaseModel):
 
     meta: BeaconInfoMeta
     response: BeaconFilteringTerms
-
-
-# Beacon V2 extension.
-class BeaconFilteringGroup(BaseModel):
-    """A named group that organises filtering terms in the UI."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    id: str
-    label: str
-    description: str = ""
-    parent: str | None = Field(
-        default=None,
-        description="The id of the filtering group this group nests under, if any.",
-    )
 
 
 # Beacon V2 extension.

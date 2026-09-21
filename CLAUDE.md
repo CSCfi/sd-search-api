@@ -42,7 +42,7 @@ search_api/
 │   └── bigpicture/     # everything Bigpicture-specific, nowhere else:
 │       ├── domain.py models.py ai.py opensearch.py local.py remote.py   # its two DocumentSources
 │       ├── extract/    # XML in, one document per image out: models.py refs.py values.py document.py
-│       ├── config/     # hand-edited fields/groups/scopes YAML
+│       ├── config/     # hand-edited fields/scopes YAML
 │       ├── index/      # GENERATED mapping (`index generate` writes it)
 │       └── schemas/    # XSDs
 ├── services/
@@ -64,7 +64,7 @@ search_api/
 `main.py` picks a deployment by `DEPLOYMENT_TYPE`, looks it up in `api/deployments.py` `DOMAINS`, and builds
 `make_beacon_router(domain)` + `make_lifespan(domain)`; the admin router mounts only when `ADMIN_KEY` is set. A new
 deployment is a new `Domain` in `DOMAINS` (see `bigpicture/domain.py`). Besides the index name, beacon metadata,
-filtering terms/groups/scopes and `replace_concepts`, it carries `local_source` / `remote_source`
+filtering terms/scopes and `replace_concepts`, it carries `local_source` / `remote_source`
 (`DocumentSource | None` — the `load` and `fetch` commands; `None` means that command has nothing to do), one
 `beacon_service_factory` for the **query-less** service behind `/status`, `/health`, `/values`, `/suggestions` and
 `ValueCountsUpdater`, and `query_endpoints: Sequence[BeaconQueryEndpoint]`, one per entity endpoint (`/datasets`,
@@ -122,7 +122,7 @@ them; an `ontology`/`ontologyOrValue` field may declare an `ontologyRestriction`
 
 | Endpoint | Description |
 |---|---|
-| `GET /info` `/filtering_terms` `/filtering_groups` `/filtering_scopes` | metadata, filter definitions |
+| `GET /info` `/filtering_terms` `/filtering_scopes` | metadata, filter definitions |
 | `POST /datasets` `/images` | Beacon V2 search: images aggregated into datasets / one per image |
 | `POST /ai/datasets` `/ai/images` | natural-language search (gated by `FEATURE_AI`) |
 | `GET /filtering_terms/{field_id}/values` `/suggestions` | values with counts; autocomplete |

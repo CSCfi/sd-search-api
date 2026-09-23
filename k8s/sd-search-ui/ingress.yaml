@@ -1,0 +1,21 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nginx
+spec:
+  rules:
+  - host: sd-search-ui.apps.example.com
+    http:
+      paths:
+      - backend:
+          service:
+            name: sd-search-ui
+            port:
+              number: 80
+        path: /
+        pathType: Prefix
+  tls:
+  - hosts:
+    - sd-search-ui.apps.example.com
+    secretName: custom-tls-certs
+status: {}

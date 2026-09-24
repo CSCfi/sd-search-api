@@ -109,6 +109,25 @@ def test_is_well_formed(service, value, expected):
     assert service.is_well_formed(value) is expected
 
 
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("4", True),
+        ("4106", True),
+        (CONCEPT_ID_HOMO_SAPIENS, True),
+        ("41006", True),
+        ("410607007", True),
+        ("0410", False),
+        ("4106070060410607006", False),
+        ("Homo", False),
+        ("41o6", False),
+        ("", False),
+    ],
+)
+def test_is_concept_id_prefix(service, value, expected):
+    assert service.is_concept_id_prefix(value) is expected
+
+
 @pytest.mark.asyncio
 async def test_find_concept_ids_passes_the_terms_ecl_to_snowstorm(service):
     service.find_concept = AsyncMock(return_value=_concept(CONCEPT_ID_HOMO_SAPIENS))

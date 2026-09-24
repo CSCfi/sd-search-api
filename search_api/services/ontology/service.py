@@ -35,6 +35,10 @@ class OntologyService(ABC):
         """
 
     @abstractmethod
+    def is_concept_id_prefix(self, value: str) -> bool:
+        """Return True if the value could be the start of a concept id of this ontology."""
+
+    @abstractmethod
     async def is_known(self, concept_id: str) -> bool:
         """Return True if the ontology has the concept ID."""
 

@@ -29,15 +29,19 @@ class CachedOntologyService(OntologyService):
         store: OntologyCacheStore,
         source: OntologySource,
         concept_id_pattern: str,
+        concept_id_prefix_pattern: str,
         refresh_interval: float = 300.0,
     ) -> None:
         """
         :param concept_id_pattern: what a concept id of this ontology looks like,
             matched as a full regular expression.
+        :param concept_id_prefix_pattern: what the start of a concept id looks
+            like, matched as a full regular expression.
         """
         self._store = store
         self._source = source
         self._concept_id_pattern = re.compile(concept_id_pattern)
+        self._concept_id_prefix_pattern = re.compile(concept_id_prefix_pattern)
         self._poller = UpdatedPoller(
             "ontology",
             lambda: store.updated_at(),
@@ -115,6 +119,10 @@ class CachedOntologyService(OntologyService):
     @override
     def is_well_formed(self, concept_id: str) -> bool:
         return bool(self._concept_id_pattern.fullmatch(concept_id))
+
+    @override
+    def is_concept_id_prefix(self, value: str) -> bool:
+        return bool(self._concept_id_prefix_pattern.fullmatch(value))
 
     @override
     async def is_known(self, concept_id: str) -> bool:

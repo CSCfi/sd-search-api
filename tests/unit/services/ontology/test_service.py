@@ -82,6 +82,10 @@ class MockOntologyService(OntologyService):
         return concept_id.startswith("C")
 
     @override
+    def is_concept_id_prefix(self, value: str) -> bool:
+        return value.startswith("C")
+
+    @override
     async def is_known(self, concept_id: str) -> bool:
         return concept_id in CONCEPT_IDS_BY_VALUE
 

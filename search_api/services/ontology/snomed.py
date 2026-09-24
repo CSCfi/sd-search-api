@@ -293,6 +293,14 @@ class SnomedService(OntologyService):
         """Return True if the value is shaped like a SNOMED CT concept id."""
         return is_well_formed_concept_id(concept_id)
 
+    def is_concept_id_prefix(self, value: str) -> bool:
+        """Return True if the value could be the start of a SNOMED CT concept id."""
+        return (
+            value.isdigit()
+            and not value.startswith("0")
+            and len(value) <= _CONCEPT_ID_MAX_LENGTH
+        )
+
     async def is_known(self, concept_id: str, branch: str = "MAIN") -> bool:
         """Return True if SNOMED CT has the concept, retired or not."""
         return await _fetch_concept(concept_id, branch) is not None

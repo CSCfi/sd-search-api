@@ -270,7 +270,12 @@ def make_beacon_router(domain: Domain) -> APIRouter:
     )
     async def suggestions(
         field_id: str = Path(description="Filtering term field ID."),
-        term: str = Query(description="Partial text to search for."),
+        term: str = Query(
+            description=(
+                "Partial text to search for. For ontology fields, text that could "
+                "start a concept id also matches concept ids starting with it."
+            )
+        ),
         substring_match: bool = Query(
             default=False,
             description="Use substring matching instead of word-boundary prefix matching.",
@@ -342,10 +347,20 @@ def make_beacon_router(domain: Domain) -> APIRouter:
             validate_field_scope(filtering_term, scope),
         )
         counts = field_counts.counts
-        term_service = ontology_term_services[ontology_id_by_field[field_id]]
+        ontology_id = ontology_id_by_field[field_id]
+        term_service = ontology_term_services[ontology_id]
         preferred_terms = await term_service.get_terms_by_concept_id(
             field_id, set(counts.keys())
         )
+        # The ontology decides if the term could start a concept id.
+        # Concept ids are case sensitive and only matched from their start.
+        is_concept_id_prefix = get_ontology_service(ontology_id).is_concept_id_prefix(
+            term
+        )
+
+        def _matches_concept_id(concept_id: str) -> bool:
+            return is_concept_id_prefix and concept_id.startswith(term)
+
         results = [
             FieldValue(
                 value=preferred_term, concept_id=concept_id, count=counts[concept_id]
@@ -353,7 +368,7 @@ def make_beacon_router(domain: Domain) -> APIRouter:
             for preferred_term, concept_id in sorted(
                 (preferred_term, concept_id)
                 for concept_id, preferred_term in preferred_terms.items()
-                if _matches(preferred_term)
+                if _matches(preferred_term) or _matches_concept_id(concept_id)
             )
         ]
 

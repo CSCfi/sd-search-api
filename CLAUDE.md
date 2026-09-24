@@ -154,7 +154,8 @@ resolve first through `prepare_ontology_filter` (expanding to descendants on `in
 ### Ontologies (`services/ontology/`)
 
 `OntologyService` (ABC) abstracts one ontology. **Shape and membership are separate questions**: `is_well_formed`
-answers from the value alone and never asks the ontology, `is_known` asks it. Beside them sit `get_preferred_terms`,
+answers from the value alone and never asks the ontology, `is_known` asks it. `is_concept_id_prefix` is shape-only
+too: only a term it accepts is matched against concept ids by prefix in `/suggestions`, so "c" matches no SEND code. Beside them sit `get_preferred_terms`,
 `is_retired`, `replacement_concept_id` and the template methods `prepare_ontology_filter` and
 `is_within_restriction`; a provider implements only `_find_concept_ids`, `_find_descendant_ids` and
 `_is_within_restriction`, and **every one is registered in `registrations.py`**, imported for the side effect.

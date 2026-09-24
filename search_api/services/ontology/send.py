@@ -38,6 +38,7 @@ SEND_ONTOLOGY_ID = "SEND"
 
 # SEND codes are NCI Thesaurus C-codes, e.g. "C158118".
 SEND_CONCEPT_ID_PATTERN = r"C\d+"
+SEND_CONCEPT_ID_PREFIX_PATTERN = r"C\d+"
 
 ONTOLOGY_SEND_URL = "https://evs.nci.nih.gov/ftp1/CDISC/SEND/SEND%20Terminology.txt"
 ONTOLOGY_SEND_VERSION_URL = (

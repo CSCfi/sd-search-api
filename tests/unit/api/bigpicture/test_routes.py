@@ -380,6 +380,28 @@ def test_filtering_term_suggestions_ontology_include_other(suggestions_values_cl
     assert not any(r.value == "Formalin" for r in results)
 
 
+def test_filtering_term_suggestions_ontology_concept_id(suggestions_values_client):
+    resp = suggestions_values_client.get(
+        "/filtering_terms/animal_species/suggestions", params={"term": "4106"}
+    )
+    assert resp.status_code == 200
+    assert [FieldValue.model_validate(r) for r in resp.json()] == [
+        FieldValue(value="Homo sapiens", concept_id="410607006", count=5)
+    ]
+
+
+def test_filtering_term_suggestions_ontology_or_value_concept_id(
+    suggestions_values_client,
+):
+    resp = suggestions_values_client.get(
+        "/filtering_terms/fixation_type/suggestions", params={"term": "1388477003"}
+    )
+    assert resp.status_code == 200
+    assert [FieldValue.model_validate(r) for r in resp.json()] == [
+        FieldValue(value="Tissue fixative", concept_id="1388477003", count=4)
+    ]
+
+
 # Filtering term values
 #
 

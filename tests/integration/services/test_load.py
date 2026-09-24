@@ -44,6 +44,7 @@ os.environ.setdefault("POSTGRES_PORT", os.environ["BP_POSTGRES_PORT"])
 # The one ontology field these tests load a document for.
 _FIELD_ID = "test_field"
 _CONCEPT_ID_PATTERN = r"C\d+"
+_CONCEPT_ID_PREFIX_PATTERN = r"C\d+"
 
 # The `single_concept_ontology_id` contains _CONCEPT_ID.
 _CONCEPT_ID = "C1"
@@ -148,7 +149,12 @@ async def _registered_ontology(
     ontology_id = f"TEST-{uuid.uuid4()}"
     register_ontology_service(
         ontology_id,
-        service_type(OntologyCacheStore(ontology_id), source, _CONCEPT_ID_PATTERN),
+        service_type(
+            OntologyCacheStore(ontology_id),
+            source,
+            _CONCEPT_ID_PATTERN,
+            _CONCEPT_ID_PREFIX_PATTERN,
+        ),
     )
     try:
         yield ontology_id

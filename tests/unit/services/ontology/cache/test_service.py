@@ -41,6 +41,7 @@ V1_ROOT_CONCEPTS: tuple[str, ...] = ("C1", "C2")
 
 # The test concepts are C-codes, like SEND's.
 CONCEPT_ID_PATTERN = r"C\d+"
+CONCEPT_ID_PREFIX_PATTERN = r"C\d+"
 
 V2_CONCEPTS = [
     CachedOntologyConcept(concept_id="C6", preferred_term="P6"),
@@ -132,7 +133,10 @@ def term(
 def make_service(concepts: list[CachedOntologyConcept]) -> CachedOntologyService:
     """A service over an empty store, so init fills it from the source."""
     return CachedOntologyService(
-        MockStore(), MockSource(cached_ontology(concepts)), CONCEPT_ID_PATTERN
+        MockStore(),
+        MockSource(cached_ontology(concepts)),
+        CONCEPT_ID_PATTERN,
+        CONCEPT_ID_PREFIX_PATTERN,
     )
 
 
@@ -147,6 +151,22 @@ async def test_init(service):
     await service.init()
     assert await service.is_known("C3")
     assert not await service.is_known("P3")
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("C1", True),
+        ("C158118", True),
+        ("C", False),
+        ("c1", False),
+        ("1", False),
+        ("Custom", False),
+        ("", False),
+    ],
+)
+def test_is_concept_id_prefix(service, value, expected):
+    assert service.is_concept_id_prefix(value) is expected
 
 
 @pytest.mark.asyncio
@@ -239,7 +259,9 @@ async def test_init_serves_what_is_stored_without_fetching():
     store = MockStore()
     await store.write(cached_ontology(V1_CONCEPTS))
     source = MockSource(cached_ontology(V2_CONCEPTS, version="v2"))
-    service = CachedOntologyService(store, source, CONCEPT_ID_PATTERN)
+    service = CachedOntologyService(
+        store, source, CONCEPT_ID_PATTERN, CONCEPT_ID_PREFIX_PATTERN
+    )
 
     await service.init()
 
@@ -252,7 +274,9 @@ async def test_init_serves_what_is_stored_without_fetching():
 async def test_init_fetches_and_stores_when_nothing_is_stored():
     store = MockStore()
     source = MockSource(cached_ontology(V1_CONCEPTS))
-    service = CachedOntologyService(store, source, CONCEPT_ID_PATTERN)
+    service = CachedOntologyService(
+        store, source, CONCEPT_ID_PATTERN, CONCEPT_ID_PREFIX_PATTERN
+    )
 
     await service.init()
 
@@ -264,7 +288,7 @@ async def test_init_fetches_and_stores_when_nothing_is_stored():
 @pytest.mark.asyncio
 async def test_init_propagates_a_fetch_failure_when_nothing_is_stored():
     service = CachedOntologyService(
-        MockStore(), FailingMockSource(), CONCEPT_ID_PATTERN
+        MockStore(), FailingMockSource(), CONCEPT_ID_PATTERN, CONCEPT_ID_PREFIX_PATTERN
     )
 
     with pytest.raises(ConnectionError):
@@ -279,6 +303,7 @@ async def test_reloads_when_another_process_writes_the_store():
         store,
         MockSource(cached_ontology(V1_CONCEPTS)),
         CONCEPT_ID_PATTERN,
+        CONCEPT_ID_PREFIX_PATTERN,
         refresh_interval=0.01,
     )
     await service.init()
@@ -306,6 +331,7 @@ async def test_does_not_reload_while_the_store_is_unchanged():
         store,
         MockSource(cached_ontology(V1_CONCEPTS)),
         CONCEPT_ID_PATTERN,
+        CONCEPT_ID_PREFIX_PATTERN,
         refresh_interval=0.01,
     )
 
@@ -365,7 +391,10 @@ async def test_after_reload():
     store = MockStore()
     store.stored = cached_ontology(V1_CONCEPTS)
     service = CachedOntologyService(
-        store, MockSource(cached_ontology(V1_CONCEPTS)), CONCEPT_ID_PATTERN
+        store,
+        MockSource(cached_ontology(V1_CONCEPTS)),
+        CONCEPT_ID_PATTERN,
+        CONCEPT_ID_PREFIX_PATTERN,
     )
 
     await service._reload()

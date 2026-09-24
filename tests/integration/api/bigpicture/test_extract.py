@@ -94,6 +94,9 @@ class _MockOntologyService(OntologyService):
     def is_well_formed(self, concept_id: str) -> bool:
         return True
 
+    def is_concept_id_prefix(self, value: str) -> bool:
+        return True
+
     async def is_known(self, concept_id: str) -> bool:
         return True
 

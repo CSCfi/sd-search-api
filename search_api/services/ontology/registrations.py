@@ -14,6 +14,7 @@ from search_api.services.ontology.service import register_ontology_service
 from search_api.services.ontology.cache.store import OntologyCacheStore
 from search_api.services.ontology.send import (
     SEND_CONCEPT_ID_PATTERN,
+    SEND_CONCEPT_ID_PREFIX_PATTERN,
     SEND_ONTOLOGY_ID,
     SendOntologySource,
 )
@@ -27,6 +28,7 @@ register_ontology_service(
         OntologyCacheStore(SEND_ONTOLOGY_ID),
         SendOntologySource(),
         concept_id_pattern=SEND_CONCEPT_ID_PATTERN,
+        concept_id_prefix_pattern=SEND_CONCEPT_ID_PREFIX_PATTERN,
         refresh_interval=cache_config().ONTOLOGY_CACHE_REFRESH,
     ),
 )

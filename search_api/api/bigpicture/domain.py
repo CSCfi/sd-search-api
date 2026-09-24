@@ -16,13 +16,7 @@ from search_api.api.bigpicture.models import (
     BigpictureBeaconDatasetResultSetsResponse,
     BigpictureBeaconImageResultSetsResponse,
 )
-from search_api.api.bigpicture.ai import (
-    BP_AI_ASSISTANT_DESCRIPTION,
-    BP_AI_IMAGE_RESULT_INSTRUCTIONS,
-    BP_AI_DATASET_RESULT_INSTRUCTIONS,
-    BigpictureAIImageSearchResult,
-    BigpictureAIDatasetSearchResult,
-)
+from search_api.api.bigpicture.ai import BP_AI_ASSISTANT_DESCRIPTION
 from search_api.api.bigpicture.opensearch import (
     BigpictureDatasetBeaconService,
     BigpictureImageBeaconService,
@@ -77,8 +71,6 @@ BP_DOMAIN = Domain(
             ),
             result_sets_response_model=BigpictureBeaconDatasetResultSetsResponse,
             ai_assistant_description=BP_AI_ASSISTANT_DESCRIPTION,
-            ai_result_model=BigpictureAIDatasetSearchResult,
-            ai_result_instructions=BP_AI_DATASET_RESULT_INSTRUCTIONS,
         ),
         BeaconQueryEndpoint(
             path="/images",
@@ -90,8 +82,6 @@ BP_DOMAIN = Domain(
             ),
             result_sets_response_model=BigpictureBeaconImageResultSetsResponse,
             ai_assistant_description=BP_AI_ASSISTANT_DESCRIPTION,
-            ai_result_model=BigpictureAIImageSearchResult,
-            ai_result_instructions=BP_AI_IMAGE_RESULT_INSTRUCTIONS,
         ),
     ],
     beacon_id=BP_BEACON_ID,

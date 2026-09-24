@@ -5,10 +5,11 @@ from urllib.parse import urlparse, urlunparse
 import httpx
 import pytest
 
-from search_api.ai.models import AIQueryFilter
-from search_api.api.bigpicture.ai import (
-    BigpictureAIImageSearchResult,
-    BigpictureAIDatasetSearchResult,
+from search_api.ai.models import AISearchResponse
+from search_api.api.beacon.models import BeaconQueryFilter
+from search_api.api.bigpicture.models import (
+    BigpictureBeaconDatasetResultSetsResponse,
+    BigpictureBeaconImageResultSetsResponse,
 )
 from tests.integration.mockauth import PORT as OIDC_MOCK_PORT
 
@@ -55,23 +56,22 @@ def test_ai_datasets_query_returns_result(client: httpx.Client):
         "/ai/datasets", json={"query": "images for human females"}, timeout=60.0
     )
     assert resp.status_code == 200
-    result = BigpictureAIDatasetSearchResult.model_validate(resp.json())
-    assert isinstance(result.interpretation, str)
+    result = AISearchResponse[BigpictureBeaconDatasetResultSetsResponse].model_validate(
+        resp.json()
+    )
     assert len(result.interpretation) > 0
-    assert result.dataset_count >= 0
-    assert isinstance(result.datasets, list)
 
-    assert result.dataset_count == 1
-    assert len(result.datasets) == 1
-    dataset: BigpictureAIDatasetSearchResult.Dataset = result.datasets[0]
-    assert dataset.dataset_id == "testDataset"
-    assert dataset.dataset_title == "testTitle"
-    assert dataset.total_image_count == 1
-    assert dataset.matching_image_count == 1
+    assert result.result.responseSummary.numTotalResults == 1
+    [result_set] = result.result.response.resultSet
+    [dataset] = result_set.results
+    assert dataset.datasetId == "testDataset"
+    assert dataset.datasetTitle == "testTitle"
+    assert dataset.totalImageCount == 1
+    assert dataset.matchingImageCount == 1
     assert len(result.filters) in (1, 2)
-    assert AIQueryFilter(id="sex", value="Female") in result.filters
+    assert BeaconQueryFilter(id="sex", value="Female") in result.filters
     if len(result.filters) == 2:
-        assert AIQueryFilter(id="animal_species", value="human") in result.filters
+        assert BeaconQueryFilter(id="animal_species", value="human") in result.filters
 
 
 @skip
@@ -86,12 +86,12 @@ def test_ai_images_query_returns_result(client: httpx.Client):
         "/ai/images", json={"query": "images for human females"}, timeout=60.0
     )
     assert resp.status_code == 200
-    result = BigpictureAIImageSearchResult.model_validate(resp.json())
-    assert isinstance(result.interpretation, str)
+    result = AISearchResponse[BigpictureBeaconImageResultSetsResponse].model_validate(
+        resp.json()
+    )
     assert len(result.interpretation) > 0
-    assert result.image_count >= 0
-    assert isinstance(result.images, list)
-    assert result.image_count == len(result.images)
+    images = [r for rs in result.result.response.resultSet for r in rs.results]
+    assert result.result.responseSummary.numTotalResults == len(images)
 
 
 @skip

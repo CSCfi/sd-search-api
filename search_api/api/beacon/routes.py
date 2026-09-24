@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 
 from search_api.database.document import max_synced_at, pending_by_scope
 from search_api.database.repository import is_healthy as is_database_healthy
-from search_api.ai.models import AISearchResult
+from search_api.ai.models import AISearchResponse
 from search_api.ai.services import AIService
 from search_api.api.beacon.models import (
     BeaconBooleanResponse,
@@ -19,13 +19,20 @@ from search_api.api.beacon.models import (
     BeaconInfo,
     BeaconInfoMeta,
     BeaconInfoResponse,
+    BeaconQueryFilter,
+    BeaconQueryGranularity,
     BeaconQueryRequest,
     BeaconResponseMeta,
     BeaconResultCountResponseSummary,
     BeaconResultExistsResponseSummary,
+    BeaconResultSetsResponse,
     BeaconSchema,
 )
-from search_api.api.beacon.services import BeaconQueryService, BeaconService
+from search_api.api.beacon.services import (
+    BeaconQueryResult,
+    BeaconQueryService,
+    BeaconService,
+)
 from search_api.api.domain import BeaconQueryEndpoint, Domain
 from search_api.api.models import (
     AIQueryRequest,
@@ -160,94 +167,107 @@ def make_beacon_router(domain: Domain) -> APIRouter:
                 get_ontology_term_services
             ),
         ):
-            beacon_service = beacon_services[endpoint.path]
             validate_scope(request.query.requestedScope)
-
-            ontology_filters = [
-                f for f in request.query.filters if f.id in ontology_id_by_field
-            ]
-            other_filters = [
-                f for f in request.query.filters if f.id not in ontology_id_by_field
-            ]
-
-            # Resolve ontology filter values to concept IDs, and optionally expand to
-            # descendants. The provider is selected per term by its ``ontology.id``.
-            try:
-                resolved_ontology_filters = list(
-                    await asyncio.gather(
-                        *[
-                            get_ontology_service(
-                                ontology_id_by_field[f.id]
-                            ).prepare_ontology_filter(
-                                f,
-                                domain.filtering_terms,
-                                ontology_term_services.get(ontology_id_by_field[f.id]),
-                            )
-                            for f in ontology_filters
-                        ]
-                    )
-                )
-            except Exception as e:
-                raise SystemException("Ontology service error.") from e
-
             granularity = request.query.requestedGranularity
-            filters = other_filters + resolved_ontology_filters
-            response = await beacon_service.query(
-                filters=filters,
-                granularity=granularity,
-                scope=request.query.requestedScope,
-            )
-            num_results = response.total
-            exists = num_results > 0
-            meta = BeaconResponseMeta(
-                returnedGranularity=granularity, beaconId=domain.beacon_id
+            result = await run_query(
+                beacon_services[endpoint.path],
+                request.query.filters,
+                granularity,
+                request.query.requestedScope,
+                ontology_term_services,
             )
 
-            if granularity == "boolean":
-                return BeaconBooleanResponse(
-                    meta=meta,
-                    responseSummary=BeaconResultExistsResponseSummary(exists=exists),
-                )
-
-            if granularity == "count":
-                return BeaconCountResponse(
-                    meta=meta,
-                    responseSummary=BeaconResultCountResponseSummary(
-                        exists=exists,
-                        numTotalResults=num_results,
-                    ),
-                )
-
-            if granularity == "record":
-                return result_sets_response_model(
-                    meta=meta,
-                    responseSummary=BeaconResultCountResponseSummary(
-                        exists=exists, numTotalResults=num_results
-                    ),
-                    response=response.result_sets,
-                )
-
-            raise UserException(f"Unsupported granularity: {granularity!r}")
+            return beacon_response(endpoint, granularity, result)
 
     for endpoint in domain.query_endpoints:
         register_query_route(endpoint)
 
-    def register_ai_query_route(endpoint: BeaconQueryEndpoint) -> None:
-        """Register one AI query endpoint.
+    async def run_query(
+        beacon_service: BeaconQueryService,
+        filters: list[BeaconQueryFilter],
+        granularity: BeaconQueryGranularity,
+        scope: str | None,
+        ontology_term_services: dict[str, OntologyTermCache],
+    ) -> BeaconQueryResult:
+        """Resolve the ontology filters, then run the query."""
+        ontology_filters = [f for f in filters if f.id in ontology_id_by_field]
+        other_filters = [f for f in filters if f.id not in ontology_id_by_field]
 
-        The query endpoints use the same request model but differ in
-        their response model.
-        """
+        # Resolve ontology filter values to concept IDs, and optionally expand to
+        # descendants. The provider is selected per term by its ``ontology.id``.
+        try:
+            resolved_ontology_filters = list(
+                await asyncio.gather(
+                    *[
+                        get_ontology_service(
+                            ontology_id_by_field[f.id]
+                        ).prepare_ontology_filter(
+                            f,
+                            domain.filtering_terms,
+                            ontology_term_services.get(ontology_id_by_field[f.id]),
+                        )
+                        for f in ontology_filters
+                    ]
+                )
+            )
+        except Exception as e:
+            raise SystemException("Ontology service error.") from e
+
+        return await beacon_service.query(
+            filters=other_filters + resolved_ontology_filters,
+            granularity=granularity,
+            scope=scope,
+        )
+
+    def beacon_response(
+        endpoint: BeaconQueryEndpoint,
+        granularity: BeaconQueryGranularity,
+        response: BeaconQueryResult,
+    ) -> BeaconBooleanResponse | BeaconCountResponse | BeaconResultSetsResponse:
+        """The response for a query result at the requested granularity."""
+        result_sets_response_model = endpoint.result_sets_response_model
+        num_results = response.total
+        exists = num_results > 0
+        meta = BeaconResponseMeta(
+            returnedGranularity=granularity, beaconId=domain.beacon_id
+        )
+
+        if granularity == "boolean":
+            return BeaconBooleanResponse(
+                meta=meta,
+                responseSummary=BeaconResultExistsResponseSummary(exists=exists),
+            )
+
+        if granularity == "count":
+            return BeaconCountResponse(
+                meta=meta,
+                responseSummary=BeaconResultCountResponseSummary(
+                    exists=exists,
+                    numTotalResults=num_results,
+                ),
+            )
+
+        if granularity == "record":
+            return result_sets_response_model(
+                meta=meta,
+                responseSummary=BeaconResultCountResponseSummary(
+                    exists=exists, numTotalResults=num_results
+                ),
+                response=response.result_sets,
+            )
+
+        raise UserException(f"Unsupported granularity: {granularity!r}")
+
+    def register_ai_query_route(endpoint: BeaconQueryEndpoint) -> None:
+        """Register one AI query endpoint."""
         ai_service = AIService(
-            domain.filtering_terms,
-            endpoint.ai_assistant_description,
-            endpoint.ai_result_model,
-            endpoint.ai_result_instructions,
+            domain.filtering_terms, endpoint.ai_assistant_description
         )
 
         @router.post(
             f"/ai{endpoint.path}",
-            response_model=endpoint.ai_result_model,
+            response_model=AISearchResponse[endpoint.result_sets_response_model],  # type: ignore[name-defined]
+            response_model_exclude_none=True,
             name=f"ai_query_{endpoint.path.lstrip('/')}",
         )
         async def ai_query(
@@ -255,9 +275,26 @@ def make_beacon_router(domain: Domain) -> APIRouter:
             beacon_services: dict[str, BeaconQueryService] = Depends(
                 get_beacon_query_services
             ),
-        ) -> AISearchResult:
-            return await ai_service.search(
-                request.query, beacon_services[endpoint.path]
+            ontology_term_services: dict[str, OntologyTermCache] = Depends(
+                get_ontology_term_services
+            ),
+        ) -> AISearchResponse:
+            validate_scope(request.requestedScope)
+            granularity = request.requestedGranularity
+            interpretation = await ai_service.interpret(
+                request.query, request.requestedScope
+            )
+            result = await run_query(
+                beacon_services[endpoint.path],
+                interpretation.filters,
+                granularity,
+                request.requestedScope,
+                ontology_term_services,
+            )
+            return AISearchResponse(
+                interpretation=interpretation.interpretation,
+                filters=interpretation.filters,
+                result=beacon_response(endpoint, granularity, result),
             )
 
     if feature_config().FEATURE_AI:

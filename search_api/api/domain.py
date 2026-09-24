@@ -6,7 +6,6 @@ from typing import Any
 
 from fastapi import FastAPI
 
-from search_api.ai.models import AISearchResult
 from search_api.api.beacon.models import (
     BeaconFilteringScope,
     BeaconResultSetsResponse,
@@ -44,8 +43,6 @@ class BeaconQueryEndpoint:
     beacon_service_factory: Callable[[Any], BeaconQueryService[Any]]
     result_sets_response_model: type[BeaconResultSetsResponse[Any]]
     ai_assistant_description: str
-    ai_result_model: type[AISearchResult]
-    ai_result_instructions: str
 
 
 @dataclass(frozen=True)

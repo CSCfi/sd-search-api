@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from search_api.api.beacon.models import (
     SNOMED_ONTOLOGY_ID,
+    BeaconQueryFilter,
     BeaconQuery,
     BeaconQueryRequest,
     BeaconBooleanResponse,
@@ -38,6 +39,7 @@ from search_api.api.bigpicture.models import (
     BP_FILTERING_TERMS_RESPONSE,
 )
 from search_api.api.bigpicture.domain import BP_DOMAIN
+from search_api.api.beacon import routes
 from search_api.api.beacon.routes import (
     get_beacon_service,
     get_beacon_query_services,
@@ -121,10 +123,16 @@ class MockBeaconDatasetService(BeaconQueryService[BigpictureBeaconDatasetResult]
 
 
 class MockBeaconImageService(BeaconQueryService[BigpictureBeaconImageResult]):
+    """Records what it was asked, so a test can check it."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
     @override
     async def query(
         self, filters, granularity="record", scope=None
     ) -> BeaconQueryResult[BigpictureBeaconImageResult]:
+        self.calls.append(dict(filters=filters, granularity=granularity, scope=scope))
         return get_mock_image_query_result()
 
 
@@ -173,7 +181,12 @@ class MockSuggestionsAndValuesBeaconService(MockBeaconService):
 
 
 @pytest.fixture()
-def client():
+def image_service() -> MockBeaconImageService:
+    return MockBeaconImageService()
+
+
+@pytest.fixture()
+def client(image_service):
     """Creates the test client and sets up mock services."""
     saved = dict(app.dependency_overrides)
     app.dependency_overrides[get_beacon_service] = lambda: MockBeaconService(
@@ -181,7 +194,7 @@ def client():
     )
     app.dependency_overrides[get_beacon_query_services] = lambda: {
         "/datasets": MockBeaconDatasetService(),
-        "/images": MockBeaconImageService(),
+        "/images": image_service,
     }
     app.dependency_overrides[get_ontology_term_services] = lambda: {
         SNOMED_ONTOLOGY_ID: MockOntologyTermCache()
@@ -236,6 +249,83 @@ def test_images_query(client: TestClient):
     assert response.responseSummary.exists
     assert response.responseSummary.numTotalResults == 1
     assert response.response.resultSet[0].results[0].imageId == "testImage"
+
+
+def test_query_returns_count_by_default(client: TestClient):
+    resp = client.post(
+        "/images", json=BeaconQueryRequest(query=BeaconQuery()).model_dump()
+    )
+    assert resp.status_code == 200
+    response = BeaconCountResponse.model_validate(resp.json())
+    assert response.meta.returnedGranularity == "count"
+    assert response.responseSummary.numTotalResults == 1
+
+
+def test_query_passes_filters_and_scope(client: TestClient, image_service):
+    scope = BP_FILTERING_SCOPES[0].id
+    filters = [BeaconQueryFilter(id="sex", value="Female")]
+    request = BeaconQueryRequest(
+        query=BeaconQuery(filters=filters, requestedScope=scope)
+    )
+    resp = client.post("/images", json=request.model_dump())
+    assert resp.status_code == 200
+    [call] = image_service.calls
+    assert call["filters"] == filters
+    assert call["scope"] == scope
+
+
+def test_query_rejects_invalid_scope(client: TestClient, image_service):
+    request = BeaconQueryRequest(query=BeaconQuery(requestedScope="invalid"))
+    resp = client.post("/images", json=request.model_dump())
+    assert resp.status_code == 400
+    assert image_service.calls == []
+
+
+MOCK_CONCEPT_ID = "337915000"
+
+
+class MockOntologyService:
+    """Resolves every value to MOCK_CONCEPT_ID, or fails."""
+
+    def __init__(self, fail: bool = False) -> None:
+        self.fail = fail
+
+    async def prepare_ontology_filter(self, query_filter, filtering_terms, term_cache):
+        if self.fail:
+            raise RuntimeError("Snowstorm is down.")
+        return query_filter.model_copy(update={"value": [MOCK_CONCEPT_ID]})
+
+
+def test_query_resolves_ontology_filters(
+    client: TestClient, image_service, monkeypatch
+):
+    monkeypatch.setattr(routes, "get_ontology_service", lambda _: MockOntologyService())
+    filters = [
+        BeaconQueryFilter(id="animal_species", value="human"),
+        BeaconQueryFilter(id="sex", value="Female"),
+    ]
+    request = BeaconQueryRequest(query=BeaconQuery(filters=filters))
+    resp = client.post("/images", json=request.model_dump())
+    assert resp.status_code == 200
+    [call] = image_service.calls
+    # Other filters first, then the resolved ontology filters.
+    assert call["filters"] == [
+        BeaconQueryFilter(id="sex", value="Female"),
+        BeaconQueryFilter(id="animal_species", value=[MOCK_CONCEPT_ID]),
+    ]
+
+
+def test_query_returns_service_unavailable_when_ontology_fails(
+    client: TestClient, image_service, monkeypatch
+):
+    monkeypatch.setattr(
+        routes, "get_ontology_service", lambda _: MockOntologyService(fail=True)
+    )
+    filters = [BeaconQueryFilter(id="animal_species", value="x")]
+    request = BeaconQueryRequest(query=BeaconQuery(filters=filters))
+    resp = client.post("/images", json=request.model_dump())
+    assert resp.status_code == 503
+    assert image_service.calls == []
 
 
 def test_info(client: TestClient):

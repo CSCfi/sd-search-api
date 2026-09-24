@@ -69,8 +69,12 @@ filtering terms/scopes and `replace_concepts`, it carries `local_source` / `remo
 `beacon_service_factory` for the **query-less** service behind `/status`, `/health`, `/values`, `/suggestions` and
 `ValueCountsUpdater`, and `query_endpoints: Sequence[BeaconQueryEndpoint]`, one per entity endpoint (`/datasets`,
 `/images`) with its `path`, its own service factory, `result_sets_response_model` and — only under `FEATURE_AI` —
-its AI persona and result model, mounted at `/ai<path>`; each endpoint needs its own service because each has a
-different result shape. `make_lifespan` builds one term cache per ontology into `app.state.ontology_term_services`
+its AI persona, mounted at `/ai<path>`; each endpoint needs its own service because each has a different result
+shape. **The model only chooses filters**: an `/ai` route runs them through the very query `/datasets` or `/images`
+does and returns its response beside the interpretation, so no record is ever written by the model. It takes
+the same `requestedGranularity` and `requestedScope`, but defaults to `record` where a Beacon query defaults to
+`count`. A scope shows the model only the fields indexed for it, since a filter on any other field would
+constrain nothing there, and a model that fails or never gives valid filters is a `503`. `make_lifespan` builds one term cache per ontology into `app.state.ontology_term_services`
 and one `app.state.beacon_service`; routes must read **that** instance, since value counts are cached in a dict on
 it and filled in the background, so a per-request one would start empty.
 

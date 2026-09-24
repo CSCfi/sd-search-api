@@ -1,0 +1,14 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+    name: nginx
+spec:
+    secretName: custom-tls-certs
+    duration: 2160h
+    renewBefore: 360h
+    issuerRef:
+        name: letsencrypt
+        kind: Issuer
+    commonName: sd-search-ui.apps.example.com
+    dnsNames:
+      - sd-search-ui.apps.example.com

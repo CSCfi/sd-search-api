@@ -244,9 +244,8 @@ filtering_terms:
     label: "Observation type"
     description: >-
       How an observation is linked to the image. A confirmed observation is
-      known to apply to the image. A candidate observation is known to apply
-      to at least one image in a set of images, but not necessarily to all
-      of them.
+      known to apply to an image. By default, observations apply to at least
+      one image in a set of images, but not necessarily to all of them.
     controlledValues: [ confirmed, candidate ]
 
 # Fields that are indexed in OpenSearch but are not filterable.

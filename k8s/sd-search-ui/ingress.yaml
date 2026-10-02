@@ -11,7 +11,7 @@ spec:
           service:
             name: sd-search-ui
             port:
-              number: 80
+              number: 8081
         path: /
         pathType: Prefix
   tls:

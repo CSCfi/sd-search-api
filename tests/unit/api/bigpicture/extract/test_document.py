@@ -67,6 +67,10 @@ def test_extract_fields_clinical_2_0():
     assert stain2["staining_target"] == "pan Cytokeratin"
 
 
+# There is no non-clinical 3.0 dataset because the sample, observation, policy
+# and staining schemas are the same in 2.0 and 3.0.
+
+
 def test_extract_fields_clinical_3_0():
     # Example XMLs for 2.0 and 3.0 metadata standards should yield
     # identical OpenSearch documents. The content of the 2.0 XMLs

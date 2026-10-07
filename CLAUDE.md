@@ -49,7 +49,7 @@ search_api/
 │   ├── ontology/       # service.py registrations.py snomed.py send.py term_cache.py values.py
 │   │   └── cache/      # one whole small ontology in memory
 │   ├── fetch.py        # DocumentSource (ABC) + SdSubmitFetchClient
-│   └── auth.py session.py load.py sync.py poller.py value_counts.py validate.py
+│   └── auth.py access_token.py oidc_metadata.py load.py sync.py poller.py value_counts.py validate.py
 ├── database/           # every line of SQL, one module per table: repository.py models.py document.py
 │   │                   #   document_log.py terms_cache.py ontology_cache.py load.py
 │   └── schema/         # create.sql drop.sql
@@ -138,6 +138,24 @@ them; an `ontology`/`ontologyOrValue` field may declare an `ontologyRestriction`
 a `400`. `AuthMiddleware` requires a session outside `PUBLIC_PATHS` — hence `/health` and `/info` anonymous,
 `/status` a `401`. `/admin` is gated by `ADMIN_KEY`; `POST /admin/caches/reload` pushes a write to a running server.
 
+### Auth (`api/auth/routes.py`, `services/{auth,access_token,oidc_metadata}.py`, `api/middlewares.py`)
+
+**The session is the LS AAI access token itself**, nothing minted: `/callback` (idpyoidc `RPHandler`, code + PKCE)
+puts it in the `access_token` cookie (`HttpOnly`, `SameSite=Strict`, `Path=/`, `Max-Age` = `expires_in`, 1 h), so
+the UI's nginx can forward it unchanged as a bearer token to Dataset-on-Demand. `AuthMiddleware` takes it from that
+cookie or `Authorization: Bearer` and **validates it locally** against the issuer's JWKS, never by introspection:
+asymmetric `alg` only (refusing HS256 and `none` before any lookup), `typ` `at+jwt` (RFC 9068 — what keeps out ID
+and refresh tokens signed with the very same key), `iss` equal to the **discovered** issuer (LS AAI's has a trailing
+slash), `aud` containing `OIDC_CLIENT_ID`, `exp` and `sub` required. An unknown `kid` refetches the keys, at most once
+a minute since anyone can name one; keys or discovery unreachable is a `503`, not a `401`, so a client does not loop
+through `/refresh` and `/login`. **The refresh token rides only to `/refresh`** (cookie `Path=/refresh`, `Max-Age`
+from its unverified `exp`, about a month): `POST /refresh` redeems it at the token endpoint directly with httpx,
+not through `RPHandler`, whose login state is in-process memory and gone after a restart or on another replica, and
+**resets both cookies, since LS AAI rotates the refresh token** — a spent one is `invalid_grant`, answered `401` with
+both cookies cleared. Refresh is client-driven (a `401`, one `POST /refresh`, a retry); LS AAI issues no refresh
+token unless `offline_access` is requested, hence its place in the default `OIDC_SCOPE`. `scripts/lsaai_token.py`
+logs in through the real client and reports what LS AAI actually issues; `tests/integration/mockauth.py` mirrors it.
+
 ### Query path
 
 `register_query_route(endpoint)` registers `/datasets` and `/images` from one handler; they differ only in which
@@ -201,7 +219,7 @@ default would match on one word, far too broad given that results are never rank
 Settings (`conf.py`) are mostly **required** — no hardcoded host/db/password. Defaults: `POSTGRES_PORT=5432`,
 `POSTGRES_POOL_{MIN_SIZE=2,MAX_SIZE=10,MAX_LIFETIME=3600,TIMEOUT=5}`, `OPENSEARCH_PORT=9200`, `DEPLOYMENT_ENV=dev`,
 `{TERM,ONTOLOGY,VALUE_COUNT}_CACHE_REFRESH=300`, `FEATURE_AI=false`, `ADMIN_KEY=None`, `OIDC_SECURE_COOKIE=true`,
-`JWT_ALGORITHM=HS256`. There is **one class per source**, since a `BaseSettings` validates every field it declares:
+`OIDC_SCOPE="openid profile email offline_access"`. There is **one class per source**, since a `BaseSettings` validates every field it declares:
 bundled, a `load <dir>` would demand submit API settings it never uses. **The server pools its Postgres connections
 and nothing else does** (`database/repository.py`): with no pool open, `get_connection()` connects directly.
 

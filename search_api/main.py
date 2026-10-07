@@ -10,17 +10,18 @@ from search_api.api.jwk.routes import make_jwk_router
 from search_api.api.domain import make_lifespan
 from search_api.api.exception_handlers import register_exception_handlers
 from search_api.api.middlewares import AuthMiddleware
-from search_api.conf import admin_config, deployment_config, jwt_config, oidc_config
+from search_api.conf import admin_config, deployment_config, oidc_config
+from search_api.services.access_token import AccessTokenValidator
 from search_api.services.auth import AuthServiceHandler
+from search_api.services.oidc_metadata import ProviderMetadata
 
 # uvicorn search_api.main:app --reload
 
 _domain = get_domain(deployment_config().DEPLOYMENT_TYPE)
 
-# Required OIDC/JWT settings validated here so a misconfigured deployment fails
-# at startup instead of only on the first /login or first request carrying a token.
+# Required OIDC settings validated here so a misconfigured deployment fails at
+# startup instead of only on the first /login or first request carrying a token.
 oidc_config()
-jwt_config()
 
 app = FastAPI(
     title=_domain.beacon_name,
@@ -28,8 +29,10 @@ app = FastAPI(
     lifespan=make_lifespan(_domain),
 )
 
-app.state.auth_service = AuthServiceHandler()
-app.add_middleware(AuthMiddleware)
+# One discovery document for the login flow and for validating its tokens.
+_provider_metadata = ProviderMetadata()
+app.state.auth_service = AuthServiceHandler(_provider_metadata)
+app.add_middleware(AuthMiddleware, validator=AccessTokenValidator(_provider_metadata))
 
 app.include_router(make_beacon_router(_domain))
 app.include_router(auth_router)

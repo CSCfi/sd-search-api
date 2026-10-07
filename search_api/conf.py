@@ -134,7 +134,11 @@ class OIDCConfiguration(BaseSettings):
         ),
     )
     OIDC_SCOPE: str = Field(
-        default="openid profile email", description="OIDC scopes to request."
+        default="openid profile email offline_access",
+        description=(
+            "OIDC scopes to request. LS AAI issues a refresh token only when "
+            "`offline_access` is requested and allowed for the client."
+        ),
     )
     OIDC_SECURE_COOKIE: bool = Field(
         default=True,
@@ -162,35 +166,6 @@ class OIDCConfiguration(BaseSettings):
         """URL to send the user to after logout: redirect_url's origin, path dropped."""
         parsed = urlparse(self.redirect_url)
         return f"{parsed.scheme}://{parsed.netloc}/"
-
-
-class JWTConfiguration(BaseSettings):
-    """Session JWT configuration."""
-
-    JWT_KEY: str = Field(
-        description="Base64-encoded secret key used to sign session JWTs."
-    )
-    JWT_ISSUER: str = Field(
-        default="sd-search-api", description="Session JWT issuer claim."
-    )
-    JWT_ALGORITHM: str = Field(
-        default="HS256", description="Session JWT signing algorithm."
-    )
-
-    @field_validator("JWT_KEY")
-    @classmethod
-    def decode_jwt_key(cls, value: str) -> str:
-        """Decode JWT key from base64-encoded environment variable."""
-        try:
-            decoded = base64.b64decode(value, validate=True)
-            key = decoded.decode("utf-8")
-        except Exception as exc:
-            raise ValueError("JWT_KEY must be a valid base64-encoded string") from exc
-        if len(decoded) < 32:
-            raise ValueError(
-                "JWT_KEY must decode to at least 32 bytes (256 bits) for HS256 signing"
-            )
-        return key
 
 
 class SdSubmitSyncConfiguration(BaseSettings):
@@ -293,11 +268,6 @@ def ai_config() -> AIConfiguration:
 def oidc_config() -> OIDCConfiguration:
     """Get OIDC configuration."""
     return OIDCConfiguration()
-
-
-def jwt_config() -> JWTConfiguration:
-    """Get JWT configuration."""
-    return JWTConfiguration()
 
 
 def sd_submit_sync_config() -> SdSubmitSyncConfiguration:

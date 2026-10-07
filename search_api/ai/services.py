@@ -16,10 +16,7 @@ from search_api.api.opensearch.clauses import iso8601_duration_to_days
 from search_api.conf import ai_config as _ai_config
 from search_api.exceptions import SystemException
 from search_api.services.field_values import get_field_suggestions, get_field_values
-from search_api.services.ontology.service import (
-    get_ontology_id_by_field,
-    get_ontology_service,
-)
+from search_api.services.ontology.service import get_ontology_service
 from search_api.services.ontology.term_cache import OntologyTermCache
 
 
@@ -329,9 +326,10 @@ class AIService:
         self,
         filtering_terms: Sequence[BeaconFilteringTerm],
         assistant_description: str,
+        ontology_id_by_field: Mapping[str, str],
     ) -> None:
         self._filtering_terms = filtering_terms
-        self._ontology_id_by_field = get_ontology_id_by_field(filtering_terms)
+        self._ontology_id_by_field = ontology_id_by_field
         cfg = _ai_config()
         model = OpenAIChatModel(
             # These models are too small to construct filters correctly: "qwen2.5:3b",

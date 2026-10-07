@@ -160,6 +160,14 @@ async def test_get_field_suggestions_match_concept_id(get_suggestions):
     assert await get_suggestions(
         FILTERING_TERM_ANIMAL_SPECIES, CONCEPT_ID_HOMO_SAPIENS[:4]
     ) == [homo_sapiens]
+    # An ontologyOrValue field matches the start of its concept ids.
+    assert await get_suggestions(
+        FILTERING_TERM_FIXATION_TYPE, CONCEPT_ID_TISSUE_FIXATIVE[:4]
+    ) == [
+        FieldValue(
+            value="Tissue fixative", concept_id=CONCEPT_ID_TISSUE_FIXATIVE, count=4
+        )
+    ]
 
 
 @pytest.mark.asyncio

@@ -139,6 +139,7 @@ ONTOLOGY_FILTERING_TERMS = [
         ontology=FILTERING_ONTOLOGY,
     ),
 ]
+ONTOLOGY_ID_BY_FIELD = {FIELD_ID_DIAGNOSIS: ONTOLOGY_ID, FIELD_ID_FINDING: ONTOLOGY_ID}
 FILTERING_TERMS = [
     *ONTOLOGY_FILTERING_TERMS,
     _term(
@@ -365,13 +366,13 @@ def deps(ontology, beacon_service) -> _Deps:
         "clinical",
         beacon_service,
         TERM_CACHES,
-        {FIELD_ID_DIAGNOSIS: ONTOLOGY_ID, FIELD_ID_FINDING: ONTOLOGY_ID},
+        ONTOLOGY_ID_BY_FIELD,
     )
 
 
 @pytest.fixture
 def ai_service(ontology) -> AIService:
-    return AIService(FILTERING_TERMS, "a test assistant")
+    return AIService(FILTERING_TERMS, "a test assistant", ONTOLOGY_ID_BY_FIELD)
 
 
 # Test interpret: the fields the model is shown.

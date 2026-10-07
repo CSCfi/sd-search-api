@@ -264,7 +264,11 @@ def make_beacon_router(domain: Domain) -> APIRouter:
 
     def register_ai_filters_route() -> None:
         """Register the AI endpoint that recommends filters."""
-        ai_service = AIService(domain.filtering_terms, domain.ai_assistant_description)
+        ai_service = AIService(
+            domain.filtering_terms,
+            domain.ai_assistant_description,
+            ontology_id_by_field,
+        )
 
         @router.post("/ai/filters", response_model=AIInterpretation)
         async def ai_filters(

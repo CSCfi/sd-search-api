@@ -8,7 +8,10 @@ process can be monkeypatched. This module runs a real, separate HTTP server (std
 to complete a real Authorization Code + PKCE login against it.
 
 The authorize endpoint immediately redirects back to the registered `redirect_uri`
-with a fresh code, and the token endpoint accepts any `client_id`/`client_secret`.
+with a fresh code. The token endpoint requires `client_secret_basic` but accepts any
+`client_id`/`client_secret`, and issues tokens shaped like LS AAI's: an RFC 9068 access
+token (`typ: at+jwt`) and, only when `offline_access` was requested, a JWT refresh token
+(`typ: JWT`, no `sub`) that each refresh grant replaces, the spent one being refused.
 """
 
 import base64
@@ -33,6 +36,8 @@ TEST_USER_GIVEN_NAME = "Test"
 TEST_USER_FAMILY_NAME = "User"
 
 ID_TOKEN_LIFETIME = 3600
+ACCESS_TOKEN_LIFETIME = 3600
+REFRESH_TOKEN_LIFETIME = 30 * 24 * 3600
 
 
 def _b64url_uint(value: int) -> str:
@@ -68,9 +73,20 @@ class MockAuthServer(ThreadingHTTPServer):
                 }
             ]
         }
-        # Authorization code -> nonce from the /authorize request that minted it.
+        # Authorization code -> (nonce, scope) from the /authorize request that minted it.
         # idpyoidc's client verifies the ID token's `nonce` matches the one it sent.
-        self.codes: dict[str, str] = {}
+        self.codes: dict[str, tuple[str, str]] = {}
+        # Refresh token -> the scope it was granted. Redeeming one removes it.
+        self.refresh_tokens: dict[str, str] = {}
+        self.lock = threading.Lock()
+
+    def sign(self, claims: dict, typ: str) -> str:
+        return jwt.encode(
+            claims,
+            self.private_key_pem,
+            algorithm="RS256",
+            headers={"kid": KEY_ID, "typ": typ},
+        )
 
 
 class MockAuthRequestHandler(BaseHTTPRequestHandler):
@@ -132,11 +148,9 @@ class MockAuthRequestHandler(BaseHTTPRequestHandler):
                 "response_types_supported": ["code"],
                 "subject_types_supported": ["public"],
                 "id_token_signing_alg_values_supported": ["RS256"],
-                "scopes_supported": ["openid", "profile", "email"],
-                "token_endpoint_auth_methods_supported": [
-                    "client_secret_basic",
-                    "client_secret_post",
-                ],
+                "scopes_supported": ["openid", "profile", "email", "offline_access"],
+                "grant_types_supported": ["authorization_code", "refresh_token"],
+                "token_endpoint_auth_methods_supported": ["client_secret_basic"],
                 "code_challenge_methods_supported": ["S256"],
             }
         )
@@ -148,9 +162,11 @@ class MockAuthRequestHandler(BaseHTTPRequestHandler):
         redirect_uri = params["redirect_uri"][0]
         state = params.get("state", [""])[0]
         nonce = params.get("nonce", [""])[0]
+        scope = params.get("scope", [""])[0]
 
         code = uuid.uuid4().hex
-        self.server.codes[code] = nonce
+        with self.server.lock:
+            self.server.codes[code] = (nonce, scope)
 
         location = f"{redirect_uri}?{urlencode({'code': code, 'state': state})}"
         self.send_response(303)
@@ -160,39 +176,89 @@ class MockAuthRequestHandler(BaseHTTPRequestHandler):
     def _token(self) -> None:
         length = int(self.headers.get("Content-Length", 0))
         form = parse_qs(self.rfile.read(length).decode())
-        code = form.get("code", [""])[0]
-        nonce = self.server.codes.pop(code, "")
-        client_id = form.get("client_id", [""])[0] or self._client_id_from_basic_auth()
+        client_id = self._client_id_from_basic_auth()
+        if not client_id:
+            self._send_json({"error": "invalid_client"}, status=401)
+            return
 
+        grant_type = form.get("grant_type", [""])[0]
+        if grant_type == "authorization_code":
+            with self.server.lock:
+                nonce, scope = self.server.codes.pop(
+                    form.get("code", [""])[0], ("", "")
+                )
+            response = self._issue_tokens(client_id, scope)
+            response["id_token"] = self._id_token(client_id, nonce)
+        elif grant_type == "refresh_token":
+            with self.server.lock:
+                scope = self.server.refresh_tokens.pop(
+                    form.get("refresh_token", [""])[0], None
+                )
+            if scope is None:
+                self._send_json({"error": "invalid_grant"}, status=400)
+                return
+            response = self._issue_tokens(client_id, scope)
+        else:
+            self._send_json({"error": "unsupported_grant_type"}, status=400)
+            return
+
+        self._send_json(response)
+
+    def _issue_tokens(self, client_id: str, scope: str) -> dict:
+        """An RFC 9068 access token, plus a refresh token if `offline_access` was asked."""
         now = int(time.time())
-        claims = {
-            "iss": self._get_issuer_url(),
-            "sub": TEST_USER_SUB,
-            "aud": client_id,
-            "exp": now + ID_TOKEN_LIFETIME,
-            "iat": now,
-            "nonce": nonce,
-        }
-        id_token = jwt.encode(
-            claims,
-            self.server.private_key_pem,
-            algorithm="RS256",
-            headers={"kid": KEY_ID},
-        )
-
-        self._send_json(
+        access_token = self.server.sign(
             {
-                "access_token": f"mock-access-token-{code}",
-                "token_type": "Bearer",
-                "expires_in": ID_TOKEN_LIFETIME,
-                "id_token": id_token,
-            }
+                "iss": self._get_issuer_url(),
+                "sub": TEST_USER_SUB,
+                "aud": client_id,
+                "client_id": client_id,
+                "scope": scope,
+                "iat": now,
+                "exp": now + ACCESS_TOKEN_LIFETIME,
+                "jti": uuid.uuid4().hex,
+            },
+            typ="at+jwt",
+        )
+        response = {
+            "access_token": access_token,
+            "token_type": "Bearer",
+            "expires_in": ACCESS_TOKEN_LIFETIME,
+            "scope": scope,
+        }
+        if "offline_access" in scope.split():
+            refresh_token = self.server.sign(
+                {
+                    "iss": self._get_issuer_url(),
+                    "aud": client_id,
+                    "exp": now + REFRESH_TOKEN_LIFETIME,
+                    "jti": uuid.uuid4().hex,
+                },
+                typ="JWT",
+            )
+            with self.server.lock:
+                self.server.refresh_tokens[refresh_token] = scope
+            response["refresh_token"] = refresh_token
+        return response
+
+    def _id_token(self, client_id: str, nonce: str) -> str:
+        now = int(time.time())
+        return self.server.sign(
+            {
+                "iss": self._get_issuer_url(),
+                "sub": TEST_USER_SUB,
+                "aud": client_id,
+                "exp": now + ID_TOKEN_LIFETIME,
+                "iat": now,
+                "nonce": nonce,
+            },
+            typ="JWT",
         )
 
     def _client_id_from_basic_auth(self) -> str:
-        # client_secret_basic auth puts client_id/secret in the Authorization header
-        # instead of the form body; this mock trusts the client_id and skips secret
-        # verification entirely (fixed test credentials, accepted unconditionally).
+        # client_secret_basic puts client_id/secret in the Authorization header. This
+        # mock trusts the client_id and skips verifying the secret (fixed test
+        # credentials, accepted unconditionally).
         auth_header = self.headers.get("Authorization", "")
         if not auth_header.lower().startswith("basic "):
             return ""

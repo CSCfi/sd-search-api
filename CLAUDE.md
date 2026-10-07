@@ -176,7 +176,9 @@ hook. Unresolved values survive the prepared filter only for `ontologyOrValue`. 
 cascade** (`ontology/values.py`), so a value indexed and a value searched for reach the same concept: the source's
 code is kept when the ontology has it, and only otherwise is the **meaning** beside it resolved — one match a
 `WARNING`, none an `ERROR`, and several an `ERROR` too unless the field's `ontologyRestriction` picks out exactly
-one. A retired concept is then substituted, which buys reach rather than a name: retiring one strips its
+one. An `ontologyOrValue` field's **free text is resolved too**, as a meaning without a code: naming one allowed
+concept, it is indexed as that concept, since a search for the text would resolve to it; otherwise it stays in
+`<id>_other`. A retired concept is then substituted, which buys reach rather than a name: retiring one strips its
 relationships, so no subtree query reaches a document citing it.
 
 **A load enforces the `ontologyRestriction`** as well as resolving through it: a concept outside the field's part

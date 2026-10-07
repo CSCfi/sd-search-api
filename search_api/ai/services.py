@@ -132,9 +132,9 @@ def get_filtering_terms(ctx: RunContext[_Deps]) -> str:
     """
     List the fields you can filter on, one per line, with the values each accepts.
 
-     A field with allowed values lists them, as "field: value1 | value2". A
-     field listed as "field: get_values" takes values found with get_values.
-     A duration field takes an ISO-8601 duration or range.
+    A field with allowed values lists them, as "field: value1 | value2". A
+    field listed as "field: get_values" takes values found with get_values.
+    A duration field takes an ISO-8601 duration or range.
     """
     lines = []
     for term in ctx.deps.filtering_terms:
@@ -163,7 +163,8 @@ async def get_values(
     if it has one, and the number of documents that have it. Use a value
     exactly as listed, or its concept id. If the text names a concept in other
     words, such as a synonym, the value for that concept is listed too. With
-    include_descendants, the values for its descendants are listed as well.
+    include_descendants, only the concept and its descendants are listed, unless
+    the text names no such concept.
 
     Args:
         field_id: A field listed by get_filtering_terms as "field: get_values".
@@ -180,6 +181,17 @@ async def get_values(
             f"Field '{field_id}' has no values to find. "
             "Give it a value as get_filtering_terms describes."
         )
+
+    if include_descendants and term.type in _ONTOLOGY_TYPES:
+        # Return the concept the text names and its descendants. If the text names
+        # no concept, use the /suggestions search below instead. When it does, that
+        # search is not used, because it would also list values whose names only
+        # contain the text, such as "Lymphomatoid papulosis" for "lymphoma".
+        descendants = await _resolve_field_values(
+            ctx.deps, term, text, include_descendants=True
+        )
+        if descendants:
+            return descendants
 
     # Offer the model the values from /suggestions.
     values = await get_field_suggestions(
@@ -201,7 +213,9 @@ async def get_values(
     # also match by part of the text. The term cache could store the synonyms
     # of every indexed concept when documents are loaded, so /suggestions could
     # match them by substring in memory, for the AI and for users alike.
-    resolved = await _resolve_field_values(ctx.deps, term, text, include_descendants)
+    resolved = await _resolve_field_values(
+        ctx.deps, term, text, include_descendants=False
+    )
     # Values /suggestions already found are not added again.
     return values + [v for v in resolved if v not in values]
 
@@ -212,7 +226,8 @@ async def _replace_with_indexed_values(
 ) -> tuple[list[BeaconQueryFilter], list[str]]:
     """Replace each given value with the indexed field values that match it.
 
-    Return the filters, and an error for each given value that matches no indexed value.
+    Return the filters, and an error for each given value that matches no indexed value,
+    and for each filter given no value.
     """
 
     replaced_filters = []
@@ -232,6 +247,11 @@ async def _replace_with_indexed_values(
             else [query_filter.value]
         )
 
+        if not given_values:
+            errors.append(
+                f"Field '{field.id}' has no value. Use get_values to find one."
+            )
+
         include_descendants = query_filter.includeDescendantTerms
         indexed_values: list[str] = []
         for given_value in given_values:
@@ -247,6 +267,9 @@ async def _replace_with_indexed_values(
             # A concept id for an ontology concept, otherwise the value itself.
             indexed_values += [v.concept_id or v.value for v in matching_field_values]
 
+        # Remove duplicate values: indexed values found by more than one given value,
+        # such as a concept and its synonym.
+        indexed_values = list(dict.fromkeys(indexed_values))
         replaced_filters.append(
             query_filter.model_copy(update={"value": indexed_values})
         )

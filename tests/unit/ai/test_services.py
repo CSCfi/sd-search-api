@@ -482,8 +482,9 @@ async def test_replace_concept_with_listed_descendants(deps):
 async def test_replace_reports_values_matching_nothing(deps):
     # A value that matches no indexed field value gets an error, which is sent
     # back to the model. With includeDescendantTerms, the error says that none
-    # of its descendants matched either.
-    _, [neoplasm_error, unknown_error] = await _replace(
+    # of its descendants matched. If no values is given, an error is sent back
+    # to the model.
+    _, [neoplasm_error, unknown_error, empty_error] = await _replace(
         deps,
         # Neoplasm is a concept, but no document has it.
         BeaconQueryFilter(id=FIELD_ID_DIAGNOSIS, value=CONCEPT_ID_NEOPLASM),
@@ -491,9 +492,28 @@ async def test_replace_reports_values_matching_nothing(deps):
         BeaconQueryFilter(
             id=FIELD_ID_DIAGNOSIS, value=CONCEPT_ID_UNKNOWN, includeDescendantTerms=True
         ),
+        BeaconQueryFilter(id="image_id", value=[]),
     )
     assert f"'{CONCEPT_ID_NEOPLASM}'. Use get_values" in neoplasm_error
     assert f"'{CONCEPT_ID_UNKNOWN}' or its descendants" in unknown_error
+    assert empty_error == "Field 'image_id' has no value. Use get_values to find one."
+
+
+@pytest.mark.asyncio
+async def test_replace_deduplicate(deps):
+    filters, errors = await _replace(
+        deps,
+        BeaconQueryFilter(
+            id=FIELD_ID_DIAGNOSIS,
+            value=[PREFERRED_TERM_NEOPLASM, PREFERRED_TERM_DUCTAL_CARCINOMA],
+            includeDescendantTerms=True,
+        ),
+    )
+    assert errors == []
+    assert filters[0].value == [
+        CONCEPT_ID_DUCTAL_CARCINOMA,
+        CONCEPT_ID_LOBULAR_CARCINOMA,
+    ]
 
 
 @pytest.mark.asyncio
@@ -573,6 +593,12 @@ async def test_get_values_lists_values_from_the_ontology(deps):
     assert await _get_values(
         deps, FIELD_ID_DIAGNOSIS, PREFERRED_TERM_NEOPLASM, include_descendants=True
     ) == [FIELD_VALUE_DUCTAL_CARCINOMA, FIELD_VALUE_LOBULAR_CARCINOMA]
+    # The test ontology has no concept named "carcinoma". So even with
+    # include_descendants, get_values falls back to the /suggestions search, and
+    # lists the values whose names contain "carcinoma".
+    assert await _get_values(
+        deps, FIELD_ID_DIAGNOSIS, "carcinoma", include_descendants=True
+    ) == [FIELD_VALUE_DUCTAL_CARCINOMA, FIELD_VALUE_LOBULAR_CARCINOMA]
 
 
 @pytest.mark.asyncio
@@ -612,8 +638,8 @@ async def test_interpret_retries_value_not_indexed(ai_service, beacon_service):
     # The model first answers with a diagnosis no document has. That answer is
     # sent back to it, and its second answer, which documents have, is accepted.
     llm = _MockLLM(
-        [{"id": FIELD_ID_DIAGNOSIS, "value": "Carcinoma"}],
-        [{"id": FIELD_ID_DIAGNOSIS, "value": "Lobular carcinoma"}],
+        [{"id": FIELD_ID_DIAGNOSIS, "value": PREFERRED_TERM_NEOPLASM}],
+        [{"id": FIELD_ID_DIAGNOSIS, "value": PREFERRED_TERM_LOBULAR_CARCINOMA}],
     )
     with ai_service._agent.override(model=llm.model):
         result = await ai_service.interpret("carcinoma", beacon_service, TERM_CACHES)

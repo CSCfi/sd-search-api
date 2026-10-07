@@ -64,23 +64,25 @@ search_api/
 `main.py` picks a deployment by `DEPLOYMENT_TYPE`, looks it up in `api/deployments.py` `DOMAINS`, and builds
 `make_beacon_router(domain)` + `make_lifespan(domain)`; the admin router mounts only when `ADMIN_KEY` is set. A new
 deployment is a new `Domain` in `DOMAINS` (see `bigpicture/domain.py`). Besides the index name, beacon metadata,
-filtering terms/scopes and `replace_concepts`, it carries `local_source` / `remote_source`
-(`DocumentSource | None` — the `load` and `fetch` commands; `None` means that command has nothing to do), one
-`beacon_service_factory` for the **query-less** service behind `/status`, `/health`, `/values`, `/suggestions` and
+filtering terms/scopes and `replace_concepts`, it carries `local_source` / `remote_source` (`DocumentSource | None`
+— the `load` and `fetch` commands; `None` means that command has nothing to do), one `beacon_service_factory` for
+the **query-less** service behind `/status`, `/health`, `/values`, `/suggestions`, `/ai/filters` and
 `ValueCountsUpdater`, and `query_endpoints: Sequence[BeaconQueryEndpoint]`, one per entity endpoint (`/datasets`,
 `/images`) with its `path`, its own service factory and `result_sets_response_model`; each endpoint needs its own
-service because each has a different result shape. Its `ai_assistant_description` is the persona behind
+service because each has a different result shape. The `Domain`'s `ai_assistant_description` is the persona behind
 `POST /ai/filters` (only under `FEATURE_AI`). **The model only recommends filters**: the route returns the
-interpretation and the filters and runs no query, so the model never sees a record; the client shows the filters
-and the user runs them through `/datasets` or `/images`. **A keyword or ontology value must be in the index**, so
-a client can select it among `/values`: the model finds values with a `get_values(field_id, text)` tool (`ai/services.py`),
-built on the very code behind `/suggestions` (`services/field_values.py`), and its answer is checked against `/values`
-and sent back to correct otherwise. An ontology value comes back as its concept id; a name the ontology knows the
-concept by, such as a synonym, is resolved as a query resolves it, and with `includeDescendantTerms` a broader
-concept is replaced by the listed values beneath it, since a client must be able to display every value. A `requestedScope` shows the model only the fields indexed for it, since a filter on any other field would
-constrain nothing there, and a model that fails or never gives valid filters is a `503`. `make_lifespan` builds one term cache per ontology into `app.state.ontology_term_services`
-and one `app.state.beacon_service`; routes must read **that** instance, since value counts are cached in a dict on
-it and filled in the background, so a per-request one would start empty.
+interpretation and the filters and runs no query, so the model never sees a record; the client shows the filters and
+the user runs them through `/datasets` or `/images`. **A keyword or ontology value must be in the index**, so a
+client can select it among `/values`: the model finds values with a `get_values(field_id, text,
+include_descendants)` tool (`ai/services.py`), built on the very code behind `/suggestions`
+(`services/field_values.py`), and its answer is checked against `/values` and sent back to correct otherwise. An
+ontology value comes back as its concept id; a name the ontology knows the concept by, such as a synonym, is
+resolved as a query resolves it, and with `includeDescendantTerms` a broader concept is replaced by its listed
+descendants, since a client must be able to display every value. A `requestedScope` shows the model only the fields
+indexed for it, since a filter on any other field would constrain nothing there, and a model that fails or never
+gives valid filters is a `503`. `make_lifespan` builds one term cache per ontology into
+`app.state.ontology_term_services` and one `app.state.beacon_service`; routes must read **that** instance, since
+value counts are cached in a dict on it and filled in the background, so a per-request one would start empty.
 
 ### Load path
 

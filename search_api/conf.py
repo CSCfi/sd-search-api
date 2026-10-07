@@ -3,7 +3,7 @@ from typing import Literal
 from urllib.parse import urljoin, urlparse
 
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
-from pydantic import Field, computed_field, field_validator
+from pydantic import Field, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -111,8 +111,30 @@ class FeatureConfiguration(BaseSettings):
 class AIConfiguration(BaseSettings):
     """AI/LLM configuration."""
 
-    LLM_BASE_URL: str = Field(description="LLM API base URL.")
-    LLM_API_KEY: str = Field(description="LLM API key.")
+    LLM_PROVIDER: str = Field(
+        default="openai",
+        description="LLM provider, as pydantic-ai names it. 'openai' is any "
+        "OpenAI-compatible server, such as Ollama. Other providers, such as "
+        "'anthropic' or 'google-gla', read their credentials from their own "
+        "environment variables.",
+    )
+    LLM_MODEL: str = Field(description="LLM model name, as the provider names it.")
+    LLM_BASE_URL: str | None = Field(
+        default=None, description="LLM API base URL, for the 'openai' provider."
+    )
+    LLM_API_KEY: str | None = Field(
+        default=None, description="LLM API key, for the 'openai' provider."
+    )
+
+    @model_validator(mode="after")
+    def validate_openai_settings(self) -> "AIConfiguration":
+        if self.LLM_PROVIDER == "openai" and not (
+            self.LLM_BASE_URL and self.LLM_API_KEY
+        ):
+            raise ValueError(
+                "LLM_BASE_URL and LLM_API_KEY are required for the 'openai' provider."
+            )
+        return self
 
 
 class OIDCConfiguration(BaseSettings):

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from functools import cached_property
 
 from pydantic_ai import Agent, ModelRetry, RunContext
+from pydantic_ai.models import Model, infer_model
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
@@ -331,11 +332,19 @@ class AIService:
         self._filtering_terms = filtering_terms
         self._ontology_id_by_field = ontology_id_by_field
         cfg = _ai_config()
-        model = OpenAIChatModel(
-            # These models are too small to construct filters correctly: "qwen2.5:3b",
-            "qwen2.5:14b",
-            provider=OpenAIProvider(base_url=cfg.LLM_BASE_URL, api_key=cfg.LLM_API_KEY),
-        )
+        model: Model
+        if cfg.LLM_PROVIDER == "openai":
+            # Any OpenAI-compatible server, such as Ollama.
+            model = OpenAIChatModel(
+                cfg.LLM_MODEL,
+                provider=OpenAIProvider(
+                    base_url=cfg.LLM_BASE_URL, api_key=cfg.LLM_API_KEY
+                ),
+            )
+        else:
+            # pydantic-ai builds the provider's own client, which reads the
+            # provider's credentials from its environment variables.
+            model = infer_model(f"{cfg.LLM_PROVIDER}:{cfg.LLM_MODEL}")
 
         self._agent = Agent[_Deps, AIInterpretation](
             model=model,
@@ -345,7 +354,7 @@ class AIService:
             system_prompt=_SYSTEM_PROMPT_TEMPLATE.format(
                 assistant_description=assistant_description,
             ),
-            output_retries=3,
+            retries={"output": 3},
         )
 
         # pydantic-ai generates a JSON schema from AIInterpretation and passes it to the

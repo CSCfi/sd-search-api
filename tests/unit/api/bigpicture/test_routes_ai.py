@@ -38,6 +38,7 @@ def client(monkeypatch, interpret) -> TestClient:
     monkeypatch.setenv("FEATURE_AI", "true")
     monkeypatch.setenv("LLM_BASE_URL", "http://localhost/v1")
     monkeypatch.setenv("LLM_API_KEY", "test")
+    monkeypatch.setenv("LLM_MODEL", "test")
 
     app = FastAPI()
     register_exception_handlers(app)

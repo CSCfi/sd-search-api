@@ -339,6 +339,7 @@ def llm_config(monkeypatch) -> None:
     """The LLM settings an AIService needs to be built. No LLM is called."""
     monkeypatch.setenv("LLM_BASE_URL", "http://localhost/v1")
     monkeypatch.setenv("LLM_API_KEY", "test")
+    monkeypatch.setenv("LLM_MODEL", "test")
 
 
 @pytest_asyncio.fixture

@@ -31,8 +31,11 @@ services:
       - C4GH_KEY_FILE=${C4GH_KEY_FILE:-}
       - C4GH_PASSPHRASE=${C4GH_PASSPHRASE:-}
       - ADMIN_KEY=${ADMIN_KEY}
+      - FEATURE_AI=${FEATURE_AI:-false}
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
       - LLM_BASE_URL=${LLM_BASE_URL}
       - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_MODEL=${LLM_MODEL}
       - BASE_URL=${BASE_URL}
       - OIDC_URL=${OIDC_URL:-http://mockauth:8080}
       - OIDC_CLIENT_ID=${OIDC_CLIENT_ID}

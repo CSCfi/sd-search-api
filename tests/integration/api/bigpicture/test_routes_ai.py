@@ -1,4 +1,4 @@
-"""Integration tests for the AI filters endpoint. Requires Ollama running locally."""
+"""Integration tests for the AI filters endpoint."""
 
 from urllib.parse import urlparse, urlunparse
 
@@ -7,9 +7,12 @@ import pytest
 
 from search_api.ai.models import AIInterpretation
 from search_api.api.beacon.models import BeaconQueryFilter
+from search_api.conf import feature_config
 from tests.integration.mockauth import PORT as OIDC_MOCK_PORT
 
-skip = pytest.mark.skip(reason="Requires Ollama")
+requires_feature_ai = pytest.mark.skipif(
+    not feature_config().FEATURE_AI, reason="Requires FEATURE_AI=true"
+)
 
 
 @pytest.fixture(scope="module")
@@ -46,7 +49,7 @@ def client() -> httpx.Client:
         yield c
 
 
-@skip
+@requires_feature_ai
 def test_ai_filters_returns_filters(client: httpx.Client):
     resp = client.post(
         "/ai/filters", json={"query": "images for human females"}, timeout=60.0
@@ -64,7 +67,7 @@ def test_ai_filters_returns_filters(client: httpx.Client):
         )
 
 
-@skip
+@requires_feature_ai
 def test_ai_filters_missing_body_returns_422(client: httpx.Client):
     resp = client.post("/ai/filters", json={})
     assert resp.status_code == 422

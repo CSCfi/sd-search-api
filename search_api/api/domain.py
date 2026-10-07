@@ -42,7 +42,6 @@ class BeaconQueryEndpoint:
     path: str
     beacon_service_factory: Callable[[Any], BeaconQueryService[Any]]
     result_sets_response_model: type[BeaconResultSetsResponse[Any]]
-    ai_assistant_description: str
 
 
 @dataclass(frozen=True)
@@ -60,6 +59,8 @@ class Domain:
     beacon_id: str
     beacon_name: str
     schemas: Sequence[str]  # Beacon entity types (returnedSchemas).
+    # The AI persona that recommends filters at /ai/filters.
+    ai_assistant_description: str
     # Whether to replace retired concepts with an active one.
     replace_concepts: bool = True
     local_source: DocumentSource | None = None

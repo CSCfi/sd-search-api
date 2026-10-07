@@ -49,7 +49,7 @@ search_api/
 │   ├── ontology/       # service.py registrations.py snomed.py send.py term_cache.py values.py
 │   │   └── cache/      # one whole small ontology in memory
 │   ├── fetch.py        # DocumentSource (ABC) + SdSubmitFetchClient
-│   └── auth.py session.py load.py sync.py poller.py value_counts.py validate.py
+│   └── auth.py session.py load.py sync.py poller.py value_counts.py field_values.py validate.py
 ├── database/           # every line of SQL, one module per table: repository.py models.py document.py
 │   │                   #   document_log.py terms_cache.py ontology_cache.py load.py
 │   └── schema/         # create.sql drop.sql
@@ -68,12 +68,16 @@ filtering terms/scopes and `replace_concepts`, it carries `local_source` / `remo
 (`DocumentSource | None` — the `load` and `fetch` commands; `None` means that command has nothing to do), one
 `beacon_service_factory` for the **query-less** service behind `/status`, `/health`, `/values`, `/suggestions` and
 `ValueCountsUpdater`, and `query_endpoints: Sequence[BeaconQueryEndpoint]`, one per entity endpoint (`/datasets`,
-`/images`) with its `path`, its own service factory, `result_sets_response_model` and — only under `FEATURE_AI` —
-its AI persona, mounted at `/ai<path>`; each endpoint needs its own service because each has a different result
-shape. **The model only chooses filters**: an `/ai` route runs them through the very query `/datasets` or `/images`
-does and returns its response beside the interpretation, so no record is ever written by the model. It takes
-the same `requestedGranularity` and `requestedScope`, but defaults to `record` where a Beacon query defaults to
-`count`. A scope shows the model only the fields indexed for it, since a filter on any other field would
+`/images`) with its `path`, its own service factory and `result_sets_response_model`; each endpoint needs its own
+service because each has a different result shape. Its `ai_assistant_description` is the persona behind
+`POST /ai/filters` (only under `FEATURE_AI`). **The model only recommends filters**: the route returns the
+interpretation and the filters and runs no query, so the model never sees a record; the client shows the filters
+and the user runs them through `/datasets` or `/images`. **A keyword or ontology value must be in the index**, so
+a client can select it among `/values`: the model finds values with a `get_values(field_id, text)` tool (`ai/services.py`),
+built on the very code behind `/suggestions` (`services/field_values.py`), and its answer is checked against `/values`
+and sent back to correct otherwise. An ontology value comes back as its concept id; a name the ontology knows the
+concept by, such as a synonym, is resolved as a query resolves it, and with `includeDescendantTerms` a broader
+concept is replaced by the listed values beneath it, since a client must be able to display every value. A `requestedScope` shows the model only the fields indexed for it, since a filter on any other field would
 constrain nothing there, and a model that fails or never gives valid filters is a `503`. `make_lifespan` builds one term cache per ontology into `app.state.ontology_term_services`
 and one `app.state.beacon_service`; routes must read **that** instance, since value counts are cached in a dict on
 it and filled in the background, so a per-request one would start empty.
@@ -128,7 +132,7 @@ them; an `ontology`/`ontologyOrValue` field may declare an `ontologyRestriction`
 |---|---|
 | `GET /info` `/filtering_terms` `/filtering_scopes` | metadata, filter definitions |
 | `POST /datasets` `/images` | Beacon V2 search: images aggregated into datasets / one per image |
-| `POST /ai/datasets` `/ai/images` | natural-language search (gated by `FEATURE_AI`) |
+| `POST /ai/filters` | filters recommended for a natural-language query (gated by `FEATURE_AI`) |
 | `GET /filtering_terms/{field_id}/values` `/suggestions` | values with counts; autocomplete |
 | `GET /status` | documents indexed and pending, total and per scope, last sync time |
 | `GET /health` | both stores answer; a `503` names the one that did not |

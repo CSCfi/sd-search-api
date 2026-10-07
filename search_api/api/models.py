@@ -2,8 +2,6 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from search_api.api.beacon.models import BeaconQueryGranularity
-
 
 class FieldValue(BaseModel):
     value: str
@@ -60,5 +58,4 @@ class ValueCountsKey(BaseModel):
 
 class AIQueryRequest(BaseModel):
     query: str
-    requestedGranularity: BeaconQueryGranularity = "record"
     requestedScope: str | None = None

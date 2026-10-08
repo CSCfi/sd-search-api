@@ -153,8 +153,8 @@ from its unverified `exp`, about a month): `POST /refresh` redeems it at the tok
 not through `RPHandler`, whose login state is in-process memory and gone after a restart or on another replica, and
 **resets both cookies, since LS AAI rotates the refresh token** — a spent one is `invalid_grant`, answered `401` with
 both cookies cleared. Refresh is client-driven (a `401`, one `POST /refresh`, a retry); LS AAI issues no refresh
-token unless `offline_access` is requested, hence its place in the default `OIDC_SCOPE`. `scripts/lsaai_token.py`
-logs in through the real client and reports what LS AAI actually issues; `tests/integration/mockauth.py` mirrors it.
+token unless `offline_access` is requested, hence its place in the default `OIDC_SCOPE`. `tests/integration/mockauth.py`
+mirrors what LS AAI actually issues.
 
 ### Query path
 

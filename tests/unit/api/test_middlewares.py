@@ -1,39 +1,37 @@
 """Unit tests for search_api.api.middlewares."""
 
-import os
-from base64 import b64encode
-
-os.environ["JWT_KEY"] = b64encode(
-    b"test-jwt-signing-key-at-least-32-bytes-long"
-).decode("ascii")
-os.environ["JWT_ISSUER"] = "sd-search-api-test"
-os.environ["JWT_ALGORITHM"] = "HS256"
-
 import pytest
 
 from search_api.api.middlewares import AuthMiddleware
-from search_api.services.session import create_jwt_token
-
+from search_api.exceptions import SystemException
+from search_api.services.access_token import InvalidAccessToken, SigningKeysUnavailable
 
 PROTECTED_PATH = "/protected"
+VALID_TOKEN = "valid-access-token"
 
 
-def _make_scope(
-    path: str, headers: list[tuple[bytes, bytes]] | None = None, method: str = "GET"
-) -> dict:
-    return {
-        "type": "http",
-        "method": method,
-        "path": path,
-        "headers": headers or [],
-    }
+class FakeValidator:
+    """Accepts `VALID_TOKEN` as user-1, rejects anything else, or raises `error`."""
+
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.seen: list[str] = []
+
+    async def validate(self, token: str) -> str:
+        self.seen.append(token)
+        if self.error:
+            raise self.error
+        if token != VALID_TOKEN:
+            raise InvalidAccessToken("rejected")
+        return "user-1"
 
 
-async def _receive() -> dict:
-    return {"type": "http.request", "body": b"", "more_body": False}
-
-
-def _make_downstream_app():
+async def _run(
+    path: str,
+    headers: list[tuple[bytes, bytes]] | None = None,
+    validator: FakeValidator | None = None,
+) -> tuple[int, bytes, dict, bool]:
+    """Send one request through the middleware: status, body, scope, downstream ran."""
     called = {"value": False}
 
     async def app(scope, receive, send):
@@ -41,175 +39,170 @@ def _make_downstream_app():
         await send({"type": "http.response.start", "status": 200, "headers": []})
         await send({"type": "http.response.body", "body": b"ok", "more_body": False})
 
-    return app, called
+    async def receive() -> dict:
+        return {"type": "http.request", "body": b"", "more_body": False}
 
-
-def _cookie_header(token: str) -> list[tuple[bytes, bytes]]:
-    return [(b"cookie", f"access_token={token}".encode())]
-
-
-def _bearer_header(token: str) -> list[tuple[bytes, bytes]]:
-    return [(b"authorization", f"Bearer {token}".encode())]
-
-
-@pytest.mark.asyncio
-async def test_public_path_passes_through_without_token():
-    app, called = _make_downstream_app()
-    middleware = AuthMiddleware(app)
-
-    scope = _make_scope("/health")
-    sent = []
+    sent: list[dict] = []
 
     async def send(message):
         sent.append(message)
 
-    await middleware(scope, _receive, send)
+    scope = {"type": "http", "method": "POST", "path": path, "headers": headers or []}
+    await AuthMiddleware(app, validator or FakeValidator())(scope, receive, send)
 
-    assert called["value"]
-    assert sent[0]["status"] == 200
+    status = next(m["status"] for m in sent if m["type"] == "http.response.start")
+    body = b"".join(m["body"] for m in sent if m["type"] == "http.response.body")
+    return status, body, scope, called["value"]
+
+
+def _cookie(token: str, others: str = "") -> list[tuple[bytes, bytes]]:
+    return [(b"cookie", f"{others}access_token={token}".encode())]
+
+
+def _authorization(value: str) -> list[tuple[bytes, bytes]]:
+    return [(b"authorization", value.encode())]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/health",
+        "/info",
+        "/jwk",
+        "/login",
+        "/callback",
+        "/refresh",
+        "/logout",
+        "/docs",
+        "/openapi.json",
+        "/redoc",
+        "/",
+        "/admin",
+        "/admin/snomed/refresh",
+    ],
+)
+async def test_public_paths_pass_through_without_token(path):
+    validator = FakeValidator()
+
+    status, _, _, called = await _run(path, validator=validator)
+
+    assert called
+    assert status == 200
+    assert validator.seen == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["/adminx", "/refreshx", "/login/extra", "/info/x"])
+async def test_lookalikes_of_public_paths_are_protected(path):
+    status, _, _, called = await _run(path)
+
+    assert not called
+    assert status == 401
 
 
 @pytest.mark.asyncio
 async def test_protected_path_without_token_returns_401_and_skips_downstream():
-    app, called = _make_downstream_app()
-    middleware = AuthMiddleware(app)
+    status, body, _, called = await _run(PROTECTED_PATH)
 
-    scope = _make_scope(PROTECTED_PATH, method="POST")
-    sent = []
-
-    async def send(message):
-        sent.append(message)
-
-    await middleware(scope, _receive, send)
-
-    assert not called["value"]
-    assert sent[0]["type"] == "http.response.start"
-    assert sent[0]["status"] == 401
-    body = next(m["body"] for m in sent if m["type"] == "http.response.body")
+    assert not called
+    assert status == 401
     assert body == b'{"detail":"Not authenticated."}'
 
 
 @pytest.mark.asyncio
-async def test_protected_path_with_valid_cookie_succeeds():
-    app, called = _make_downstream_app()
-    middleware = AuthMiddleware(app)
+@pytest.mark.parametrize(
+    "headers",
+    [
+        _cookie(VALID_TOKEN),
+        _cookie(VALID_TOKEN, others="theme=dark; "),
+        _authorization(f"Bearer {VALID_TOKEN}"),
+        _authorization(f"bearer {VALID_TOKEN}"),
+    ],
+    ids=["cookie", "cookie-among-others", "bearer", "bearer-lowercase"],
+)
+async def test_valid_token_authenticates_as_its_subject(headers):
+    status, _, scope, called = await _run(PROTECTED_PATH, headers)
 
-    token = create_jwt_token("user-1", "Jane Doe")
-    scope = _make_scope(PROTECTED_PATH, _cookie_header(token), method="POST")
-    sent = []
-
-    async def send(message):
-        sent.append(message)
-
-    await middleware(scope, _receive, send)
-
-    assert called["value"]
-    assert sent[0]["status"] == 200
+    assert called
+    assert status == 200
     assert scope["state"]["user_id"] == "user-1"
 
 
 @pytest.mark.asyncio
-async def test_protected_path_with_valid_bearer_header_succeeds():
-    app, called = _make_downstream_app()
-    middleware = AuthMiddleware(app)
+@pytest.mark.parametrize(
+    "value", [f"Basic {VALID_TOKEN}", "Bearer", f"Bearer {VALID_TOKEN} extra", ""]
+)
+async def test_malformed_authorization_header_is_not_a_token(value):
+    validator = FakeValidator()
 
-    token = create_jwt_token("user-1", "Jane Doe")
-    scope = _make_scope(PROTECTED_PATH, _bearer_header(token), method="POST")
-    sent = []
+    status, _, _, called = await _run(PROTECTED_PATH, _authorization(value), validator)
 
-    async def send(message):
-        sent.append(message)
-
-    await middleware(scope, _receive, send)
-
-    assert called["value"]
-    assert sent[0]["status"] == 200
-    assert scope["state"]["user_id"] == "user-1"
+    assert not called
+    assert status == 401
+    assert validator.seen == []
 
 
 @pytest.mark.asyncio
-async def test_protected_path_with_expired_token_returns_401():
-    from datetime import timedelta
+async def test_rejected_token_returns_401():
+    validator = FakeValidator()
 
-    app, called = _make_downstream_app()
-    middleware = AuthMiddleware(app)
-
-    token = create_jwt_token("user-1", "Jane Doe", expiration=timedelta(seconds=-1))
-    scope = _make_scope(PROTECTED_PATH, _cookie_header(token), method="POST")
-    sent = []
-
-    async def send(message):
-        sent.append(message)
-
-    await middleware(scope, _receive, send)
-
-    assert not called["value"]
-    assert sent[0]["status"] == 401
-
-
-@pytest.mark.asyncio
-async def test_protected_path_with_tampered_token_returns_401():
-    app, called = _make_downstream_app()
-    middleware = AuthMiddleware(app)
-
-    token = create_jwt_token("user-1", "Jane Doe")
-    # Flip a character in the middle of the signature. The
-    # final base64url character of a 32-byte HMAC-SHA256 signature only
-    # carries 4 significant bits (2 are unused padding), so a swap
-    # there can decode to the identical signature bytes.
-    middle = len(token) // 2
-    flipped_char = "A" if token[middle] != "A" else "B"
-    tampered = token[:middle] + flipped_char + token[middle + 1 :]
-    scope = _make_scope(PROTECTED_PATH, _cookie_header(tampered), method="POST")
-    sent = []
-
-    async def send(message):
-        sent.append(message)
-
-    await middleware(scope, _receive, send)
-
-    assert not called["value"]
-    assert sent[0]["status"] == 401
-
-
-@pytest.mark.asyncio
-async def test_admin_path_passes_through_unauthenticated():
-    app, called = _make_downstream_app()
-    middleware = AuthMiddleware(app)
-
-    scope = _make_scope("/admin/snomed/refresh")
-    sent = []
-
-    async def send(message):
-        sent.append(message)
-
-    await middleware(scope, _receive, send)
-
-    assert called["value"]
-    assert sent[0]["status"] == 200
-
-
-@pytest.mark.asyncio
-async def test_protected_path_with_non_jwt_validation_error_returns_401(monkeypatch):
-    import search_api.api.middlewares as middlewares_module
-
-    def _raise(_token):
-        raise ValueError("JWT_KEY misconfigured")
-
-    monkeypatch.setattr(middlewares_module, "validate_jwt_token", _raise)
-
-    app, called = _make_downstream_app()
-    middleware = AuthMiddleware(app)
-
-    scope = _make_scope(
-        PROTECTED_PATH, _cookie_header("irrelevant-token"), method="POST"
+    status, _, _, called = await _run(
+        PROTECTED_PATH, _cookie("expired-or-forged"), validator
     )
-    sent = []
 
-    async def send(message):
-        sent.append(message)
+    assert not called
+    assert status == 401
+    assert validator.seen == ["expired-or-forged"]
 
-    await middleware(scope, _receive, send)
 
-    assert not called["value"]
-    assert sent[0]["status"] == 401
+@pytest.mark.asyncio
+async def test_cookie_takes_precedence_over_bearer_header():
+    validator = FakeValidator()
+    headers = _cookie(VALID_TOKEN) + _authorization("Bearer other-token")
+
+    status, _, _, _ = await _run(PROTECTED_PATH, headers, validator)
+
+    assert status == 200
+    assert validator.seen == [VALID_TOKEN]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "error",
+    [
+        SigningKeysUnavailable("OIDC signing keys unreachable."),
+        SystemException("OIDC discovery failed."),
+    ],
+)
+async def test_issuer_unreachable_returns_503(error):
+    status, body, _, called = await _run(
+        PROTECTED_PATH, _cookie(VALID_TOKEN), FakeValidator(error)
+    )
+
+    assert not called
+    assert status == 503
+    assert body == b'{"detail":"Service error."}'
+
+
+@pytest.mark.asyncio
+async def test_unexpected_validation_error_is_not_turned_into_401():
+    # A bug must surface, not send the client round /refresh and /login.
+    with pytest.raises(RuntimeError):
+        await _run(
+            PROTECTED_PATH, _cookie(VALID_TOKEN), FakeValidator(RuntimeError("bug"))
+        )
+
+
+@pytest.mark.asyncio
+async def test_non_http_scope_passes_through():
+    called = {"value": False}
+
+    async def app(scope, receive, send):
+        called["value"] = True
+
+    validator = FakeValidator()
+    await AuthMiddleware(app, validator)({"type": "lifespan"}, None, None)  # type: ignore[arg-type]
+
+    assert called["value"]
+    assert validator.seen == []

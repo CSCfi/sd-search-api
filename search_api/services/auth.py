@@ -2,21 +2,31 @@
 
 import asyncio
 import logging
+import time
+from dataclasses import dataclass
 from typing import Any
 
+import httpx
+import jwt
 from cryptojwt import KeyJar  # type: ignore[import-untyped]
 from fastapi import HTTPException
 from idpyoidc.client.exception import OidcServiceError  # type: ignore[import-untyped]
 from idpyoidc.client.rp_handler import RPHandler  # type: ignore[import-untyped]
 from idpyoidc.exception import OidcMsgError  # type: ignore[import-untyped]
 from requests.exceptions import RequestException
-from starlette.responses import RedirectResponse
+from starlette.responses import RedirectResponse, Response
 
 from search_api.conf import oidc_config
 from search_api.exceptions import SystemException
-from search_api.services.session import JWT_EXPIRATION, create_jwt_token_from_userinfo
+from search_api.services.oidc_metadata import ProviderMetadata
 
 SESSION_COOKIE = "access_token"
+# Scoped to the one path that redeems it, so the long-lived token rides on no other
+# request.
+REFRESH_COOKIE = "refresh_token"
+REFRESH_COOKIE_PATH = "/refresh"
+
+REFRESH_TIMEOUT = 10.0
 
 # idpyoidc's RPHandler logs the client config -- including OIDC_CLIENT_SECRET -- at
 # DEBUG on init. Capped here, independent of whatever level the app's own root logger
@@ -24,10 +34,24 @@ SESSION_COOKIE = "access_token"
 logging.getLogger("idpyoidc").setLevel(logging.INFO)
 
 
+@dataclass(frozen=True)
+class TokenSet:
+    """The identity provider's tokens that make up a session."""
+
+    access_token: str
+    expires_in: int | None
+    refresh_token: str | None
+
+
+class RefreshRejected(Exception):
+    """The identity provider refused the refresh token: the session is over."""
+
+
 class AuthServiceHandler:
     """OIDC Authorization Code + PKCE relying party, backed by idpyoidc's `RPHandler`."""
 
-    def __init__(self) -> None:
+    def __init__(self, metadata: ProviderMetadata | None = None) -> None:
+        self._metadata = metadata or ProviderMetadata()
         self._rph: RPHandler | None = None
         # RPHandler's calls are synchronous (built on `requests`) and get dispatched to a
         # thread via asyncio.to_thread; the lock keeps concurrent logins from racing on the
@@ -56,6 +80,7 @@ class AuthServiceHandler:
                 "client_id": config.OIDC_CLIENT_ID,
                 "client_secret": config.OIDC_CLIENT_SECRET,
                 "client_type": "oidc",
+                "client_authn_methods": ["client_secret_basic"],
                 "redirect_uris": [config.callback_url],
                 "preference": {
                     "response_types_supported": ["code"],
@@ -83,8 +108,8 @@ class AuthServiceHandler:
 
         return str(authorization_url)
 
-    async def callback(self, state: str, code: str) -> str:
-        """Exchange the authorization code for tokens and return a signed JWT for the session."""
+    async def callback(self, state: str, code: str) -> TokenSet:
+        """Exchange the authorization code and return the identity provider's tokens."""
         async with self._rph_lock:
             try:
                 session_info = await asyncio.to_thread(
@@ -122,37 +147,137 @@ class AuthServiceHandler:
                 # failure, not a bad credential -> 503.
                 raise SystemException("OIDC token exchange failed.") from exc
 
-            jwt_token = create_jwt_token_from_userinfo(session["userinfo"])
+            if "error" in session:
+                raise HTTPException(
+                    status_code=401, detail="OIDC provider returned an error."
+                )
 
-        return jwt_token
+            # finalize returns only the access token; the rest of the token response
+            # is kept in the client's per-login state.
+            client = self.rph.get_client_from_session_key(state)
+            token_response = client.get_context().cstate.get_set(
+                state, claim=["access_token", "expires_in", "refresh_token"]
+            )
+            # The login is complete: drop its state rather than keep it for the life
+            # of the process.
+            self.rph.clear_session(state)
 
-    def initiate_web_session(self, jwt_token: str) -> RedirectResponse:
-        """Set the session cookie and redirect to the post-login URL."""
+        access_token = token_response.get("access_token")
+        if not access_token:
+            raise HTTPException(
+                status_code=401, detail="OIDC provider issued no access token."
+            )
+        expires_in = token_response.get("expires_in")
+        return TokenSet(
+            access_token=access_token,
+            expires_in=int(expires_in) if expires_in is not None else None,
+            refresh_token=token_response.get("refresh_token"),
+        )
+
+    async def refresh(self, refresh_token: str) -> TokenSet:
+        """Redeem a refresh token at the token endpoint.
+
+        Posts to the token endpoint itself rather than through `RPHandler`, which finds
+        a session by its login `state` in process memory: that would fail after a
+        restart, on any other replica, and once the callback has cleared it.
+        """
+        token_endpoint = (await self._metadata.get())["token_endpoint"]
+        config = oidc_config()
+        try:
+            async with httpx.AsyncClient(timeout=REFRESH_TIMEOUT) as client:
+                response = await client.post(
+                    token_endpoint,
+                    data={
+                        "grant_type": "refresh_token",
+                        "refresh_token": refresh_token,
+                    },
+                    # client_secret_basic, as idpyoidc sends it for the code exchange.
+                    auth=(config.OIDC_CLIENT_ID, config.OIDC_CLIENT_SECRET),
+                )
+        except httpx.HTTPError as exc:
+            raise SystemException("OIDC token refresh failed.") from exc
+
+        if response.status_code in (400, 401):
+            # invalid_grant: expired, revoked, or spent by an earlier refresh.
+            raise RefreshRejected(response.text)
+        if not response.is_success:
+            raise SystemException(f"OIDC token refresh failed: {response.status_code}.")
+
+        try:
+            body = response.json()
+            access_token = body["access_token"]
+        except (ValueError, KeyError) as exc:
+            raise SystemException(
+                "OIDC token refresh returned no access token."
+            ) from exc
+
+        expires_in = body.get("expires_in")
+        return TokenSet(
+            access_token=access_token,
+            expires_in=int(expires_in) if expires_in is not None else None,
+            # Kept when the provider does not rotate it.
+            refresh_token=body.get("refresh_token") or refresh_token,
+        )
+
+    def initiate_web_session(self, tokens: TokenSet) -> RedirectResponse:
+        """Set the session cookies and redirect to the post-login URL."""
         response = RedirectResponse(url=oidc_config().redirect_url, status_code=303)
+        self.set_session_cookies(response, tokens)
+        return response
+
+    def set_session_cookies(self, response: Response, tokens: TokenSet) -> None:
+        """Set the access token and, when there is one, the refresh token cookie."""
+        secure = oidc_config().OIDC_SECURE_COOKIE
         response.set_cookie(
             key=SESSION_COOKIE,
-            value=jwt_token,
+            value=tokens.access_token,
             httponly=True,
-            secure=oidc_config().OIDC_SECURE_COOKIE,
+            secure=secure,
             samesite="strict",
             path="/",
-            max_age=int(JWT_EXPIRATION.total_seconds()),
+            max_age=tokens.expires_in,
         )
+        if tokens.refresh_token:
+            response.set_cookie(
+                key=REFRESH_COOKIE,
+                value=tokens.refresh_token,
+                httponly=True,
+                secure=secure,
+                samesite="strict",
+                path=REFRESH_COOKIE_PATH,
+                max_age=_seconds_until_expiry(tokens.refresh_token),
+            )
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
-        return response
+
+    def clear_session_cookies(self, response: Response) -> None:
+        """Delete both session cookies, each on the path it was set with."""
+        secure = oidc_config().OIDC_SECURE_COOKIE
+        for key, path in ((SESSION_COOKIE, "/"), (REFRESH_COOKIE, REFRESH_COOKIE_PATH)):
+            response.delete_cookie(
+                key, path=path, secure=secure, httponly=True, samesite="strict"
+            )
 
     def logout(self) -> RedirectResponse:
-        """Clear the session cookie and redirect to the post-logout URL."""
+        """Clear the session cookies and redirect to the post-logout URL."""
         response = RedirectResponse(
             url=oidc_config().post_logout_redirect_url, status_code=303
         )
-        response.delete_cookie(
-            SESSION_COOKIE,
-            path="/",
-            secure=oidc_config().OIDC_SECURE_COOKIE,
-            httponly=True,
-            samesite="strict",
-        )
+        self.clear_session_cookies(response)
         return response
+
+
+def _seconds_until_expiry(token: str) -> int | None:
+    """Seconds until a JWT's `exp`, read unverified; `None` when it states none.
+
+    Unverified is enough: the token came straight from the token endpoint, and only
+    this client's secret redeems it. `None` makes the cookie last the browser session.
+    """
+    try:
+        exp = jwt.decode(token, options={"verify_signature": False}).get("exp")
+    except jwt.PyJWTError:
+        return None
+    if not isinstance(exp, (int, float)):
+        return None
+    return max(0, int(exp - time.time()))

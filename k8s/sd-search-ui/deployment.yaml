@@ -29,6 +29,10 @@ spec:
             # sd-search-api Service, same namespace
             - name: BACKEND_URL
               value: http://sd-search-api:8000
+            # Dataset-on-Demand submission endpoint. nginx proxies /dod to it and adds
+            # the user's LS AAI access token from the session cookie as the bearer token.
+            - name: DOD_URL
+              value: https://dod.example.com/datasets
           readinessProbe:
             httpGet:
               path: /

@@ -39,7 +39,6 @@ services:
       - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET}
       - OIDC_REDIRECT_URL=${OIDC_REDIRECT_URL}
       - OIDC_SECURE_COOKIE=${OIDC_SECURE_COOKIE:-true}
-      - JWT_KEY=${JWT_KEY}
     depends_on:
       bp-postgres:
         condition: service_healthy

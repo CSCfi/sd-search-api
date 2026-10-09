@@ -41,10 +41,10 @@ search_api/
 │   ├── {admin,auth,beacon,jwk,opensearch}/   # generic routers and services
 │   └── bigpicture/     # everything Bigpicture-specific, nowhere else:
 │       ├── domain.py models.py ai.py opensearch.py local.py remote.py   # its two DocumentSources
-│       ├── extract/    # XML in, one document per image out: models.py refs.py values.py document.py
+│       ├── extract/    # XML in, one document per image out: models.py refs.py values.py version.py document.py
 │       ├── config/     # hand-edited fields/scopes YAML
 │       ├── index/      # GENERATED mapping (`index generate` writes it)
-│       └── schemas/    # XSDs
+│       └── schemas/    # XSDs, one directory per metadata standard version (2.0/, 3.0/)
 ├── services/
 │   ├── ontology/       # service.py registrations.py snomed.py send.py term_cache.py values.py
 │   │   └── cache/      # one whole small ontology in memory
@@ -114,7 +114,12 @@ out on `logs` and becomes `document_log` rows, replaced on every reload.
 (id, title, description), `image` (ids, slide mappings), `policy` (scope), `sample` (biological beings, cases,
 specimens, blocks), `staining`, and `observation` (diagnoses and findings, the only optional one).
 `dataset_files(fs, root)` resolves the same six paths alone (plain or `.c4gh`), so `local.py` can date a dataset
-without reading it. `scope` is the part of the policy's `type_of_dataset` before the `/`. Every `CODE_ATTRIBUTE`
+without reading it. **The dataset's `METADATA_STANDARD` picks the XML schemas** every one of the six files is
+validated against (`extract/version.py`, one `schemas/<version>/` directory per supported version), so it is read
+before anything is validated and an unsupported version is a `UserException`. Only validation is version-aware:
+3.0 adds `BIGPICTURE_NODE` and `LANDING_PAGE_REF` to the dataset, drops the observation's `ANNOTATION_REF` and
+restricts an image to one `IMAGE_OF`, none of which is indexed, so one extraction path serves both versions.
+`scope` is the part of the policy's `type_of_dataset` before the `/`. Every `CODE_ATTRIBUTE`
 contributes the pair `(CODE, MEANING)`, the meaning being the fallback when the code is no concept id; a value
 whose scheme is not the field's ontology is dropped with an error, and an **`ontologyOrValue`** field takes its
 code in precedence over free text, so `<id>_other` is filled only when no code was read. Fields and filtering
@@ -209,6 +214,11 @@ and nothing else does** (`database/repository.py`): with no pool open, `get_conn
 
 `tests/` mirrors the package. `tests/unit/` is what `tox` runs and needs nothing external; `tests/integration/`
 needs Postgres and OpenSearch (`tests/integration/.env` is a working config set); `tests/performance/` is Locust.
+The Bigpicture XML fixtures sit under `tests/files/bigpicture/xml/<version>/<dataset>/`, one directory per metadata
+standard version beside the schemas, and `tests/utils/bigpicture.py` is the one place their paths and accessions are
+written down; `tests/integration/bigpicture.py` checks and deletes what loading them stores. **A read takes one
+dataset directory or a parent of several, never a parent of parents**, so a test loading every dataset loads each
+version directory in turn.
 Integration `conftest.py` gives `bp_opensearch_docs` (override with inline documents) and `bp_opensearch_index` (a
 `bp-image-index-test-<uuid>`, so runs are isolated). `@pytest.mark.requires_snowstorm` is skipped by
 `SKIP_SNOWSTORM_TESTS=true`, set in CI, which cannot reach the internal-only Snowstorm, while

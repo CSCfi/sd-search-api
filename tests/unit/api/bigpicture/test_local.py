@@ -11,9 +11,11 @@ from search_api.api.bigpicture import local
 from search_api.api.bigpicture.local import BigpictureLocalSource
 from search_api.exceptions import UserException
 from search_api.services.fetch import SourceDocuments
-
-FILES_DIR = Path(__file__).parent.parent.parent.parent / "files" / "bigpicture" / "xml"
-DATASET_DIR = FILES_DIR / "dataset_clinical"
+from tests.utils.bigpicture import (
+    CLINICAL_2_0_DATASET_DIR,
+    VERSION_DIRS,
+    XML_DIR_2_0,
+)
 
 
 @pytest.fixture
@@ -30,39 +32,42 @@ async def _read(root: Path, **kwargs) -> list[SourceDocuments]:
 
 @pytest.mark.asyncio
 async def test_read_bigpicture_dataset_directory(unencrypted) -> None:
-    source_docs = await _read(DATASET_DIR)
+    source_docs = await _read(CLINICAL_2_0_DATASET_DIR)
     assert len(source_docs) == 1
     assert source_docs[0].documents
     assert datetime.fromisoformat(source_docs[0].marker)
 
 
 @pytest.mark.asyncio
-async def test_read_bigpicture_dataset_directories(unencrypted) -> None:
-    source_docs = await _read(FILES_DIR)
+@pytest.mark.parametrize("version_dir", VERSION_DIRS, ids=lambda path: path.name)
+async def test_read_bigpicture_dataset_directories(unencrypted, version_dir) -> None:
+    source_docs = await _read(version_dir)
     assert len(source_docs) == len(
-        [path for path in FILES_DIR.iterdir() if (path / "METADATA").is_dir()]
+        [path for path in version_dir.iterdir() if (path / "METADATA").is_dir()]
     )
     assert all(unit.documents for unit in source_docs)
 
 
 @pytest.mark.asyncio
 async def test_read_bigpicture_oldest_first(unencrypted) -> None:
-    source_docs = await _read(FILES_DIR)
+    source_docs = await _read(XML_DIR_2_0)
     markers = [unit.marker for unit in source_docs]
     assert markers == sorted(markers)
 
 
 @pytest.mark.asyncio
 async def test_read_bigpicture_skips_not_newer(unencrypted) -> None:
-    source_docs = await _read(DATASET_DIR)
+    source_docs = await _read(CLINICAL_2_0_DATASET_DIR)
     assert len(source_docs) == 1
     marker = source_docs[0].marker
 
     # Marker causes datasets to be skipped on subsequent read.
-    assert await _read(DATASET_DIR, marker=marker) == []
+    assert await _read(CLINICAL_2_0_DATASET_DIR, marker=marker) == []
 
     earlier = datetime.fromisoformat(marker) - timedelta(seconds=1)
-    assert await _read(DATASET_DIR, marker=earlier.isoformat()) == source_docs
+    assert (
+        await _read(CLINICAL_2_0_DATASET_DIR, marker=earlier.isoformat()) == source_docs
+    )
 
 
 @pytest.mark.asyncio
@@ -76,7 +81,7 @@ async def test_read_bigpicture_missing_key_file(unencrypted, monkeypatch) -> Non
     monkeypatch.setenv("C4GH_KEY_FILE", "/nonexistent.sec")
 
     with pytest.raises(Exception) as raised:
-        await _read(DATASET_DIR)
+        await _read(CLINICAL_2_0_DATASET_DIR)
 
     assert "nonexistent.sec" in str(raised.value) or isinstance(raised.value, OSError)
     assert not os.path.exists("/nonexistent.sec")
@@ -87,9 +92,10 @@ def test_bigpicture_dataset_modified_at() -> None:
 
     fs = fsspec.filesystem("file")
 
-    modified_at = local._dataset_modified_at(fs, str(DATASET_DIR))
+    modified_at = local._dataset_modified_at(fs, str(CLINICAL_2_0_DATASET_DIR))
 
     newest = max(
-        path.stat().st_mtime for path in (DATASET_DIR / "METADATA").glob("*.xml")
+        path.stat().st_mtime
+        for path in (CLINICAL_2_0_DATASET_DIR / "METADATA").glob("*.xml")
     )
     assert modified_at == datetime.fromtimestamp(newest, tz=timezone.utc)

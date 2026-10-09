@@ -200,25 +200,14 @@ def get_filtering_terms(ctx: RunContext[_Deps]) -> list[AIFilterableField]:
     get_values ("get_values"), an ISO-8601 duration or range ("duration"), or
     words in a text ("text").
     """
-    fields = []
-    for term in ctx.deps.filtering_terms:
-        accepts: AIFieldAccepts
-        if term.controlledValues:
-            accepts = "values"
-        elif term.type in _INDEXED_TYPES:
-            accepts = "get_values"
-        elif term.type == "iso8601Range":
-            accepts = "duration"
-        else:
-            accepts = "text"
-        fields.append(
-            AIFilterableField(
-                field=term.label,
-                accepts=accepts,
-                values=term.controlledValues,
-            )
+    return [
+        AIFilterableField(
+            field=term.label,
+            accepts=_accepts(term),
+            values=term.controlledValues,
         )
-    return fields
+        for term in ctx.deps.filtering_terms
+    ]
 
 
 async def get_values(
@@ -247,11 +236,26 @@ async def get_values(
     term = ctx.deps.find_term(field)
     if term is None:
         return f"Unknown field: '{field}'."
-    if term.type not in _INDEXED_TYPES:
-        return (
-            f"Field '{term.label}' has no values to find. "
-            "Give it a value as get_filtering_terms describes."
-        )
+    # A field that takes no indexed values. The model is told what it takes
+    # instead. Told only that there is nothing to find, it took a valid value
+    # to be invalid.
+    match _accepts(term):
+        case "values":
+            return (
+                f"Field '{term.label}' takes one of these values: "
+                f"{' | '.join(term.controlledValues or [])}. "
+                "Use one of them in the filter. get_values is not needed."
+            )
+        case "duration":
+            return (
+                f"Field '{term.label}' takes an ISO-8601 duration or range, such as "
+                "P40Y or P40Y-P60Y. get_values is not needed."
+            )
+        case "text":
+            return (
+                f"Field '{term.label}' takes words to match in its text. "
+                "Use words from the query. get_values is not needed."
+            )
 
     values = await _find_field_values(ctx.deps, term, text, include_descendants)
     if not values:
@@ -261,6 +265,17 @@ async def get_values(
             "Search again with other words. If none fit, leave the field out."
         )
     return values
+
+
+def _accepts(term: BeaconFilteringTerm) -> AIFieldAccepts:
+    """Return what the field takes, as get_filtering_terms tells the model."""
+    if term.controlledValues:
+        return "values"
+    if term.type in _INDEXED_TYPES:
+        return "get_values"
+    if term.type == "iso8601Range":
+        return "duration"
+    return "text"
 
 
 async def final_result(

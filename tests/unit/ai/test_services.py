@@ -737,14 +737,26 @@ async def test_get_values_lists_values_from_the_ontology(deps):
 
 @pytest.mark.asyncio
 async def test_get_values_refuses_fields_it_cannot_look_up(deps):
-    # The model is told why, so it can correct itself: a controlled value
-    # field's values are all listed by get_filtering_terms already, and an
-    # unknown field does not exist.
+    # The model is told what the field takes instead, so it can correct
+    # itself. An unknown field does not exist.
     assert await _get_values(deps, LABEL_SEX, "Female") == (
-        "Field 'Sex' has no values to find. "
-        "Give it a value as get_filtering_terms describes."
+        "Field 'Sex' takes one of these values: Male | Female. "
+        "Use one of them in the filter. get_values is not needed."
     )
     assert await _get_values(deps, "colour", "red") == "Unknown field: 'colour'."
+
+
+@pytest.mark.asyncio
+async def test_get_values_tells_what_other_fields_take(ontology, beacon_service):
+    deps = _Deps(TERMS, None, beacon_service, TERM_CACHES, ONTOLOGY_ID_BY_FIELD)
+    assert await _get_values(deps, "Age", "40") == (
+        "Field 'Age' takes an ISO-8601 duration or range, such as "
+        "P40Y or P40Y-P60Y. get_values is not needed."
+    )
+    assert await _get_values(deps, "Title", "liver") == (
+        "Field 'Title' takes words to match in its text. "
+        "Use words from the query. get_values is not needed."
+    )
 
 
 # Test interpret: the get_values tool and the check of the model's answer.

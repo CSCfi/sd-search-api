@@ -18,6 +18,17 @@ class DeploymentConfiguration(BaseSettings):
         default="dev",
         description="Deployment environment.",
     )
+    LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(
+        default="INFO",
+        description="Log level of the server. DEBUG level logs sensitive information "
+        "including conversations with the AI model and must not be used "
+        "in production.",
+    )
+
+    @field_validator("LOG_LEVEL", mode="before")
+    @classmethod
+    def upper_case_log_level(cls, value: object) -> object:
+        return value.upper() if isinstance(value, str) else value
 
 
 class DatabaseConfiguration(BaseSettings):

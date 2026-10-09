@@ -7,15 +7,22 @@ explained until they read clearly. That was not a thorough review, and the tests
 have not been thoroughly reviewed by a human.
 """
 
+import copy
 from types import SimpleNamespace
 from typing import override
 
 import pytest
 import pytest_asyncio
+from pydantic_ai.exceptions import (
+    ModelAPIError,
+    ModelHTTPError,
+    UnexpectedModelBehavior,
+)
 from pydantic_ai.messages import (
     ModelMessage,
     ModelResponse,
     RetryPromptPart,
+    TextPart,
     ToolCallPart,
     ToolReturnPart,
 )
@@ -23,6 +30,7 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from search_api.ai import services as ai_services
 from search_api.ai.services import (
+    _NO_VALID_ANSWER,
     AIService,
     _Deps,
     _replace_with_indexed_values,
@@ -285,6 +293,37 @@ class _MockLLM:
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, answer)])
 
 
+def _model_answering(answer: ModelResponse | dict | Exception) -> FunctionModel:
+    """A model that gives the same answer every time, or raises the error.
+
+    A dict is the arguments of a call to the tool pydantic-ai gives the model
+    to answer with.
+    """
+
+    def respond(_: object, info: AgentInfo) -> ModelResponse:
+        if isinstance(answer, Exception):
+            raise answer
+        if isinstance(answer, dict):
+            # The tool's name is pydantic-ai's, as _MockLLM reads it.
+            tool_name = info.output_tools[0].name
+            return ModelResponse(parts=[ToolCallPart(tool_name, answer)])
+        return copy.deepcopy(answer)
+
+    return FunctionModel(respond)
+
+
+# The model's filters as plain text. pydantic-ai asks the model to answer by
+# calling a tool named "final_result", with the filters as its arguments, but
+# small models sometimes write their answer as text instead.
+FILTERS_IN_PLAIN_TEXT_RESPONSE = ModelResponse(
+    parts=[TextPart("Interpretation: none. Filters: []")]
+)
+
+# The model's filters in a call to "final_result", but with arguments that do
+# not fit AIInterpretation.
+MALFORMED_FILTERS_ARGUMENTS = {"filters": "none"}
+
+
 # Test validate_filters.
 #
 
@@ -404,26 +443,54 @@ async def test_interpret_uses_only_the_scope(
 @pytest.mark.asyncio
 async def test_interpret_rejects_field_outside_scope(ai_service, beacon_service):
     # Diagnosis is a clinical field, so the non-clinical scope hides it. The
-    # model keeps answering with it anyway, every answer is rejected, and once
-    # its retries run out, interpret fails.
+    # model keeps answering with it anyway, and every answer is rejected. Once
+    # its retries run out, interpret says the query could not be turned into
+    # filters.
     llm = _MockLLM([{"id": FIELD_ID_DIAGNOSIS, "value": CONCEPT_ID_DUCTAL_CARCINOMA}])
     with ai_service._agent.override(model=llm.model):
-        with pytest.raises(SystemException):
-            await ai_service.interpret(
-                "carcinoma", beacon_service, TERM_CACHES, scope="non_clinical"
-            )
+        result = await ai_service.interpret(
+            "carcinoma", beacon_service, TERM_CACHES, scope="non_clinical"
+        )
+    assert result.filters == []
+    assert result.interpretation == _NO_VALID_ANSWER
 
 
+@pytest.mark.parametrize(
+    "answer",
+    [
+        FILTERS_IN_PLAIN_TEXT_RESPONSE,
+        MALFORMED_FILTERS_ARGUMENTS,
+        UnexpectedModelBehavior("Invalid response from chat completions endpoint"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_interpret_returns_no_filters_without_valid_answer(
+    ai_service, beacon_service, answer
+):
+    # Small models sometimes answer in plain text, or with arguments that do
+    # not fit the answer. interpret then returns no filters and an explanation,
+    # which the route returns with a 200, so the client can tell it from a 503.
+    with ai_service._agent.override(model=_model_answering(answer)):
+        result = await ai_service.interpret("anything", beacon_service, TERM_CACHES)
+    assert result.filters == []
+    assert result.interpretation == _NO_VALID_ANSWER
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        # The model's server cannot be reached.
+        ModelAPIError("test", "Connection error."),
+        # The model is missing.
+        ModelHTTPError(404, "test", "model not found"),
+    ],
+)
 @pytest.mark.asyncio
 async def test_interpret_raises_system_exception_when_model_fails(
-    ai_service, beacon_service
+    ai_service, beacon_service, error
 ):
-    # The model cannot be reached. interpret fails with a SystemException, which
-    # the route turns into a 503.
-    def fail(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-        raise ConnectionError("LLM is down.")
-
-    with ai_service._agent.override(model=FunctionModel(fail)):
+    # interpret fails with a SystemException, which the route turns into a 503.
+    with ai_service._agent.override(model=_model_answering(error)):
         with pytest.raises(SystemException):
             await ai_service.interpret("anything", beacon_service, TERM_CACHES)
 
@@ -648,3 +715,54 @@ async def test_interpret_retries_value_not_indexed(ai_service, beacon_service):
     assert result.filters == [
         BeaconQueryFilter(id=FIELD_ID_DIAGNOSIS, value=[CONCEPT_ID_LOBULAR_CARCINOMA])
     ]
+
+
+@pytest.mark.asyncio
+async def test_interpret_logs_conversation(ai_service, beacon_service, caplog):
+    # At DEBUG, each tool call, what it returned and the answer are logged.
+    llm = _MockLLM(
+        [{"id": FIELD_ID_DIAGNOSIS, "value": PREFERRED_TERM_DUCTAL_CARCINOMA}],
+        find={"field_id": FIELD_ID_DIAGNOSIS, "text": "ductal"},
+    )
+    with caplog.at_level("DEBUG", logger="search_api.ai.services"):
+        with ai_service._agent.override(model=llm.model):
+            await ai_service.interpret("ductal", beacon_service, TERM_CACHES)
+    assert "AI conversation for the query 'ductal'" in caplog.text
+    assert (
+        'model called get_values({"field_id":"diagnosis","text":"ductal"' in caplog.text
+    )
+    assert "get_values returned:" in caplog.text
+    # The fields get_filtering_terms returned, one per line, are indented to
+    # stay in its entry.
+    assert "- get_filtering_terms returned: diagnosis: get_values\n  finding:" in (
+        caplog.text
+    )
+
+
+@pytest.mark.parametrize(
+    "answer,answer_logged,correction_logged",
+    [
+        (
+            FILTERS_IN_PLAIN_TEXT_RESPONSE,
+            "- model said: Interpretation: none. Filters: []",
+            # A plain text answer called no tool, so the correction names none.
+            "- sent back to the model: ",
+        ),
+        (
+            MALFORMED_FILTERS_ARGUMENTS,
+            '- model called final_result({"filters"',
+            "- sent back to the model for final_result: ",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_interpret_logs_conversation_without_valid_answer(
+    ai_service, beacon_service, caplog, answer, answer_logged, correction_logged
+):
+    # The conversation is logged when the model gives no valid answer too,
+    # which is when it matters most.
+    with caplog.at_level("DEBUG", logger="search_api.ai.services"):
+        with ai_service._agent.override(model=_model_answering(answer)):
+            await ai_service.interpret("anything", beacon_service, TERM_CACHES)
+    assert answer_logged in caplog.text
+    assert correction_logged in caplog.text

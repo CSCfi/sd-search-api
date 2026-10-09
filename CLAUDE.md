@@ -79,9 +79,10 @@ include_descendants)` tool (`ai/services.py`), built on the very code behind `/s
 ontology value comes back as its concept id; a name the ontology knows the concept by, such as a synonym, is
 resolved as a query resolves it, and with `includeDescendantTerms` a broader concept is replaced by its listed
 descendants, since a client must be able to display every value. A `requestedScope` shows the model only the fields
-indexed for it, since a filter on any other field would constrain nothing there, and a model that fails or never
-gives valid filters is a `503`. `make_lifespan` builds one term cache per ontology into
-`app.state.ontology_term_services` and one `app.state.beacon_service`; routes must read **that** instance, since
+indexed for it, since a filter on any other field would constrain nothing there. A model that never gives a valid
+answer gets no filters and a fixed explanation, as for a query no filter can express, so a `503` means that the
+model's server could not be reached or answered with an HTTP error, or that a store the model's tools read failed.
+`make_lifespan` builds one term cache per ontology into `app.state.ontology_term_services` and one `app.state.beacon_service`; routes must read **that** instance, since
 value counts are cached in a dict on it and filled in the background, so a per-request one would start empty.
 
 ### Load path
@@ -207,7 +208,7 @@ code fields are `keyword`; `age_at_extraction` is an `integer_range` of days. Te
 default would match on one word, far too broad given that results are never ranked.
 
 Settings (`conf.py`) are mostly **required** — no hardcoded host/db/password. Defaults: `POSTGRES_PORT=5432`,
-`POSTGRES_POOL_{MIN_SIZE=2,MAX_SIZE=10,MAX_LIFETIME=3600,TIMEOUT=5}`, `OPENSEARCH_PORT=9200`, `DEPLOYMENT_ENV=dev`,
+`POSTGRES_POOL_{MIN_SIZE=2,MAX_SIZE=10,MAX_LIFETIME=3600,TIMEOUT=5}`, `OPENSEARCH_PORT=9200`, `DEPLOYMENT_ENV=dev`, `LOG_LEVEL=INFO`,
 `{TERM,ONTOLOGY,VALUE_COUNT}_CACHE_REFRESH=300`, `FEATURE_AI=false`, `LLM_PROVIDER=openai`, `ADMIN_KEY=None`, `OIDC_SECURE_COOKIE=true`,
 `JWT_ALGORITHM=HS256`. There is **one class per source**, since a `BaseSettings` validates every field it declares:
 bundled, a `load <dir>` would demand submit API settings it never uses. **The server pools its Postgres connections

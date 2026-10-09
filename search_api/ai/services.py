@@ -1,10 +1,20 @@
 """Natural language queries translated into Beacon V2 filters using pydantic-ai and Ollama."""
 
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from functools import cached_property
 
-from pydantic_ai import Agent, ModelRetry, RunContext
+from pydantic_ai import Agent, ModelRetry, RunContext, capture_run_messages
+from pydantic_ai.exceptions import UnexpectedModelBehavior
+from pydantic_ai.messages import (
+    ModelMessage,
+    RetryPromptPart,
+    TextPart,
+    ThinkingPart,
+    ToolCallPart,
+    ToolReturnPart,
+)
 from pydantic_ai.models import Model, infer_model
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -19,6 +29,40 @@ from search_api.exceptions import SystemException
 from search_api.services.field_values import get_field_suggestions, get_field_values
 from search_api.services.ontology.service import get_ontology_service
 from search_api.services.ontology.term_cache import OntologyTermCache
+
+
+logger = logging.getLogger(__name__)
+
+
+def _log_conversation(query: str, messages: list[ModelMessage]) -> None:
+    """Log the conversation with the model, at DEBUG level.
+
+    It shows each tool the model called and what the tool returned, each error
+    sent back to the model to correct, and the model's answer. The query is
+    logged too, so DEBUG is not for production.
+    """
+    if not logger.isEnabledFor(logging.DEBUG):
+        return
+    lines = [f"AI conversation for the query {query!r}:"]
+    for message in messages:
+        for part in message.parts:
+            if isinstance(part, ToolCallPart):
+                line = f"model called {part.tool_name}({part.args_as_json_str()})"
+            elif isinstance(part, ToolReturnPart):
+                line = f"{part.tool_name} returned: {part.model_response_str()}"
+            elif isinstance(part, RetryPromptPart):
+                # The tool whose call was wrong. A plain text answer has none.
+                tool = f" for {part.tool_name}" if part.tool_name else ""
+                line = f"sent back to the model{tool}: {part.model_response()}"
+            elif isinstance(part, ThinkingPart):
+                line = f"model thought: {part.content}"
+            elif isinstance(part, TextPart):
+                line = f"model said: {part.content}"
+            else:
+                continue
+            # Text over several lines is indented, so it stays in its entry.
+            lines.append("- " + line.replace("\n", "\n  "))
+    logger.debug("\n".join(lines))
 
 
 _SYSTEM_PROMPT_TEMPLATE = """\
@@ -322,6 +366,12 @@ async def _resolve_concept_ids(
     return list(prepared.value)
 
 
+# The interpretation returned when the model never gives a valid answer. The
+# model's own text is not used. It can be anything and may describe filters
+# that were rejected.
+_NO_VALID_ANSWER = "The query could not be turned into filters."
+
+
 class AIService:
     def __init__(
         self,
@@ -394,16 +444,31 @@ class AIService:
             for term in self._filtering_terms
             if scope is None or scope in term.scopes
         ]
-        try:
-            # Dependencies are used by the AI tools and the AI output validator.
-            deps = _Deps(
-                filtering_terms,
-                scope,
-                beacon_service,
-                term_caches,
-                self._ontology_id_by_field,
-            )
-            result = await self._agent.run(query, deps=deps)
-        except Exception as e:
-            raise SystemException("AI service error.") from e
+        # The messages are captured even when the run fails.
+        with capture_run_messages() as messages:
+            try:
+                # Dependencies are used by the AI tools and the AI output validator.
+                deps = _Deps(
+                    filtering_terms,
+                    scope,
+                    beacon_service,
+                    term_caches,
+                    self._ontology_id_by_field,
+                )
+                result = await self._agent.run(query, deps=deps)
+            except UnexpectedModelBehavior:
+                # The model did not give a valid answer. It answered in plain text,
+                # gave invalid filters even when it was asked to correct them, or
+                # its server replied with something other than an answer. Most often
+                # this is a query the model could not express as filters, so it is not
+                # a service failure. A server that cannot be reached or answers with
+                # an HTTP error, such as for a missing model, raises other errors.
+                # The query is logged only as part of the conversation at DEBUG
+                # log level.
+                logger.info("The AI gave no valid answer.")
+                return AIInterpretation(interpretation=_NO_VALID_ANSWER, filters=[])
+            except Exception as e:
+                raise SystemException("AI service error.") from e
+            finally:
+                _log_conversation(query, messages)
         return result.output

@@ -16,6 +16,7 @@ services:
     environment:
       - DEPLOYMENT_TYPE=Bigpicture
       - DEPLOYMENT_ENV=${DEPLOYMENT_ENV}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - POSTGRES_HOST=bp-postgres
       - POSTGRES_DB=${BP_POSTGRES_DB}
       - POSTGRES_PORT=${BP_POSTGRES_PORT}

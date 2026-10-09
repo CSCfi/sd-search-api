@@ -8,7 +8,9 @@ from pydantic import BaseModel, ConfigDict
 
 from search_api.api.beacon.models import BeaconFilteringTerm
 from search_api.api.opensearch.models import (
+    ONTOLOGY_OTHER_VALUE_FIELD_SUFFIX,
     ExtractedDocument,
+    OpenSearchField,
     OpenSearchFieldValue,
 )
 from search_api.database.document_log import write_document_log
@@ -237,6 +239,7 @@ async def _resolve_concept_id(
     document_id: str,
     ontology_value: OntologyValueWithBinding,
     replace_concepts: bool,
+    log_unresolved: bool = True,
 ) -> OpenSearchFieldValue | None:
     """Resolve a valid concept id and assign it to a copy of the OpenSearch field value.
 
@@ -249,6 +252,8 @@ async def _resolve_concept_id(
         term and ontology.
     :param replace_concepts: Whether a retired concept id is replaced by the
         active concept replacing it.
+    :param log_unresolved: Whether a value that resolves to no concept id is
+        logged as an error.
     :return: A copy of the field value carrying the resolved concept id, or None
         if no valid concept id could be resolved.
     """
@@ -288,16 +293,17 @@ async def _resolve_concept_id(
         )
 
     if concept_id is None:
-        await write_document_log(
-            cur,
-            StoredDocumentLog(
-                document_id=document_id,
-                field_id=ontology_value.field_id,
-                severity="ERROR",
-                message=f"Concept id could not be resolved for ontology field "
-                f"'{ontology_value.field_id}'.",
-            ),
-        )
+        if log_unresolved:
+            await write_document_log(
+                cur,
+                StoredDocumentLog(
+                    document_id=document_id,
+                    field_id=ontology_value.field_id,
+                    severity="ERROR",
+                    message=f"Concept id could not be resolved for ontology field "
+                    f"'{ontology_value.field_id}'.",
+                ),
+            )
         return None
 
     if not await _is_within_restriction(cur, document_id, ontology_value, concept_id):
@@ -305,6 +311,34 @@ async def _resolve_concept_id(
         return None
 
     return ontology_value.value.model_copy(update={"resolved_concept_id": concept_id})
+
+
+async def _resolve_free_text(
+    cur: AsyncCursor,
+    document_id: str,
+    value: OpenSearchFieldValue,
+    binding: OntologyBinding,
+    replace_concepts: bool,
+) -> OpenSearchFieldValue:
+    """Resolve an ontologyOrValue field's free text to a concept id.
+
+    If not resolved, it is kept as free text.
+    """
+    concept_value = OntologyValueWithBinding(
+        value=OpenSearchFieldValue(
+            field=OpenSearchField(
+                id=binding.term.id,
+                type="ontology",
+                nested_group=value.field.nested_group,
+            ),
+            value=(None, cast(str, value.value)),
+        ),
+        binding=binding,
+    )
+    concept_id = await _resolve_concept_id(
+        cur, document_id, concept_value, replace_concepts, log_unresolved=False
+    )
+    return concept_id or value
 
 
 async def _resolve_concept_ids(
@@ -315,8 +349,23 @@ async def _resolve_concept_ids(
     replace_concepts: bool,
 ) -> list[OpenSearchFieldValue]:
     """Resolve valid concept ids and assign them to copies of the OpenSearchFieldValues."""
+
+    free_text_bindings = {
+        f"{field_id}{ONTOLOGY_OTHER_VALUE_FIELD_SUFFIX}": binding
+        # Binding contains the ontology service used to resolve concept ids.
+        for field_id, binding in bindings.items()
+        if binding.term.type == "ontologyOrValue"
+    }
     resolved: list[OpenSearchFieldValue] = []
     for value in values:
+        if free_text_binding := free_text_bindings.get(value.field.id):
+            # Check if the free text value can be resolved to a concept id.
+            resolved.append(
+                await _resolve_free_text(
+                    cur, document_id, value, free_text_binding, replace_concepts
+                )
+            )
+            continue
         binding = bindings.get(value.field.id)
         if binding is None:
             # Non-ontology field.

@@ -49,7 +49,7 @@ search_api/
 │   ├── ontology/       # service.py registrations.py snomed.py send.py term_cache.py values.py
 │   │   └── cache/      # one whole small ontology in memory
 │   ├── fetch.py        # DocumentSource (ABC) + SdSubmitFetchClient
-│   └── auth.py session.py load.py sync.py poller.py value_counts.py validate.py
+│   └── auth.py session.py load.py sync.py poller.py value_counts.py field_values.py validate.py
 ├── database/           # every line of SQL, one module per table: repository.py models.py document.py
 │   │                   #   document_log.py terms_cache.py ontology_cache.py load.py
 │   └── schema/         # create.sql drop.sql
@@ -64,19 +64,26 @@ search_api/
 `main.py` picks a deployment by `DEPLOYMENT_TYPE`, looks it up in `api/deployments.py` `DOMAINS`, and builds
 `make_beacon_router(domain)` + `make_lifespan(domain)`; the admin router mounts only when `ADMIN_KEY` is set. A new
 deployment is a new `Domain` in `DOMAINS` (see `bigpicture/domain.py`). Besides the index name, beacon metadata,
-filtering terms/scopes and `replace_concepts`, it carries `local_source` / `remote_source`
-(`DocumentSource | None` — the `load` and `fetch` commands; `None` means that command has nothing to do), one
-`beacon_service_factory` for the **query-less** service behind `/status`, `/health`, `/values`, `/suggestions` and
+filtering terms/scopes and `replace_concepts`, it carries `local_source` / `remote_source` (`DocumentSource | None`
+— the `load` and `fetch` commands; `None` means that command has nothing to do), one `beacon_service_factory` for
+the **query-less** service behind `/status`, `/health`, `/values`, `/suggestions`, `/ai/filters` and
 `ValueCountsUpdater`, and `query_endpoints: Sequence[BeaconQueryEndpoint]`, one per entity endpoint (`/datasets`,
-`/images`) with its `path`, its own service factory, `result_sets_response_model` and — only under `FEATURE_AI` —
-its AI persona, mounted at `/ai<path>`; each endpoint needs its own service because each has a different result
-shape. **The model only chooses filters**: an `/ai` route runs them through the very query `/datasets` or `/images`
-does and returns its response beside the interpretation, so no record is ever written by the model. It takes
-the same `requestedGranularity` and `requestedScope`, but defaults to `record` where a Beacon query defaults to
-`count`. A scope shows the model only the fields indexed for it, since a filter on any other field would
-constrain nothing there, and a model that fails or never gives valid filters is a `503`. `make_lifespan` builds one term cache per ontology into `app.state.ontology_term_services`
-and one `app.state.beacon_service`; routes must read **that** instance, since value counts are cached in a dict on
-it and filled in the background, so a per-request one would start empty.
+`/images`) with its `path`, its own service factory and `result_sets_response_model`; each endpoint needs its own
+service because each has a different result shape. The `Domain`'s `ai_assistant_description` is the persona behind
+`POST /ai/filters` (only under `FEATURE_AI`). **The model only recommends filters**: the route returns the
+interpretation and the filters and runs no query, so the model never sees a record; the client shows the filters and
+the user runs them through `/datasets` or `/images`. **A keyword or ontology value must be in the index**, so a
+client can select it among `/values`: the model finds values with a `get_values(field_id, text,
+include_descendants)` tool (`ai/services.py`), built on the very code behind `/suggestions`
+(`services/field_values.py`), and its answer is checked against `/values` and sent back to correct otherwise. An
+ontology value comes back as its concept id; a name the ontology knows the concept by, such as a synonym, is
+resolved as a query resolves it, and with `includeDescendantTerms` a broader concept is replaced by its listed
+descendants, since a client must be able to display every value. A `requestedScope` shows the model only the fields
+indexed for it, since a filter on any other field would constrain nothing there. A model that never gives a valid
+answer gets no filters and a fixed explanation, as for a query no filter can express, so a `503` means that the
+model's server could not be reached or answered with an HTTP error, or that a store the model's tools read failed.
+`make_lifespan` builds one term cache per ontology into `app.state.ontology_term_services` and one `app.state.beacon_service`; routes must read **that** instance, since
+value counts are cached in a dict on it and filled in the background, so a per-request one would start empty.
 
 ### Load path
 
@@ -128,7 +135,7 @@ them; an `ontology`/`ontologyOrValue` field may declare an `ontologyRestriction`
 |---|---|
 | `GET /info` `/filtering_terms` `/filtering_scopes` | metadata, filter definitions |
 | `POST /datasets` `/images` | Beacon V2 search: images aggregated into datasets / one per image |
-| `POST /ai/datasets` `/ai/images` | natural-language search (gated by `FEATURE_AI`) |
+| `POST /ai/filters` | filters recommended for a natural-language query (gated by `FEATURE_AI`) |
 | `GET /filtering_terms/{field_id}/values` `/suggestions` | values with counts; autocomplete |
 | `GET /status` | documents indexed and pending, total and per scope, last sync time |
 | `GET /health` | both stores answer; a `503` names the one that did not |
@@ -172,7 +179,9 @@ hook. Unresolved values survive the prepared filter only for `ontologyOrValue`. 
 cascade** (`ontology/values.py`), so a value indexed and a value searched for reach the same concept: the source's
 code is kept when the ontology has it, and only otherwise is the **meaning** beside it resolved — one match a
 `WARNING`, none an `ERROR`, and several an `ERROR` too unless the field's `ontologyRestriction` picks out exactly
-one. A retired concept is then substituted, which buys reach rather than a name: retiring one strips its
+one. An `ontologyOrValue` field's **free text is resolved too**, as a meaning without a code: naming one allowed
+concept, it is indexed as that concept, since a search for the text would resolve to it; otherwise it stays in
+`<id>_other`. A retired concept is then substituted, which buys reach rather than a name: retiring one strips its
 relationships, so no subtree query reaches a document citing it.
 
 **A load enforces the `ontologyRestriction`** as well as resolving through it: a concept outside the field's part
@@ -199,8 +208,8 @@ code fields are `keyword`; `age_at_extraction` is an `integer_range` of days. Te
 default would match on one word, far too broad given that results are never ranked.
 
 Settings (`conf.py`) are mostly **required** — no hardcoded host/db/password. Defaults: `POSTGRES_PORT=5432`,
-`POSTGRES_POOL_{MIN_SIZE=2,MAX_SIZE=10,MAX_LIFETIME=3600,TIMEOUT=5}`, `OPENSEARCH_PORT=9200`, `DEPLOYMENT_ENV=dev`,
-`{TERM,ONTOLOGY,VALUE_COUNT}_CACHE_REFRESH=300`, `FEATURE_AI=false`, `ADMIN_KEY=None`, `OIDC_SECURE_COOKIE=true`,
+`POSTGRES_POOL_{MIN_SIZE=2,MAX_SIZE=10,MAX_LIFETIME=3600,TIMEOUT=5}`, `OPENSEARCH_PORT=9200`, `DEPLOYMENT_ENV=dev`, `LOG_LEVEL=INFO`,
+`{TERM,ONTOLOGY,VALUE_COUNT}_CACHE_REFRESH=300`, `FEATURE_AI=false`, `LLM_PROVIDER=openai`, `ADMIN_KEY=None`, `OIDC_SECURE_COOKIE=true`,
 `JWT_ALGORITHM=HS256`. There is **one class per source**, since a `BaseSettings` validates every field it declares:
 bundled, a `load <dir>` would demand submit API settings it never uses. **The server pools its Postgres connections
 and nothing else does** (`database/repository.py`): with no pool open, `get_connection()` connects directly.

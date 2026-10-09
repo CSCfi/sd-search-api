@@ -4,6 +4,7 @@ import logging
 
 import httpx
 import pytest
+from search_api.api.beacon.models import BeaconQueryFilter
 from search_api.api.bigpicture.models import BP_FILTERING_TERM_BY_ID
 from search_api.services.ontology.snomed import (
     SnomedService,
@@ -57,6 +58,46 @@ async def test_find_concept():
         assert concept is not None
         assert concept.concept_id == _CONCEPT_ID_HOMO_SAPIENS
         assert concept.preferred_term == "Homo sapiens"
+
+
+@pytest.mark.requires_snowstorm
+@pytest.mark.asyncio
+async def test_prepare_ontology_filter():
+    # Resolve filter's values to concept IDs.
+    prepared = await SnomedService().prepare_ontology_filter(
+        BeaconQueryFilter(
+            id="animal_species",
+            value=[
+                # Values that should resolve to homo sapiens.
+                "human",
+                "Homo sapiens",
+                _CONCEPT_ID_HOMO_SAPIENS,
+                # Values that should not resolve for animal species.
+                "Myocardial infarction",
+                "not a species at all",
+            ],
+        ),
+        [BP_FILTERING_TERM_BY_ID["animal_species"]],
+    )
+    assert prepared.value == [_CONCEPT_ID_HOMO_SAPIENS]
+
+
+@pytest.mark.requires_snowstorm
+@pytest.mark.asyncio
+async def test_prepare_ontology_filter_keeps_free_text():
+    # Resolve filter's values to concept IDs.
+    prepared = await SnomedService().prepare_ontology_filter(
+        BeaconQueryFilter(
+            # fixation_type is an ontologyOrValue field.
+            id="fixation_type",
+            value=["Neutral buffered formalin 10% solution", "home-made fixative"],
+        ),
+        [BP_FILTERING_TERM_BY_ID["fixation_type"]],
+    )
+    assert prepared.value == [
+        _CONCEPT_ID_NEUTRAL_BUFFERED_FORMALIN,
+        "home-made fixative",
+    ]
 
 
 @pytest.mark.requires_snowstorm

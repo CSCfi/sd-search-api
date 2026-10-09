@@ -1,19 +1,18 @@
-"""Integration tests for the AI search endpoint. Requires Ollama running locally."""
+"""Integration tests for the AI filters endpoint."""
 
 from urllib.parse import urlparse, urlunparse
 
 import httpx
 import pytest
 
-from search_api.ai.models import AISearchResponse
+from search_api.ai.models import AIInterpretation
 from search_api.api.beacon.models import BeaconQueryFilter
-from search_api.api.bigpicture.models import (
-    BigpictureBeaconDatasetResultSetsResponse,
-    BigpictureBeaconImageResultSetsResponse,
-)
+from search_api.conf import feature_config
 from tests.integration.mockauth import PORT as OIDC_MOCK_PORT
 
-skip = pytest.mark.skip(reason="Requires Ollama")
+requires_feature_ai = pytest.mark.skipif(
+    not feature_config().FEATURE_AI, reason="Requires FEATURE_AI=true"
+)
 
 
 @pytest.fixture(scope="module")
@@ -50,51 +49,25 @@ def client() -> httpx.Client:
         yield c
 
 
-@skip
-def test_ai_datasets_query_returns_result(client: httpx.Client):
+@requires_feature_ai
+def test_ai_filters_returns_filters(client: httpx.Client):
     resp = client.post(
-        "/ai/datasets", json={"query": "images for human females"}, timeout=60.0
+        "/ai/filters", json={"query": "images for human females"}, timeout=60.0
     )
     assert resp.status_code == 200
-    result = AISearchResponse[BigpictureBeaconDatasetResultSetsResponse].model_validate(
-        resp.json()
-    )
+    result = AIInterpretation.model_validate(resp.json())
     assert len(result.interpretation) > 0
-
-    assert result.result.responseSummary.numTotalResults == 1
-    [result_set] = result.result.response.resultSet
-    [dataset] = result_set.results
-    assert dataset.datasetId == "testDataset"
-    assert dataset.datasetTitle == "testTitle"
-    assert dataset.totalImageCount == 1
-    assert dataset.matchingImageCount == 1
     assert len(result.filters) in (1, 2)
     assert BeaconQueryFilter(id="sex", value="Female") in result.filters
     if len(result.filters) == 2:
-        assert BeaconQueryFilter(id="animal_species", value="human") in result.filters
+        # Ontology values are returned as concept ids: Homo sapiens.
+        assert (
+            BeaconQueryFilter(id="animal_species", value=["337915000"])
+            in result.filters
+        )
 
 
-@skip
-def test_ai_datasets_query_missing_body_returns_422(client: httpx.Client):
-    resp = client.post("/ai/datasets", json={})
-    assert resp.status_code == 422
-
-
-@skip
-def test_ai_images_query_returns_result(client: httpx.Client):
-    resp = client.post(
-        "/ai/images", json={"query": "images for human females"}, timeout=60.0
-    )
-    assert resp.status_code == 200
-    result = AISearchResponse[BigpictureBeaconImageResultSetsResponse].model_validate(
-        resp.json()
-    )
-    assert len(result.interpretation) > 0
-    images = [r for rs in result.result.response.resultSet for r in rs.results]
-    assert result.result.responseSummary.numTotalResults == len(images)
-
-
-@skip
-def test_ai_images_query_missing_body_returns_422(client: httpx.Client):
-    resp = client.post("/ai/images", json={})
+@requires_feature_ai
+def test_ai_filters_missing_body_returns_422(client: httpx.Client):
+    resp = client.post("/ai/filters", json={})
     assert resp.status_code == 422

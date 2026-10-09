@@ -432,8 +432,26 @@ start it before running the API:
 
 ```bash
 brew install ollama
-ollama pull qwen2.5:14b
+ollama pull qwen2.5:7b
 ollama serve
+```
+
+The AI endpoint is mounted only when `FEATURE_AI=true`:
+
+```bash
+FEATURE_AI=true docker compose --env-file tests/integration/.env --profile dev up --build
+```
+
+`LLM_PROVIDER` (default `openai`: any OpenAI-compatible server, such as Ollama), `LLM_MODEL`, `LLM_BASE_URL` and
+`LLM_API_KEY` choose the model, and `tests/integration/.env` sets them for Ollama on the host. Other providers,
+such as `anthropic`, read their credentials from their own environment variables.
+To see each conversation with the model in the API's log, set `LOG_LEVEL=DEBUG`. It logs the user's query
+too, which can reveal what they are researching, so it is not for production.
+
+The AI integration tests call the model, so they run only with `FEATURE_AI=true`:
+
+```bash
+FEATURE_AI=true uv run pytest tests/integration/api/bigpicture/test_routes_ai.py -v
 ```
 
 ## Performance tests

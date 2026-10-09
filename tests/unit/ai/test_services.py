@@ -29,11 +29,13 @@ from pydantic_ai.messages import (
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from search_api.ai import services as ai_services
+from search_api.ai.models import AIFilterableField
 from search_api.ai.services import (
     _NO_VALID_ANSWER,
     AIService,
     _Deps,
     _replace_with_indexed_values,
+    get_filtering_terms,
     get_values,
     validate_filters,
 )
@@ -58,10 +60,19 @@ from search_api.services.ontology.cache.store import OntologyCacheStore
 
 
 def _term(
-    id: str, type: str, scopes: tuple[str, ...] = (), **kwargs
+    id: str,
+    type: str,
+    scopes: tuple[str, ...] = (),
+    label: str | None = None,
+    **kwargs,
 ) -> BeaconFilteringTerm:
     return BeaconFilteringTerm(
-        id=id, type=type, scopes=list(scopes), label=id, description=id, **kwargs
+        id=id,
+        type=type,
+        scopes=list(scopes),
+        label=label or id.capitalize(),
+        description=id,
+        **kwargs,
     )
 
 
@@ -130,20 +141,28 @@ CONCEPT_ID_UNKNOWN = "C9"
 
 # The fields.
 
+# The model knows each field only by its label. Most labels here differ from
+# their ids, so a test shows the label was mapped to the id.
 FIELD_ID_DIAGNOSIS = "diagnosis"
+LABEL_DIAGNOSIS = "Diagnosed disease"
 FIELD_ID_FINDING = "finding"
+LABEL_FINDING = "Observed finding"
+LABEL_SEX = "Sex"
+LABEL_IMAGE_ID = "Image"
 FILTERING_ONTOLOGY = BeaconFilteringOntology(id=ONTOLOGY_ID)
 ONTOLOGY_FILTERING_TERMS = [
     _term(
         FIELD_ID_DIAGNOSIS,
         "ontology",
         scopes=("clinical",),
+        label=LABEL_DIAGNOSIS,
         ontology=FILTERING_ONTOLOGY,
     ),
     _term(
         FIELD_ID_FINDING,
         "ontologyOrValue",
         scopes=("clinical",),
+        label=LABEL_FINDING,
         ontology=FILTERING_ONTOLOGY,
     ),
 ]
@@ -154,9 +173,12 @@ FILTERING_TERMS = [
         "sex",
         "controlledValue",
         scopes=("clinical", "non_clinical"),
+        label=LABEL_SEX,
         controlledValues=["Male", "Female"],
     ),
-    _term("image_id", "keyword", scopes=("clinical", "non_clinical")),
+    _term(
+        "image_id", "keyword", scopes=("clinical", "non_clinical"), label=LABEL_IMAGE_ID
+    ),
 ]
 
 
@@ -233,7 +255,7 @@ class _MockLLM:
     rejected, it answers with the next filters it was given, if any.
 
     Before answering, it asks AIService which fields it may filter on, as a real
-    LLM does. It keeps their ids in offered_fields, so a test can check them.
+    LLM does. It keeps their labels in offered_fields, so a test can check them.
     Given find, it then calls get_values with it, and keeps the reply in found.
     """
 
@@ -256,8 +278,8 @@ class _MockLLM:
         - A call to a tool. pydantic-ai runs the tool, adds its result to the
           conversation, and calls this again.
         - The final answer. This is a call to a tool pydantic-ai makes for the
-          purpose, named in info.output_tools. If AIService's validator rejects the
-          answer, the error is added to the conversation and this is called again.
+          purpose, named in info.output_tools. If AIService rejects the answer, the
+          error is added to the conversation and this is called again.
         """
         # The results of the tools called so far.
         tool_returns = [
@@ -271,10 +293,10 @@ class _MockLLM:
         if not tool_returns:
             return ModelResponse(parts=[ToolCallPart("get_filtering_terms", {})])
 
-        # Later calls: get_filtering_terms has answered. Its reply is one line per
-        # field, "field_id" or "field_id: allowed values". Keep the field ids.
+        # Later calls: get_filtering_terms has answered with the fields. Keep
+        # their labels.
         fields, *found = tool_returns
-        self.offered_fields = [line.split(":")[0] for line in fields.splitlines()]
+        self.offered_fields = [field.field for field in fields]
 
         # Then look for values, if asked to.
         if self.find is not None and not found:
@@ -320,7 +342,7 @@ FILTERS_IN_PLAIN_TEXT_RESPONSE = ModelResponse(
 )
 
 # The model's filters in a call to "final_result", but with arguments that do
-# not fit AIInterpretation.
+# not fit the answer.
 MALFORMED_FILTERS_ARGUMENTS = {"filters": "none"}
 
 
@@ -341,11 +363,6 @@ def test_validate_filters_accepts_valid_filters():
     assert validate_filters(filters, TERMS) == []
 
 
-def test_validate_filters_rejects_unknown_field():
-    [error] = validate_filters([BeaconQueryFilter(id="colour", value="red")], TERMS)
-    assert "'colour'" in error
-
-
 def test_validate_filters_rejects_value_not_controlled():
     [error] = validate_filters(
         [BeaconQueryFilter(id="sex", value=["Female", "female"])], TERMS
@@ -363,10 +380,11 @@ def test_validate_filters_rejects_malformed_duration():
 
 
 def test_validate_filters_rejects_descendants_outside_ontology():
+    # The error names the field by its label, as the model knows it.
     [error] = validate_filters(
         [BeaconQueryFilter(id="title", value="x", includeDescendantTerms=True)], TERMS
     )
-    assert "'title'" in error
+    assert "'Title'" in error
 
 
 # Fixtures shared by the tests below.
@@ -415,6 +433,13 @@ def ai_service(ontology) -> AIService:
     return AIService(FILTERING_TERMS, "a test assistant", ONTOLOGY_ID_BY_FIELD)
 
 
+def test_ai_service_rejects_fields_sharing_a_label():
+    # The model names fields by their labels, so each must name one field.
+    terms = [_term("title", "text"), _term("name", "text", label="title")]
+    with pytest.raises(ValueError, match="title"):
+        AIService(terms, "a test assistant", {})
+
+
 # Test interpret: the fields the model is shown.
 #
 
@@ -422,8 +447,8 @@ def ai_service(ontology) -> AIService:
 @pytest.mark.parametrize(
     "scope,offered_fields",
     [
-        (None, [FIELD_ID_DIAGNOSIS, FIELD_ID_FINDING, "sex", "image_id"]),
-        ("non_clinical", ["sex", "image_id"]),
+        (None, [LABEL_DIAGNOSIS, LABEL_FINDING, LABEL_SEX, LABEL_IMAGE_ID]),
+        ("non_clinical", [LABEL_SEX, LABEL_IMAGE_ID]),
     ],
 )
 @pytest.mark.asyncio
@@ -433,11 +458,30 @@ async def test_interpret_uses_only_the_scope(
     # The model is shown only the fields in the scope, or every field when no
     # scope is given. The value it answers with is then looked up in the index
     # for that same scope.
-    llm = _MockLLM([{"id": "image_id", "value": "img1"}])
+    llm = _MockLLM([{"field": LABEL_IMAGE_ID, "value": "img1"}])
     with ai_service._agent.override(model=llm.model):
         await ai_service.interpret("image img1", beacon_service, TERM_CACHES, scope)
     assert llm.offered_fields == offered_fields
     assert beacon_service.scopes == [scope]
+
+
+@pytest.mark.asyncio
+async def test_interpret_maps_labels_to_field_ids(ai_service, beacon_service):
+    # The model names each field by its label, in any letter case and with
+    # spaces around it. The filters returned name each field by its id. An id
+    # the model gives is accepted too.
+    llm = _MockLLM(
+        [
+            {"field": f" {LABEL_IMAGE_ID.upper()} ", "value": "img1"},
+            {"field": "sex", "value": "Female"},
+        ]
+    )
+    with ai_service._agent.override(model=llm.model):
+        result = await ai_service.interpret("image img1", beacon_service, TERM_CACHES)
+    assert result.filters == [
+        BeaconQueryFilter(id="image_id", value=["img1"]),
+        BeaconQueryFilter(id="sex", value="Female"),
+    ]
 
 
 @pytest.mark.asyncio
@@ -446,7 +490,7 @@ async def test_interpret_rejects_field_outside_scope(ai_service, beacon_service)
     # model keeps answering with it anyway, and every answer is rejected. Once
     # its retries run out, interpret says the query could not be turned into
     # filters.
-    llm = _MockLLM([{"id": FIELD_ID_DIAGNOSIS, "value": CONCEPT_ID_DUCTAL_CARCINOMA}])
+    llm = _MockLLM([{"field": LABEL_DIAGNOSIS, "value": CONCEPT_ID_DUCTAL_CARCINOMA}])
     with ai_service._agent.override(model=llm.model):
         result = await ai_service.interpret(
             "carcinoma", beacon_service, TERM_CACHES, scope="non_clinical"
@@ -565,7 +609,10 @@ async def test_replace_reports_values_matching_nothing(deps):
     )
     assert f"'{CONCEPT_ID_NEOPLASM}'. Use get_values" in neoplasm_error
     assert f"'{CONCEPT_ID_UNKNOWN}' or its descendants" in unknown_error
-    assert empty_error == "Field 'image_id' has no value. Use get_values to find one."
+    assert empty_error == (
+        f"Field '{LABEL_IMAGE_ID}' has no value. "
+        "Use get_values to find one. If get_values finds none, leave the field out."
+    )
 
 
 @pytest.mark.asyncio
@@ -616,13 +663,27 @@ async def test_replace_keywords_and_keeps_controlled_values(deps):
     assert "'img2'" in error
 
 
+# Test get_filtering_terms.
+#
+
+
+def test_get_filtering_terms_lists_what_each_field_accepts():
+    ctx = SimpleNamespace(deps=SimpleNamespace(filtering_terms=TERMS))
+    assert get_filtering_terms(ctx) == [
+        AIFilterableField(field="Sex", accepts="values", values=["Male", "Female"]),
+        AIFilterableField(field="Age", accepts="duration"),
+        AIFilterableField(field="Title", accepts="text"),
+        AIFilterableField(field="Diagnosis", accepts="get_values"),
+    ]
+
+
 # Test get_values.
 #
 
 
-async def _get_values(deps: _Deps, field_id: str, text: str, include_descendants=False):
+async def _get_values(deps: _Deps, field: str, text: str, include_descendants=False):
     return await get_values(
-        SimpleNamespace(deps=deps), field_id, text, include_descendants
+        SimpleNamespace(deps=deps), field, text, include_descendants
     )
 
 
@@ -630,20 +691,20 @@ async def _get_values(deps: _Deps, field_id: str, text: str, include_descendants
 async def test_get_values_lists_suggestions(deps):
     # get_values lists what /suggestions finds. First, text anywhere in a
     # preferred term.
-    assert await _get_values(deps, FIELD_ID_DIAGNOSIS, "carcinoma") == [
+    assert await _get_values(deps, LABEL_DIAGNOSIS, "carcinoma") == [
         FIELD_VALUE_DUCTAL_CARCINOMA,
         FIELD_VALUE_LOBULAR_CARCINOMA,
     ]
-    assert await _get_values(deps, FIELD_ID_DIAGNOSIS, "ductal carc") == [
+    assert await _get_values(deps, LABEL_DIAGNOSIS, "ductal carc") == [
         FIELD_VALUE_DUCTAL_CARCINOMA
     ]
     # Then the start of a concept id. The ontology finds this concept too, but
     # it is listed only once.
-    assert await _get_values(
-        deps, FIELD_ID_DIAGNOSIS, CONCEPT_ID_LOBULAR_CARCINOMA
-    ) == [FIELD_VALUE_LOBULAR_CARCINOMA]
+    assert await _get_values(deps, LABEL_DIAGNOSIS, CONCEPT_ID_LOBULAR_CARCINOMA) == [
+        FIELD_VALUE_LOBULAR_CARCINOMA
+    ]
     # And free text, on an ontologyOrValue field.
-    assert await _get_values(deps, FIELD_ID_FINDING, "atypical") == [
+    assert await _get_values(deps, LABEL_FINDING, "atypical") == [
         FieldValue(value="atypical cells", count=4)
     ]
 
@@ -653,20 +714,24 @@ async def test_get_values_lists_values_from_the_ontology(deps):
     # get_values also looks values up by an exact match of a synonym, which
     # /suggestions does not search. "Ductal cancer" is a synonym of ductal
     # carcinoma.
-    assert await _get_values(deps, FIELD_ID_DIAGNOSIS, SYNONYM_DUCTAL_CARCINOMA) == [
+    assert await _get_values(deps, LABEL_DIAGNOSIS, SYNONYM_DUCTAL_CARCINOMA) == [
         FIELD_VALUE_DUCTAL_CARCINOMA
     ]
     # No document has Neoplasm, so on its own it finds nothing. With
     # include_descendants, it finds its descendants that documents have.
-    assert await _get_values(deps, FIELD_ID_DIAGNOSIS, PREFERRED_TERM_NEOPLASM) == []
+    assert await _get_values(deps, LABEL_DIAGNOSIS, PREFERRED_TERM_NEOPLASM) == (
+        f"No indexed value of field '{LABEL_DIAGNOSIS}' matches "
+        f"'{PREFERRED_TERM_NEOPLASM}'. "
+        "Search again with other words. If none fit, leave the field out."
+    )
     assert await _get_values(
-        deps, FIELD_ID_DIAGNOSIS, PREFERRED_TERM_NEOPLASM, include_descendants=True
+        deps, LABEL_DIAGNOSIS, PREFERRED_TERM_NEOPLASM, include_descendants=True
     ) == [FIELD_VALUE_DUCTAL_CARCINOMA, FIELD_VALUE_LOBULAR_CARCINOMA]
     # The test ontology has no concept named "carcinoma". So even with
     # include_descendants, get_values falls back to the /suggestions search, and
     # lists the values whose names contain "carcinoma".
     assert await _get_values(
-        deps, FIELD_ID_DIAGNOSIS, "carcinoma", include_descendants=True
+        deps, LABEL_DIAGNOSIS, "carcinoma", include_descendants=True
     ) == [FIELD_VALUE_DUCTAL_CARCINOMA, FIELD_VALUE_LOBULAR_CARCINOMA]
 
 
@@ -675,8 +740,8 @@ async def test_get_values_refuses_fields_it_cannot_look_up(deps):
     # The model is told why, so it can correct itself: a controlled value
     # field's values are all listed by get_filtering_terms already, and an
     # unknown field does not exist.
-    assert await _get_values(deps, "sex", "Female") == (
-        "Field 'sex' has no values to find. "
+    assert await _get_values(deps, LABEL_SEX, "Female") == (
+        "Field 'Sex' has no values to find. "
         "Give it a value as get_filtering_terms describes."
     )
     assert await _get_values(deps, "colour", "red") == "Unknown field: 'colour'."
@@ -691,8 +756,8 @@ async def test_interpret_offers_get_values(ai_service, beacon_service):
     # The model looks up diagnoses with get_values, then answers with one of
     # them. The answer comes back with the value replaced by its concept id.
     llm = _MockLLM(
-        [{"id": FIELD_ID_DIAGNOSIS, "value": "Ductal carcinoma"}],
-        find={"field_id": FIELD_ID_DIAGNOSIS, "text": "carcinoma"},
+        [{"field": LABEL_DIAGNOSIS, "value": "Ductal carcinoma"}],
+        find={"field": LABEL_DIAGNOSIS, "text": "carcinoma"},
     )
     with ai_service._agent.override(model=llm.model):
         result = await ai_service.interpret("carcinoma", beacon_service, TERM_CACHES)
@@ -707,8 +772,8 @@ async def test_interpret_retries_value_not_indexed(ai_service, beacon_service):
     # The model first answers with a diagnosis no document has. That answer is
     # sent back to it, and its second answer, which documents have, is accepted.
     llm = _MockLLM(
-        [{"id": FIELD_ID_DIAGNOSIS, "value": PREFERRED_TERM_NEOPLASM}],
-        [{"id": FIELD_ID_DIAGNOSIS, "value": PREFERRED_TERM_LOBULAR_CARCINOMA}],
+        [{"field": LABEL_DIAGNOSIS, "value": PREFERRED_TERM_NEOPLASM}],
+        [{"field": LABEL_DIAGNOSIS, "value": PREFERRED_TERM_LOBULAR_CARCINOMA}],
     )
     with ai_service._agent.override(model=llm.model):
         result = await ai_service.interpret("carcinoma", beacon_service, TERM_CACHES)
@@ -721,22 +786,23 @@ async def test_interpret_retries_value_not_indexed(ai_service, beacon_service):
 async def test_interpret_logs_conversation(ai_service, beacon_service, caplog):
     # At DEBUG, each tool call, what it returned and the answer are logged.
     llm = _MockLLM(
-        [{"id": FIELD_ID_DIAGNOSIS, "value": PREFERRED_TERM_DUCTAL_CARCINOMA}],
-        find={"field_id": FIELD_ID_DIAGNOSIS, "text": "ductal"},
+        [{"field": LABEL_DIAGNOSIS, "value": PREFERRED_TERM_DUCTAL_CARCINOMA}],
+        find={"field": LABEL_DIAGNOSIS, "text": "ductal"},
     )
     with caplog.at_level("DEBUG", logger="search_api.ai.services"):
         with ai_service._agent.override(model=llm.model):
             await ai_service.interpret("ductal", beacon_service, TERM_CACHES)
     assert "AI conversation for the query 'ductal'" in caplog.text
     assert (
-        'model called get_values({"field_id":"diagnosis","text":"ductal"' in caplog.text
+        'model called get_values({"field":"Diagnosed disease","text":"ductal"'
+        in caplog.text
     )
     assert "get_values returned:" in caplog.text
-    # The fields get_filtering_terms returned, one per line, are indented to
-    # stay in its entry.
-    assert "- get_filtering_terms returned: diagnosis: get_values\n  finding:" in (
-        caplog.text
-    )
+    # The fields get_filtering_terms returned are logged as the model sees them.
+    assert (
+        '- get_filtering_terms returned: [{"field":"Diagnosed disease",'
+        '"accepts":"get_values","values":null}'
+    ) in caplog.text
 
 
 @pytest.mark.parametrize(
@@ -746,7 +812,8 @@ async def test_interpret_logs_conversation(ai_service, beacon_service, caplog):
             FILTERS_IN_PLAIN_TEXT_RESPONSE,
             "- model said: Interpretation: none. Filters: []",
             # A plain text answer called no tool, so the correction names none.
-            "- sent back to the model: ",
+            # The correction is over several lines, indented to stay in its entry.
+            "- sent back to the model: 1 validation error:\n  ```json\n  [",
         ),
         (
             MALFORMED_FILTERS_ARGUMENTS,

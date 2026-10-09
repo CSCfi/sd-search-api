@@ -19,7 +19,12 @@ from pydantic_ai.models import Model, infer_model
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
-from search_api.ai.models import AIInterpretation
+from search_api.ai.models import (
+    AIFieldAccepts,
+    AIFilter,
+    AIFilterableField,
+    AIInterpretation,
+)
 from search_api.api.beacon.models import BeaconFilteringTerm, BeaconQueryFilter
 from search_api.api.beacon.services import BeaconService
 from search_api.api.models import FieldValue
@@ -72,20 +77,23 @@ Always respond in the same language as the user's query, or in English if uncert
 Your job is to translate a natural language query into Beacon V2 filters. Follow these
 steps for every query:
 
-1. Call get_filtering_terms() to see available field names. Fields with allowed values are
-   listed as "field: value1 | value2 | ..."; use one of those values exactly. Duration
-   fields are listed as "field: ISO-8601 duration"; give one duration (P40Y) or a range (P40Y-P60Y).
-2. Fields listed as "field: get_values" take only values that are in the index. Call
-   get_values(field_id, text) with one or two words from the query, and use a value
+1. Call get_filtering_terms() to see the fields you can filter on, and what each
+   accepts. A field that accepts "values" lists them; use one of those values exactly. A field that accepts "duration" takes one ISO-8601 duration (P40Y)
+   or a range (P40Y-P60Y). A field that accepts "text" matches words in a text, such
+   as a title; filter on it only when the query asks to search that text, such as
+   "datasets with liver in the title".
+2. A field that accepts "get_values" takes only values that are in the index. Call
+   get_values(field, text) with one or two words from the query, and use a value
    exactly as it is listed, or its concept id. Search again with other words if
-   nothing fits. When the query means a concept and everything under it, such as
+   nothing fits. If still nothing fits, leave the field out, and say so in the
+   interpretation. When the query means a concept and everything under it, such as
    "any carcinoma", call get_values with include_descendants set to true, and use
    the values it lists.
 3. Return a structured result with:
    - interpretation: a concise explanation of how you understood the query and which
      filters you chose
-   - filters: the filters, using field names from step 1 as filter ids, with values
-     from steps 1 and 2
+   - filters: the filters, with values from steps 1 and 2. Give each field exactly
+     as get_filtering_terms lists it.
 
 The user reviews your filters and runs the search with them. You never see the
 records, so never list or describe any.
@@ -115,24 +123,23 @@ def validate_filters(
 ) -> list[str]:
     """Return what is wrong with the model's filters, if anything.
 
-    Only what the filters say is checked, not whether they match anything.
+    Only what the filters say is checked, not whether they match anything. Each
+    filter's field is known. An error names the field by its label, as the
+    model knows it.
     """
     terms_by_id = {term.id: term for term in filtering_terms}
     errors = []
     for f in filters:
-        term = terms_by_id.get(f.id)
-        if term is None:
-            errors.append(f"Unknown field: '{f.id}'.")
-            continue
+        term = terms_by_id[f.id]
         if f.includeDescendantTerms and term.type not in _ONTOLOGY_TYPES:
             errors.append(
-                f"Field '{f.id}' is not an ontology field, "
+                f"Field '{term.label}' is not an ontology field, "
                 "so includeDescendantTerms must be false."
             )
         for value in f.value if isinstance(f.value, list) else [f.value]:
             if term.controlledValues and value not in term.controlledValues:
                 errors.append(
-                    f"Field '{f.id}' has no value '{value}'. "
+                    f"Field '{term.label}' has no value '{value}'. "
                     f"Use one of: {' | '.join(term.controlledValues)}."
                 )
             if term.type == "iso8601Range":
@@ -141,8 +148,8 @@ def validate_filters(
                         iso8601_duration_to_days(duration)
                 except Exception:
                     errors.append(
-                        f"Field '{f.id}' value '{value}' is not an ISO-8601 duration "
-                        "or range, such as P40Y or P40Y-P60Y."
+                        f"Field '{term.label}' value '{value}' is not an ISO-8601 "
+                        "duration or range, such as P40Y or P40Y-P60Y."
                     )
     return errors
 
@@ -161,8 +168,23 @@ class _Deps:
     def terms_by_id(self) -> dict[str, BeaconFilteringTerm]:
         return {term.id: term for term in self.filtering_terms}
 
+    @cached_property
+    def _terms_by_name(self) -> dict[str, BeaconFilteringTerm]:
+        # Labels are added last, so a label wins over an id it equals.
+        terms = {term.id.lower(): term for term in self.filtering_terms}
+        terms |= {term.label.lower(): term for term in self.filtering_terms}
+        return terms
 
-# The two functions below are the tools the model can call. Their docstrings
+    def find_term(self, field: str) -> BeaconFilteringTerm | None:
+        """Return the field the model names, by its label, in any letter case.
+
+        The model is shown only labels. A field id is accepted too, which does
+        no harm.
+        """
+        return self._terms_by_name.get(field.strip().lower())
+
+
+# The three functions below are the tools the model can call. Their docstrings
 # are not documentation for developers: pydantic-ai sends each docstring to
 # the model as the tool's description, and the model reads it to decide when
 # and how to call the tool. Editing a docstring changes what the model is told,
@@ -170,31 +192,38 @@ class _Deps:
 # does not use.
 
 
-def get_filtering_terms(ctx: RunContext[_Deps]) -> str:
+def get_filtering_terms(ctx: RunContext[_Deps]) -> list[AIFilterableField]:
     """
-    List the fields you can filter on, one per line, with the values each accepts.
+    List the fields you can filter on.
 
-    A field with allowed values lists them, as "field: value1 | value2". A
-    field listed as "field: get_values" takes values found with get_values.
-    A duration field takes an ISO-8601 duration or range.
+    A field accepts one of its listed values ("values"), values found with
+    get_values ("get_values"), an ISO-8601 duration or range ("duration"), or
+    words in a text ("text").
     """
-    lines = []
+    fields = []
     for term in ctx.deps.filtering_terms:
+        accepts: AIFieldAccepts
         if term.controlledValues:
-            allowed = " | ".join(term.controlledValues or [])
-            lines.append(f"{term.id}: {allowed}")
+            accepts = "values"
         elif term.type in _INDEXED_TYPES:
-            lines.append(f"{term.id}: get_values")
+            accepts = "get_values"
         elif term.type == "iso8601Range":
-            lines.append(f"{term.id}: ISO-8601 duration")
+            accepts = "duration"
         else:
-            lines.append(term.id)
-    return "\n".join(lines)
+            accepts = "text"
+        fields.append(
+            AIFilterableField(
+                field=term.label,
+                accepts=accepts,
+                values=term.controlledValues,
+            )
+        )
+    return fields
 
 
 async def get_values(
     ctx: RunContext[_Deps],
-    field_id: str,
+    field: str,
     text: str,
     include_descendants: bool = False,
 ) -> list[FieldValue] | str:
@@ -209,20 +238,82 @@ async def get_values(
     the text names no such concept.
 
     Args:
-        field_id: A field listed by get_filtering_terms as "field: get_values".
+        field: A field that get_filtering_terms lists as accepting "get_values".
         text: A word or two from the query, such as "carcinoma".
         include_descendants: Whether the query means a concept and all its
             descendants, such as "any carcinoma".
     """
 
-    term = ctx.deps.terms_by_id.get(field_id)
+    term = ctx.deps.find_term(field)
     if term is None:
-        return f"Unknown field: '{field_id}'."
+        return f"Unknown field: '{field}'."
     if term.type not in _INDEXED_TYPES:
         return (
-            f"Field '{field_id}' has no values to find. "
+            f"Field '{term.label}' has no values to find. "
             "Give it a value as get_filtering_terms describes."
         )
+
+    values = await _find_field_values(ctx.deps, term, text, include_descendants)
+    if not values:
+        # Advice the model that no values were found.
+        return (
+            f"No indexed value of field '{term.label}' matches '{text}'. "
+            "Search again with other words. If none fit, leave the field out."
+        )
+    return values
+
+
+async def final_result(
+    ctx: RunContext[_Deps], interpretation: str, filters: list[AIFilter]
+) -> AIInterpretation:
+    """
+    Give your interpretation of the query and the filters you recommend for it.
+
+    Args:
+        interpretation: How you understood the query and which filters you chose.
+        filters: The filters. Give each field exactly as get_filtering_terms
+            lists it.
+    """
+    # pydantic-ai sends the model a JSON schema built from these arguments, and
+    # calls this function with the model's answer. An error raised as
+    # ModelRetry goes back to the model to correct.
+
+    # Map each field the model names by its label to the field's id.
+    query_filters = []
+    errors = []
+    for f in filters:
+        term = ctx.deps.find_term(f.field)
+        if term is None:
+            errors.append(f"Unknown field: '{f.field}'.")
+            continue
+        query_filters.append(
+            BeaconQueryFilter(
+                id=term.id,
+                value=f.value,
+                includeDescendantTerms=f.includeDescendantTerms,
+            )
+        )
+    errors += validate_filters(query_filters, ctx.deps.filtering_terms)
+    if errors:
+        raise ModelRetry("\n".join(errors))
+
+    # Values not in the index go back to the model to correct as well.
+    query_filters, errors = await _replace_with_indexed_values(ctx.deps, query_filters)
+    if errors:
+        raise ModelRetry("\n".join(errors))
+
+    # The values are replaced by the indexed ones. An ontology value is then
+    # returned as a concept id.
+    return AIInterpretation(interpretation=interpretation, filters=query_filters)
+
+
+async def _find_field_values(
+    deps: _Deps,
+    term: BeaconFilteringTerm,
+    text: str,
+    include_descendants: bool,
+) -> list[FieldValue]:
+    """Return the indexed field values that match the text, as get_values describes."""
 
     if include_descendants and term.type in _ONTOLOGY_TYPES:
         # Return the concept the text names and its descendants. If the text names
@@ -230,7 +321,7 @@ async def get_values(
         # search is not used, because it would also list values whose names only
         # contain the text, such as "Lymphomatoid papulosis" for "lymphoma".
         descendants = await _resolve_field_values(
-            ctx.deps, term, text, include_descendants=True
+            deps, term, text, include_descendants=True
         )
         if descendants:
             return descendants
@@ -239,10 +330,10 @@ async def get_values(
     values = await get_field_suggestions(
         term,
         text,
-        ctx.deps.scope,
-        ctx.deps.beacon_service,
-        ctx.deps.term_caches,
-        ctx.deps.ontology_id_by_field,
+        deps.scope,
+        deps.beacon_service,
+        deps.term_caches,
+        deps.ontology_id_by_field,
         substring_match=True,
     )
     if term.type not in _ONTOLOGY_TYPES:
@@ -255,9 +346,7 @@ async def get_values(
     # also match by part of the text. The term cache could store the synonyms
     # of every indexed concept when documents are loaded, so /suggestions could
     # match them by substring in memory, for the AI and for users alike.
-    resolved = await _resolve_field_values(
-        ctx.deps, term, text, include_descendants=False
-    )
+    resolved = await _resolve_field_values(deps, term, text, include_descendants=False)
     # Values /suggestions already found are not added again.
     return values + [v for v in resolved if v not in values]
 
@@ -291,7 +380,9 @@ async def _replace_with_indexed_values(
 
         if not given_values:
             errors.append(
-                f"Field '{field.id}' has no value. Use get_values to find one."
+                f"Field '{field.label}' has no value. "
+                "Use get_values to find one. "
+                "If get_values finds none, leave the field out."
             )
 
         include_descendants = query_filter.includeDescendantTerms
@@ -303,8 +394,9 @@ async def _replace_with_indexed_values(
             if not matching_field_values:
                 descendants = " or its descendants" if include_descendants else ""
                 errors.append(
-                    f"Field '{field.id}' has no indexed value '{given_value}'"
-                    f"{descendants}. Use get_values to find one."
+                    f"Field '{field.label}' has no indexed value '{given_value}'"
+                    f"{descendants}. Use get_values to find one. "
+                    "If get_values finds none, leave the field out."
                 )
             # A concept id for an ontology concept, otherwise the value itself.
             indexed_values += [v.concept_id or v.value for v in matching_field_values]
@@ -379,6 +471,10 @@ class AIService:
         assistant_description: str,
         ontology_id_by_field: Mapping[str, str],
     ) -> None:
+        # The model names fields by their labels, so each must name one field.
+        labels = [term.label.lower() for term in filtering_terms]
+        if duplicates := sorted({label for label in labels if labels.count(label) > 1}):
+            raise ValueError(f"Fields share the labels: {', '.join(duplicates)}.")
         self._filtering_terms = filtering_terms
         self._ontology_id_by_field = ontology_id_by_field
         cfg = _ai_config()
@@ -399,33 +495,13 @@ class AIService:
         self._agent = Agent[_Deps, AIInterpretation](
             model=model,
             deps_type=_Deps,
-            output_type=AIInterpretation,
+            output_type=final_result,
             tools=[get_filtering_terms, get_values],
             system_prompt=_SYSTEM_PROMPT_TEMPLATE.format(
                 assistant_description=assistant_description,
             ),
             retries={"output": 3},
         )
-
-        # pydantic-ai generates a JSON schema from AIInterpretation and passes it to the
-        # model so that the model knows the expected filter structure.
-
-        @self._agent.output_validator
-        async def check_filters(
-            ctx: RunContext[_Deps], output: AIInterpretation
-        ) -> AIInterpretation:
-            # Invalid filters go back to the model to correct.
-            if errors := validate_filters(output.filters, ctx.deps.filtering_terms):
-                raise ModelRetry("\n".join(errors))
-            # Values not in the index go back to the model to correct as well.
-            filters, errors = await _replace_with_indexed_values(
-                ctx.deps, output.filters
-            )
-            if errors:
-                raise ModelRetry("\n".join(errors))
-            # Return the model's answer with its values replaced by the indexed
-            # ones. An ontology value is then returned as a concept id.
-            return output.model_copy(update={"filters": filters})
 
     async def interpret(
         self,

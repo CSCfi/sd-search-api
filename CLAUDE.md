@@ -72,7 +72,10 @@ the **query-less** service behind `/status`, `/health`, `/values`, `/suggestions
 service because each has a different result shape. The `Domain`'s `ai_assistant_description` is the persona behind
 `POST /ai/filters` (only under `FEATURE_AI`). **The model only recommends filters**: the route returns the
 interpretation and the filters and runs no query, so the model never sees a record; the client shows the filters and
-the user runs them through `/datasets` or `/images`. **A keyword or ontology value must be in the index**, so a
+the user runs them through `/datasets` or `/images`. **A query may edit the current filters** sent with it, and the
+response gives every filter that results: the model gives only the filters it adds or changes, and a field with no
+value to remove its filter, and the code keeps the rest, so it cannot drop or alter them; `answerable` is `false`, with the current
+filters unchanged, when the query cannot be expressed as filters. **A keyword or ontology value must be in the index**, so a
 client can select it among `/values`: the model finds values with a `get_values(field_id, text,
 include_descendants)` tool (`ai/services.py`), built on the very code behind `/suggestions`
 (`services/field_values.py`), and its answer is checked against `/values` and sent back to correct otherwise. An
@@ -80,7 +83,7 @@ ontology value comes back as its concept id; a name the ontology knows the conce
 resolved as a query resolves it, and with `includeDescendantTerms` a broader concept is replaced by its listed
 descendants, since a client must be able to display every value. A `requestedScope` shows the model only the fields
 indexed for it, since a filter on any other field would constrain nothing there. A model that never gives a valid
-answer gets no filters and a fixed explanation, as for a query no filter can express, so a `503` means that the
+answer gets the current filters unchanged and a fixed explanation, as for a query no filter can express, so a `503` means that the
 model's server could not be reached or answered with an HTTP error, or that a store the model's tools read failed.
 `make_lifespan` builds one term cache per ontology into `app.state.ontology_term_services` and one `app.state.beacon_service`; routes must read **that** instance, since
 value counts are cached in a dict on it and filled in the background, so a per-request one would start empty.
@@ -209,7 +212,7 @@ default would match on one word, far too broad given that results are never rank
 
 Settings (`conf.py`) are mostly **required** — no hardcoded host/db/password. Defaults: `POSTGRES_PORT=5432`,
 `POSTGRES_POOL_{MIN_SIZE=2,MAX_SIZE=10,MAX_LIFETIME=3600,TIMEOUT=5}`, `OPENSEARCH_PORT=9200`, `DEPLOYMENT_ENV=dev`, `LOG_LEVEL=INFO`,
-`{TERM,ONTOLOGY,VALUE_COUNT}_CACHE_REFRESH=300`, `FEATURE_AI=false`, `LLM_PROVIDER=openai`, `ADMIN_KEY=None`, `OIDC_SECURE_COOKIE=true`,
+`{TERM,ONTOLOGY,VALUE_COUNT}_CACHE_REFRESH=300`, `FEATURE_AI=false`, `LLM_PROVIDER=openai`, `LLM_MAX_TOKENS=1024`, `LLM_TIMEOUT=60`, `ADMIN_KEY=None`, `OIDC_SECURE_COOKIE=true`,
 `JWT_ALGORITHM=HS256`. There is **one class per source**, since a `BaseSettings` validates every field it declares:
 bundled, a `load <dir>` would demand submit API settings it never uses. **The server pools its Postgres connections
 and nothing else does** (`database/repository.py`): with no pool open, `get_connection()` connects directly.

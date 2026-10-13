@@ -20,8 +20,6 @@ from search_api.database.document import (
 )
 from search_api.database.repository import get_cursor
 
-logging.basicConfig(level=logging.INFO)
-
 # OpenSearch index batch size.
 BATCH_SIZE = 1000
 

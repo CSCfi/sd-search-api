@@ -9,7 +9,9 @@ import pytest_asyncio
 from search_api.api.beacon.models import BeaconFilteringOntology, OntologyRestriction
 from search_api.api.extract_logs import ExtractLog
 from search_api.api.opensearch.models import (
+    ONTOLOGY_OTHER_VALUE_FIELD_SUFFIX,
     ExtractedDocument,
+    OpenSearchField,
     OpenSearchFieldType,
     OpenSearchBeaconFilteringTerm,
     OpenSearchFieldValue,
@@ -626,3 +628,103 @@ async def test_concept_id_already_indexed_is_accepted(
         logs = await read_document_logs(cur, document_id)
     assert stored[_FIELD_ID] == concept_id
     assert logs == []
+
+
+_FREE_TEXT_FIELD_ID = f"{_FIELD_ID}{ONTOLOGY_OTHER_VALUE_FIELD_SUFFIX}"
+
+
+async def _load_document_with_free_text(
+    ontology_id: str, document_id: str, free_text: str
+) -> None:
+    """Load a document whose one ontologyOrValue field has free text and no code.
+
+    The document is built and stored using the real load, which resolves the
+    free text, writes any logs to document_log, stores the document in Postgres,
+    and caches the preferred terms of the concepts it resolved.
+    """
+    field = _ontology_field(ontology_id, "ontologyOrValue")
+    free_text_field = OpenSearchField(id=_FREE_TEXT_FIELD_ID, type="keyword")
+    document = ExtractedDocument(
+        id=document_id,
+        values=[OpenSearchFieldValue(field=free_text_field, value=free_text)],
+    )
+    await LoadService(create_term_caches({ontology_id}), [field]).store_documents(
+        iter([document])
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_concept_id_from_free_text(
+    single_concept_ontology_id, document_id
+):
+    """Free text that names one concept is indexed as that concept.
+
+    A search for the text resolves it to the concept, so the document is
+    indexed under the concept id, not as free text that no search would reach.
+    """
+    await _load_document_with_free_text(
+        single_concept_ontology_id, document_id, _PREFERRED_TERM.lower()
+    )
+
+    async with get_cursor() as cur:
+        document = await get_document(cur, document_id)
+        logs = await read_document_logs(cur, document_id)
+    assert document[_FIELD_ID] == _CONCEPT_ID
+    assert _FREE_TEXT_FIELD_ID not in document
+    assert [(log.severity, log.message) for log in logs] == [
+        (
+            "WARNING",
+            f"Concept id '{_CONCEPT_ID}' was resolved from the provided textual "
+            f"concept value '{_PREFERRED_TERM.lower()}' for field '{_FIELD_ID}'.",
+        )
+    ]
+    # read_terms reads the terms cache table. The load cached the concept's
+    # preferred term there for this field, which is how /values labels the
+    # concept.
+    assert {
+        (term.field_id, term.concept_id, term.preferred_term)
+        for term in await read_terms(single_concept_ontology_id)
+    } == {(_FIELD_ID, _CONCEPT_ID, _PREFERRED_TERM)}
+
+
+@pytest.mark.asyncio
+async def test_resolve_no_concept_id_from_free_text(
+    single_concept_ontology_id, document_id
+):
+    """Free text that names no concept is indexed as free text, with no log."""
+    await _load_document_with_free_text(
+        single_concept_ontology_id, document_id, "home-made fixative"
+    )
+
+    async with get_cursor() as cur:
+        document = await get_document(cur, document_id)
+        assert await read_document_logs(cur, document_id) == []
+    assert document[_FREE_TEXT_FIELD_ID] == "home-made fixative"
+    assert _FIELD_ID not in document
+
+
+@pytest.mark.asyncio
+async def test_resolve_multiple_concepts_id_from_free_text(
+    shared_term_and_parent_ontology_id, document_id
+):
+    """Free text that names several concepts is indexed as free text.
+
+    No single concept can be chosen, which is logged as for a meaning.
+    """
+    await _load_document_with_free_text(
+        shared_term_and_parent_ontology_id, document_id, _SHARED_PREFERRED_TERM
+    )
+
+    async with get_cursor() as cur:
+        document = await get_document(cur, document_id)
+        logs = await read_document_logs(cur, document_id)
+    assert document[_FREE_TEXT_FIELD_ID] == _SHARED_PREFERRED_TERM
+    assert _FIELD_ID not in document
+    assert [(log.severity, log.message) for log in logs] == [
+        (
+            "ERROR",
+            f"Textual concept value '{_SHARED_PREFERRED_TERM}' resolves to several "
+            f"concept ids for field '{_FIELD_ID}': "
+            f"{_CHILD_CONCEPT_ID}, {_ORPHAN_CONCEPT_ID}.",
+        )
+    ]

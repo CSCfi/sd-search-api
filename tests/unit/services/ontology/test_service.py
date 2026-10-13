@@ -19,20 +19,23 @@ from search_api.api.beacon.models import (
 )
 from search_api.services.ontology.service import OntologyService, normalise_term
 
-# Which concept id(s) each term resolves to and the concept id
-# parent/child graph. By convention, concept ids start with C
-# and preferred terms start with P.
-CONCEPT_IDS_BY_VALUE = {
-    "C1": {"C1"},
-    "C2": {"C2"},
-    "C3": {"C3"},
-    "P1": {"C1"},
-    "P2": {"C2", "C3"},  # a term resolving to > 1 concept ids (e.g. in SEND)
+CONCEPT_ID_C1 = "C1"
+CONCEPT_ID_C2 = "C2"
+CONCEPT_ID_C3 = "C3"
+CONCEPT_ID_C4 = "C4"
+CONCEPT_IDS = {CONCEPT_ID_C1, CONCEPT_ID_C2, CONCEPT_ID_C3, CONCEPT_ID_C4}
+
+PREFERRED_TERM_OF_C1 = "P1"
+PREFERRED_TERM_OF_C2_AND_C3 = "P2"
+
+CONCEPT_IDS_BY_TERM = {
+    PREFERRED_TERM_OF_C1: {CONCEPT_ID_C1},
+    PREFERRED_TERM_OF_C2_AND_C3: {CONCEPT_ID_C2, CONCEPT_ID_C3},
 }
 
 DESCENDANT_IDS_BY_CONCEPT_ID = {
-    "C1": {"C3", "C4"},  # C1 has two descendants
-    "C2": {"C4"},  # C4 has two parents
+    CONCEPT_ID_C1: {CONCEPT_ID_C3, CONCEPT_ID_C4},  # C1 has two descendants
+    CONCEPT_ID_C2: {CONCEPT_ID_C4},  # C4 has two parents
 }
 
 
@@ -87,7 +90,7 @@ class MockOntologyService(OntologyService):
 
     @override
     async def is_known(self, concept_id: str) -> bool:
-        return concept_id in CONCEPT_IDS_BY_VALUE
+        return concept_id in CONCEPT_IDS
 
     @override
     async def get_preferred_terms(self, concept_ids: set[str]) -> dict[str, str]:
@@ -98,7 +101,7 @@ class MockOntologyService(OntologyService):
         self, value: str, filtering_term: BeaconFilteringTerm
     ) -> set[str]:
         self.find_concept_calls.append((value, filtering_term))
-        return set(CONCEPT_IDS_BY_VALUE.get(value, ()))
+        return set(CONCEPT_IDS_BY_TERM.get(value, ()))
 
     @override
     async def _is_within_restriction(
@@ -135,122 +138,132 @@ def service() -> MockOntologyService:
 
 
 @pytest.mark.asyncio
-async def test_resolves_a_scalar_value(service):
-    result = await service.prepare_ontology_filter(filter("P1"), [term()])
-    assert result.value == ["C1"]
+async def test_prepare_ontology_filter_preferred_term(service):
+    result = await service.prepare_ontology_filter(
+        filter(PREFERRED_TERM_OF_C1), [term()]
+    )
+    assert result.value == [CONCEPT_ID_C1]
 
 
 @pytest.mark.asyncio
-async def test_resolves_a_list_of_values(service):
-    result = await service.prepare_ontology_filter(filter(["C1", "C2"]), [term()])
-    assert set(result.value) == {"C1", "C2"}
+async def test_prepare_ontology_filter_concept_id(service):
+    result = await service.prepare_ontology_filter(
+        filter([CONCEPT_ID_C1, CONCEPT_ID_C2]), [term()]
+    )
+    assert set(result.value) == {CONCEPT_ID_C1, CONCEPT_ID_C2}
+    assert service.find_concept_calls == []
 
 
 @pytest.mark.asyncio
-async def test_resolves_a_value_to_several_concept_ids(service):
-    """A term that isn't unique resolves to every concept carrying it."""
-    result = await service.prepare_ontology_filter(filter("P2"), [term()])
-    assert set(result.value) == {"C2", "C3"}
+async def test_prepare_ontology_filter_shared_preferred_term(service):
+    result = await service.prepare_ontology_filter(
+        filter(PREFERRED_TERM_OF_C2_AND_C3), [term()]
+    )
+    assert set(result.value) == {CONCEPT_ID_C2, CONCEPT_ID_C3}
 
 
 @pytest.mark.asyncio
-async def test_resolves_each_value_against_the_matched_filtering_term(service):
-    """Each value is resolved once, against the filtering term it matched —
-    a provider such as SNOMED reads its search hierarchy off that term."""
+async def test_prepare_ontology_filter_two_preferred_terms(service):
     filtering_term = term()
 
     result = await service.prepare_ontology_filter(
-        filter(["P1", "P2"]), [filtering_term]
+        filter([PREFERRED_TERM_OF_C1, PREFERRED_TERM_OF_C2_AND_C3]), [filtering_term]
     )
 
-    assert sorted(value for value, _ in service.find_concept_calls) == ["P1", "P2"]
+    assert sorted(value for value, _ in service.find_concept_calls) == [
+        PREFERRED_TERM_OF_C1,
+        PREFERRED_TERM_OF_C2_AND_C3,
+    ]
     assert all(t is filtering_term for _, t in service.find_concept_calls)
-    assert set(result.value) == {"C1", "C2", "C3"}
+    assert set(result.value) == {CONCEPT_ID_C1, CONCEPT_ID_C2, CONCEPT_ID_C3}
 
 
 @pytest.mark.asyncio
-async def test_concept_id_resolves_without_using_ontology_service(service):
-    result = await service.prepare_ontology_filter(filter("C1"), [term()])
-
-    assert result.value == ["C1"]
-    assert service.find_concept_calls == []
-
-
-@pytest.mark.asyncio
-async def test_cached_preferred_term_resolves_without_using_ontology_service(
+async def test_prepare_ontology_filter_cached(
     service,
 ):
-    term_cache = MockTermCache({"P1": {"C1"}})
+    term_cache = MockTermCache({PREFERRED_TERM_OF_C1: {CONCEPT_ID_C1}})
 
-    result = await service.prepare_ontology_filter(filter("P1"), [term()], term_cache)
+    result = await service.prepare_ontology_filter(
+        filter(PREFERRED_TERM_OF_C1), [term()], term_cache
+    )
 
-    assert result.value == ["C1"]
+    assert result.value == [CONCEPT_ID_C1]
     assert service.find_concept_calls == []
-    assert term_cache.calls == [("species", "P1")]
+    assert term_cache.calls == [("species", PREFERRED_TERM_OF_C1)]
 
 
 @pytest.mark.asyncio
-async def test_not_concept_id_or_cached_preferred_term_uses_ontology_service(service):
+async def test_prepare_ontology_filter_not_cached(service):
     term_cache = MockTermCache()
 
-    result = await service.prepare_ontology_filter(filter("P2"), [term()], term_cache)
+    result = await service.prepare_ontology_filter(
+        filter(PREFERRED_TERM_OF_C2_AND_C3), [term()], term_cache
+    )
 
-    assert set(result.value) == {"C2", "C3"}
-    assert [value for value, _ in service.find_concept_calls] == ["P2"]
+    assert set(result.value) == {CONCEPT_ID_C2, CONCEPT_ID_C3}
+    assert [value for value, _ in service.find_concept_calls] == [
+        PREFERRED_TERM_OF_C2_AND_C3
+    ]
 
 
 @pytest.mark.asyncio
-async def test_unresolved_values_are_dropped_for_an_ontology_term(service):
-    """A strict "ontology" field has no free-text fallback field, so values
-    that don't resolve are dropped — whether or not any other value did."""
-    mixed = await service.prepare_ontology_filter(filter(["C1", "invalid"]), [term()])
-    assert mixed.value == ["C1"]
+async def test_prepare_ontology_filter_ontology_drops_unresolved_values(service):
+    result = await service.prepare_ontology_filter(
+        filter([CONCEPT_ID_C1, "invalid"]), [term()]
+    )
+    assert result.value == [CONCEPT_ID_C1]
 
-    none_resolved = await service.prepare_ontology_filter(
+    result = await service.prepare_ontology_filter(
         filter(["invalid1", "invalid2"]), [term()]
     )
-    assert none_resolved.value == []
+    assert result.value == []
 
 
 @pytest.mark.asyncio
-async def test_unresolved_values_are_kept_for_an_ontology_or_value_term(service):
-    """An "ontologyOrValue" field also queries a free-text fallback field, so
-    values that don't resolve are kept for it."""
-    mixed = await service.prepare_ontology_filter(
-        filter(["C1", "invalid"]), [term("ontologyOrValue")]
+async def test_prepare_ontology_filter_ontology_or_value_keeps_unresolved_values(
+    service,
+):
+    result = await service.prepare_ontology_filter(
+        filter([CONCEPT_ID_C1, "invalid"]), [term("ontologyOrValue")]
     )
-    assert set(mixed.value) == {"C1", "invalid"}
+    assert set(result.value) == {CONCEPT_ID_C1, "invalid"}
 
-    none_resolved = await service.prepare_ontology_filter(
+    result = await service.prepare_ontology_filter(
         filter(["invalid1", "invalid2"]), [term("ontologyOrValue")]
     )
-    assert set(none_resolved.value) == {"invalid1", "invalid2"}
+    assert set(result.value) == {"invalid1", "invalid2"}
 
 
 @pytest.mark.asyncio
-async def test_descendants_are_not_resolved_unless_requested(service):
+async def test_prepare_ontology_filter_false_include_descendants(service):
     result = await service.prepare_ontology_filter(
-        filter("C1", include_descendants=False), [term()]
+        filter(CONCEPT_ID_C1, include_descendants=False), [term()]
     )
-    assert result.value == ["C1"]
+    assert result.value == [CONCEPT_ID_C1]
     assert service.find_descendant_calls == []
 
 
 @pytest.mark.asyncio
-async def test_descendants_are_resolved_once_for_all_concept_ids(service):
+async def test_prepare_ontology_filter_true_include_descendants(service):
     result = await service.prepare_ontology_filter(
-        filter(["C1", "C2"], include_descendants=True), [term()]
+        filter([CONCEPT_ID_C1, CONCEPT_ID_C2], include_descendants=True), [term()]
     )
-    assert set(result.value) == {"C1", "C2", "C3", "C4"}
+    assert set(result.value) == {
+        CONCEPT_ID_C1,
+        CONCEPT_ID_C2,
+        CONCEPT_ID_C3,
+        CONCEPT_ID_C4,
+    }
     # One call with every resolved concept id, not one call per value.
-    assert service.find_descendant_calls == [{"C1", "C2"}]
+    assert service.find_descendant_calls == [{CONCEPT_ID_C1, CONCEPT_ID_C2}]
 
 
 @pytest.mark.asyncio
-async def test_concept_ids_are_deduplicated(service):
+async def test_prepare_ontology_filter_concept_ids_are_deduplicated(service):
     """C3 is resolved directly and is also a descendant of C1; C4 is a
     descendant of both C1 and C3's siblings. Each appears once."""
     result = await service.prepare_ontology_filter(
-        filter(["C1", "C3"], include_descendants=True), [term()]
+        filter([CONCEPT_ID_C1, CONCEPT_ID_C3], include_descendants=True), [term()]
     )
-    assert sorted(result.value) == ["C1", "C3", "C4"]
+    assert sorted(result.value) == [CONCEPT_ID_C1, CONCEPT_ID_C3, CONCEPT_ID_C4]

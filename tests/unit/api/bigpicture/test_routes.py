@@ -1,5 +1,5 @@
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock
 from datetime import datetime, timezone
 from typing import override
 
@@ -34,6 +34,7 @@ from search_api.api.opensearch.models import (
 )
 from search_api.api.bigpicture.models import (
     BP_FILTERING_SCOPES,
+    BP_FILTERING_TERM_BY_ID,
     BP_FILTERING_TERMS,
     BP_INFO_RESPONSE,
     BP_FILTERING_TERMS_RESPONSE,
@@ -136,14 +137,6 @@ class MockBeaconImageService(BeaconQueryService[BigpictureBeaconImageResult]):
         return get_mock_image_query_result()
 
 
-SUGGESTIONS_AND_VALUES_INDEXED_COUNTS: dict[str, ValueCounts] = {
-    "sex": ValueCounts(counts={"Male": 10, "Female": 8}),
-    "animal_species": ValueCounts(counts={"410607006": 5, "78678003": 3}),
-    "fixation_type": ValueCounts(
-        counts={"1388477003": 4}, other_counts={"Formalin": 2, "Custom fix": 1}
-    ),
-}
-
 PREFERRED_TERMS: dict[str, str] = {
     "410607006": "Homo sapiens",
     "78678003": "Sus scrofa",
@@ -170,14 +163,6 @@ class MockOntologyTermCache:
 
     async def refresh(self, snomed) -> None:
         pass
-
-
-class MockSuggestionsAndValuesBeaconService(MockBeaconService):
-    @override
-    async def get_value_counts(self, field_id: str, scope=None) -> ValueCounts:
-        if field_id in SUGGESTIONS_AND_VALUES_INDEXED_COUNTS:
-            return SUGGESTIONS_AND_VALUES_INDEXED_COUNTS[field_id]
-        raise ValueError(f"Unsupported field: '{field_id}'")
 
 
 @pytest.fixture()
@@ -357,34 +342,18 @@ def test_filtering_scopes(client: TestClient):
         assert "label" in scope
 
 
-@pytest.fixture()
-def suggestions_values_client():
-    saved = dict(app.dependency_overrides)
-    app.dependency_overrides[get_beacon_service] = lambda: (
-        MockSuggestionsAndValuesBeaconService(BP_FILTERING_TERMS)
-    )
-    app.dependency_overrides[get_ontology_term_services] = lambda: {
-        SNOMED_ONTOLOGY_ID: MockOntologyTermCache()
-    }
-    yield TestClient(app)
-    app.dependency_overrides.clear()
-    app.dependency_overrides.update(saved)
-
-
 # Filtering term suggestions
 #
 
 
-def test_filtering_term_suggestions_unknown_field(suggestions_values_client):
-    resp = suggestions_values_client.get(
-        "/filtering_terms/unknown/suggestions", params={"term": "x"}
-    )
+def test_filtering_term_suggestions_unknown_field(client):
+    resp = client.get("/filtering_terms/unknown/suggestions", params={"term": "x"})
     assert resp.status_code == 400
     assert resp.json()["detail"] == "Unknown field: 'unknown'."
 
 
-def test_filtering_term_suggestions_unsupported_type(suggestions_values_client):
-    resp = suggestions_values_client.get(
+def test_filtering_term_suggestions_unsupported_type(client):
+    resp = client.get(
         "/filtering_terms/dataset_title/suggestions", params={"term": "x"}
     )
     assert resp.status_code == 400
@@ -394,116 +363,58 @@ def test_filtering_term_suggestions_unsupported_type(suggestions_values_client):
     )
 
 
-def test_filtering_term_suggestions_controlled_value_all(suggestions_values_client):
-    resp = suggestions_values_client.get(
-        "/filtering_terms/sex/suggestions",
-        params={"term": "ma", "include_all_controlled_values": True},
-    )
-    assert resp.status_code == 200
-    assert [FieldValue.model_validate(r) for r in resp.json()] == [
-        FieldValue(value="Male", count=10)
-    ]
-    resp = suggestions_values_client.get(
-        "/filtering_terms/sex/suggestions",
-        params={"term": "FE", "include_all_controlled_values": True},
-    )
-    assert resp.status_code == 200
-    assert [FieldValue.model_validate(r) for r in resp.json()] == [
-        FieldValue(value="Female", count=8)
-    ]
-
-
-def test_filtering_term_suggestions_controlled_value_indexed_only(
-    suggestions_values_client,
+def test_filtering_term_suggestions_calls_get_field_suggestions(
+    client: TestClient, monkeypatch
 ):
-    resp = suggestions_values_client.get(
-        "/filtering_terms/sex/suggestions",
-        params={"term": "o", "include_all_controlled_values": True},
+    field_id = "sex"
+    term = "fe"
+    scope = "clinical"
+    # Each option differs from its default to find any dropped parameters.
+    substring_match = True
+    include_all_controlled_values = True
+    include_other_ontology_values = False
+    mocked_field_values = [FieldValue(value="Female", count=8)]
+
+    get_field_suggestions = AsyncMock(return_value=mocked_field_values)
+    monkeypatch.setattr(routes, "get_field_suggestions", get_field_suggestions)
+    resp = client.get(
+        f"/filtering_terms/{field_id}/suggestions",
+        params={
+            "term": term,
+            "scope": scope,
+            "substring_match": substring_match,
+            "include_all_controlled_values": include_all_controlled_values,
+            "include_other_ontology_values": include_other_ontology_values,
+        },
     )
+
     assert resp.status_code == 200
-    assert [FieldValue.model_validate(r) for r in resp.json()] == [
-        FieldValue(value="Other", count=0)  # "Other" is not indexed
-    ]
-    resp = suggestions_values_client.get(
-        "/filtering_terms/sex/suggestions",
-        params={"term": "o", "include_all_controlled_values": False},
+    assert [FieldValue.model_validate(v) for v in resp.json()] == mocked_field_values
+    get_field_suggestions.assert_awaited_once_with(
+        BP_FILTERING_TERM_BY_ID[field_id],
+        term,
+        scope,
+        ANY,  # the beacon service
+        ANY,  # the term caches
+        BP_DOMAIN.ontology_id_by_field,
+        substring_match=substring_match,
+        include_all_controlled_values=include_all_controlled_values,
+        include_other_ontology_values=include_other_ontology_values,
     )
-    assert resp.status_code == 200
-    assert [FieldValue.model_validate(r) for r in resp.json()] == []
-
-
-def test_filtering_term_suggestions_controlled_value_substring_match(
-    suggestions_values_client,
-):
-    resp = suggestions_values_client.get(
-        "/filtering_terms/sex/suggestions",
-        params={"term": "ale", "substring_match": False},
-    )
-    assert resp.status_code == 200
-    assert [FieldValue.model_validate(r) for r in resp.json()] == []
-    resp = suggestions_values_client.get(
-        "/filtering_terms/sex/suggestions",
-        params={"term": "ale", "substring_match": True},
-    )
-    assert resp.status_code == 200
-    assert [FieldValue.model_validate(r) for r in resp.json()] == [
-        FieldValue(value="Female", count=8),
-        FieldValue(value="Male", count=10),
-    ]
-
-
-def test_filtering_term_suggestions_ontology_include_other(suggestions_values_client):
-    resp = suggestions_values_client.get(
-        "/filtering_terms/fixation_type/suggestions",
-        params={"term": "fo", "include_other_ontology_values": True},
-    )
-    assert resp.status_code == 200
-    results = [FieldValue.model_validate(r) for r in resp.json()]
-    assert FieldValue(value="Formalin", count=2) in results
-
-    resp = suggestions_values_client.get(
-        "/filtering_terms/fixation_type/suggestions",
-        params={"term": "fo", "include_other_ontology_values": False},
-    )
-    assert resp.status_code == 200
-    results = [FieldValue.model_validate(r) for r in resp.json()]
-    assert not any(r.value == "Formalin" for r in results)
-
-
-def test_filtering_term_suggestions_ontology_concept_id(suggestions_values_client):
-    resp = suggestions_values_client.get(
-        "/filtering_terms/animal_species/suggestions", params={"term": "4106"}
-    )
-    assert resp.status_code == 200
-    assert [FieldValue.model_validate(r) for r in resp.json()] == [
-        FieldValue(value="Homo sapiens", concept_id="410607006", count=5)
-    ]
-
-
-def test_filtering_term_suggestions_ontology_or_value_concept_id(
-    suggestions_values_client,
-):
-    resp = suggestions_values_client.get(
-        "/filtering_terms/fixation_type/suggestions", params={"term": "1388477003"}
-    )
-    assert resp.status_code == 200
-    assert [FieldValue.model_validate(r) for r in resp.json()] == [
-        FieldValue(value="Tissue fixative", concept_id="1388477003", count=4)
-    ]
 
 
 # Filtering term values
 #
 
 
-def test_filtering_term_values_unknown_field(suggestions_values_client):
-    resp = suggestions_values_client.get("/filtering_terms/unknown/values")
+def test_filtering_term_values_unknown_field(client):
+    resp = client.get("/filtering_terms/unknown/values")
     assert resp.status_code == 400
     assert resp.json()["detail"] == "Unknown field: 'unknown'."
 
 
-def test_filtering_term_values_unsupported_type(suggestions_values_client):
-    resp = suggestions_values_client.get("/filtering_terms/dataset_title/values")
+def test_filtering_term_values_unsupported_type(client):
+    resp = client.get("/filtering_terms/dataset_title/values")
     assert resp.status_code == 400
     assert (
         resp.json()["detail"]
@@ -511,124 +422,36 @@ def test_filtering_term_values_unsupported_type(suggestions_values_client):
     )
 
 
-def test_filtering_term_values_controlled_include_all(suggestions_values_client):
-    resp = suggestions_values_client.get(
-        "/filtering_terms/sex/values",
-        params={"include_all_controlled_values": False},
-    )
-    assert resp.status_code == 200
-    results = [FieldValue.model_validate(r) for r in resp.json()]
-    assert {r.value: r.count for r in results} == {"Male": 10, "Female": 8}
+def test_filtering_term_values_calls_get_field_values(client: TestClient, monkeypatch):
+    field_id = "sex"
+    scope = "clinical"
+    # Each option differs from its default to find any dropped parameters.
+    include_all_controlled_values = True
+    include_other_ontology_values = False
+    mocked_field_values = [FieldValue(value="Female", count=8)]
 
-    resp = suggestions_values_client.get(
-        "/filtering_terms/sex/values",
-        params={"include_all_controlled_values": True},
-    )
-    assert resp.status_code == 200
-    results = [FieldValue.model_validate(r) for r in resp.json()]
-    assert {r.value: r.count for r in results} == {
-        "Male": 10,
-        "Female": 8,
-        "Not-known": 0,
-        "Other": 0,
-    }
-
-
-def test_filtering_term_values_ontology_indexed(suggestions_values_client):
-    resp = suggestions_values_client.get("/filtering_terms/animal_species/values")
-    assert resp.status_code == 200
-    results = [FieldValue.model_validate(r) for r in resp.json()]
-    assert {r.value: r.count for r in results} == {
-        "Homo sapiens": 5,
-        "Sus scrofa": 3,
-    }
-
-
-def test_filtering_term_values_ontology_include_other(suggestions_values_client):
-    resp = suggestions_values_client.get(
-        "/filtering_terms/fixation_type/values",
+    get_field_values = AsyncMock(return_value=mocked_field_values)
+    monkeypatch.setattr(routes, "get_field_values", get_field_values)
+    resp = client.get(
+        f"/filtering_terms/{field_id}/values",
         params={
-            "include_all_ontology_values": False,
-            "include_other_ontology_values": True,
+            "scope": scope,
+            "include_all_controlled_values": include_all_controlled_values,
+            "include_other_ontology_values": include_other_ontology_values,
         },
     )
-    assert resp.status_code == 200
-    results = [FieldValue.model_validate(r) for r in resp.json()]
-    assert {r.value: r.count for r in results} == {
-        "Tissue fixative": 4,
-        "Formalin": 2,  # free-text, only visible with include_other=True
-        "Custom fix": 1,  # free-text, only visible with include_other=True
-    }
 
-    resp = suggestions_values_client.get(
-        "/filtering_terms/fixation_type/values",
-        params={
-            "include_all_ontology_values": False,
-            "include_other_ontology_values": False,
-        },
+    assert resp.status_code == 200
+    assert [FieldValue.model_validate(v) for v in resp.json()] == mocked_field_values
+    get_field_values.assert_awaited_once_with(
+        BP_FILTERING_TERM_BY_ID[field_id],
+        scope,
+        ANY,  # the beacon service
+        ANY,  # the term caches
+        BP_DOMAIN.ontology_id_by_field,
+        include_all_controlled_values=include_all_controlled_values,
+        include_other_ontology_values=include_other_ontology_values,
     )
-    assert resp.status_code == 200
-    results = [FieldValue.model_validate(r) for r in resp.json()]
-    assert {r.value: r.count for r in results} == {"Tissue fixative": 4}
-
-
-def test_filtering_term_values_sorted_by_count(suggestions_values_client):
-    resp = suggestions_values_client.get("/filtering_terms/animal_species/values")
-    assert resp.status_code == 200
-    results = [FieldValue.model_validate(r) for r in resp.json()]
-    counts = [r.count for r in results]
-    assert counts == sorted(counts, reverse=True)
-
-
-class OnlyHomoSapiensCacheService(MockOntologyTermCache):
-    """Returns only Homo sapiens as valid for animal_species."""
-
-    async def get_terms_by_concept_id(
-        self, field_id: str, concept_ids: set[str]
-    ) -> dict[str, str]:
-        if field_id == "animal_species":
-            return {"410607006": "Homo sapiens"} if "410607006" in concept_ids else {}
-        return await super().get_terms_by_concept_id(field_id, concept_ids)
-
-
-def test_filtering_term_values_excludes_unexpected():
-    saved = dict(app.dependency_overrides)
-    app.dependency_overrides[get_beacon_service] = lambda: (
-        MockSuggestionsAndValuesBeaconService(BP_FILTERING_TERMS)
-    )
-    app.dependency_overrides[get_ontology_term_services] = lambda: {
-        SNOMED_ONTOLOGY_ID: OnlyHomoSapiensCacheService()
-    }
-    try:
-        resp = TestClient(app).get("/filtering_terms/animal_species/values")
-    finally:
-        app.dependency_overrides.clear()
-        app.dependency_overrides.update(saved)
-
-    assert resp.status_code == 200
-    results = [FieldValue.model_validate(r) for r in resp.json()]
-    assert len(results) == 1
-    assert results[0].value == "Homo sapiens"
-
-
-def test_filtering_term_suggestions_excludes_unexpected():
-    saved = dict(app.dependency_overrides)
-    app.dependency_overrides[get_beacon_service] = lambda: (
-        MockSuggestionsAndValuesBeaconService(BP_FILTERING_TERMS)
-    )
-    app.dependency_overrides[get_ontology_term_services] = lambda: {
-        SNOMED_ONTOLOGY_ID: OnlyHomoSapiensCacheService()
-    }
-    try:
-        resp = TestClient(app).get(
-            "/filtering_terms/animal_species/suggestions", params={"term": "su"}
-        )
-    finally:
-        app.dependency_overrides.clear()
-        app.dependency_overrides.update(saved)
-
-    assert resp.status_code == 200
-    assert resp.json() == []
 
 
 @pytest.mark.parametrize("path", ["values", "suggestions"])

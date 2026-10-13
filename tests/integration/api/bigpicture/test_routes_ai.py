@@ -1,19 +1,23 @@
-"""Integration tests for the AI search endpoint. Requires Ollama running locally."""
+"""Integration tests for the AI filters endpoint."""
 
+import os
 from urllib.parse import urlparse, urlunparse
 
 import httpx
 import pytest
 
-from search_api.ai.models import AISearchResponse
+from search_api.ai.models import AIInterpretation
 from search_api.api.beacon.models import BeaconQueryFilter
-from search_api.api.bigpicture.models import (
-    BigpictureBeaconDatasetResultSetsResponse,
-    BigpictureBeaconImageResultSetsResponse,
-)
+from search_api.conf import feature_config
 from tests.integration.mockauth import PORT as OIDC_MOCK_PORT
 
-skip = pytest.mark.skip(reason="Requires Ollama")
+requires_feature_ai = pytest.mark.skipif(
+    not feature_config().FEATURE_AI, reason="Requires FEATURE_AI=true"
+)
+
+# Longer than the server's LLM_TIMEOUT. A model that is too slow then fails the
+# test with a 503, not with a client timeout.
+_TIMEOUT = float(os.environ.get("LLM_TIMEOUT", 60)) + 30
 
 
 @pytest.fixture(scope="module")
@@ -50,51 +54,43 @@ def client() -> httpx.Client:
         yield c
 
 
-@skip
-def test_ai_datasets_query_returns_result(client: httpx.Client):
+@requires_feature_ai
+def test_ai_filters_returns_filters(client: httpx.Client):
     resp = client.post(
-        "/ai/datasets", json={"query": "images for human females"}, timeout=60.0
+        "/ai/filters", json={"query": "images for human females"}, timeout=_TIMEOUT
     )
     assert resp.status_code == 200
-    result = AISearchResponse[BigpictureBeaconDatasetResultSetsResponse].model_validate(
-        resp.json()
-    )
+    result = AIInterpretation.model_validate(resp.json())
     assert len(result.interpretation) > 0
-
-    assert result.result.responseSummary.numTotalResults == 1
-    [result_set] = result.result.response.resultSet
-    [dataset] = result_set.results
-    assert dataset.datasetId == "testDataset"
-    assert dataset.datasetTitle == "testTitle"
-    assert dataset.totalImageCount == 1
-    assert dataset.matchingImageCount == 1
     assert len(result.filters) in (1, 2)
-    assert BeaconQueryFilter(id="sex", value="Female") in result.filters
+    assert BeaconQueryFilter(id="sex", value=["Female"]) in result.filters
     if len(result.filters) == 2:
-        assert BeaconQueryFilter(id="animal_species", value="human") in result.filters
+        # Ontology values are returned as concept ids: Homo sapiens.
+        assert (
+            BeaconQueryFilter(id="animal_species", value=["337915000"])
+            in result.filters
+        )
 
 
-@skip
-def test_ai_datasets_query_missing_body_returns_422(client: httpx.Client):
-    resp = client.post("/ai/datasets", json={})
-    assert resp.status_code == 422
-
-
-@skip
-def test_ai_images_query_returns_result(client: httpx.Client):
+@requires_feature_ai
+def test_ai_filters_removes_current_filter(client: httpx.Client):
+    # The query removes the only current filter. The response returns every
+    # filter after that change, so it has none.
     resp = client.post(
-        "/ai/images", json={"query": "images for human females"}, timeout=60.0
+        "/ai/filters",
+        json={
+            "query": "Remove sex",
+            "filters": [{"id": "sex", "value": "Female", "operator": "="}],
+        },
+        timeout=_TIMEOUT,
     )
     assert resp.status_code == 200
-    result = AISearchResponse[BigpictureBeaconImageResultSetsResponse].model_validate(
-        resp.json()
-    )
-    assert len(result.interpretation) > 0
-    images = [r for rs in result.result.response.resultSet for r in rs.results]
-    assert result.result.responseSummary.numTotalResults == len(images)
+    result = AIInterpretation.model_validate(resp.json())
+    assert result.answerable
+    assert result.filters == []
 
 
-@skip
-def test_ai_images_query_missing_body_returns_422(client: httpx.Client):
-    resp = client.post("/ai/images", json={})
+@requires_feature_ai
+def test_ai_filters_missing_body_returns_422(client: httpx.Client):
+    resp = client.post("/ai/filters", json={})
     assert resp.status_code == 422

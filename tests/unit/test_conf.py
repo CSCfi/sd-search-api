@@ -11,6 +11,7 @@ from cryptography.hazmat.primitives.serialization import (
 )
 
 from search_api.conf import (
+    AIConfiguration,
     JWTConfiguration,
     OIDCConfiguration,
     SdSubmitSyncConfiguration,
@@ -101,3 +102,27 @@ def test_sd_submit_sync_private_key_not_base64() -> None:
 def test_sd_submit_sync_private_key_not_pem(decoded_key: bytes) -> None:
     with pytest.raises(ValueError, match="PEM private key"):
         _sd_submit_sync_config(base64.b64encode(decoded_key).decode("ascii"))
+
+
+def test_ai_openai_provider_requires_base_url_and_api_key(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("LLM_MODEL", "qwen2.5:7b")
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="LLM_BASE_URL and LLM_API_KEY are required"):
+        AIConfiguration()
+
+
+def test_ai_other_provider_needs_no_base_url_or_api_key(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("LLM_MODEL", "claude-sonnet-5-5")
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    assert AIConfiguration().LLM_PROVIDER == "anthropic"
+
+
+def test_ai_model_has_no_default(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    with pytest.raises(ValueError, match="LLM_MODEL"):
+        AIConfiguration()

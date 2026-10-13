@@ -24,9 +24,6 @@ data:
   # Set to "true" to enable POST /ai/*; also set LLM_* vars in the secret
   FEATURE_AI: "false"
 
-  # LLM base URL (only used when FEATURE_AI=true)
-  LLM_BASE_URL: ""
-
   # OIDC Relying Party login (LifeScience AAI)
   # Must be the UI's own hostname, not the API's — the OIDC callback sets a
   # host-only session cookie, and the UI's own /api/ calls need to see it.

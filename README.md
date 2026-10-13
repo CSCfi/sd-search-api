@@ -427,14 +427,19 @@ uv run python scripts/admin.py Bigpicture refresh snomed
 
 ## LLM search
 
-The experimental Bigpicture LLM search endpoint uses a small local [Ollama](https://ollama.com) model. Install and
-start it before running the API:
+The AI endpoint `POST /ai/filters` is configured with these environment variables:
 
-```bash
-brew install ollama
-ollama pull qwen2.5:14b
-ollama serve
-```
+| Variable         | Default   | Description                                                                            |
+|------------------|-----------|----------------------------------------------------------------------------------------|
+| `FEATURE_AI`     | `false`   | Set to `true` to enable the AI endpoint.                                               |
+| `LLM_PROVIDER`   | `openai`  | The model provider, as pydantic-ai names it. `openai` is any OpenAI-compatible server. |
+| `LLM_MODEL`      |           | The model name, as the provider names it.                                              |
+| `LLM_BASE_URL`   |           | The server's API URL. Required for `openai`.                                           |
+| `LLM_API_KEY`    |           | The server's API key. Required for `openai`.                                           |
+| `LLM_MAX_TOKENS` | `1024`    | The most tokens the model may generate in one reply.                                   |
+| `LLM_TIMEOUT`    | `60`      | Seconds the model may take to answer one query. After that the endpoint answers `503`. |
+
+Providers other than `openai`, such as `anthropic`, read their credentials from their own environment variables.
 
 ## Performance tests
 

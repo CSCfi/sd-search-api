@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 import uvicorn
@@ -14,6 +16,15 @@ from search_api.conf import admin_config, deployment_config, jwt_config, oidc_co
 from search_api.services.auth import AuthServiceHandler
 
 # uvicorn search_api.main:app --reload
+
+# Logging is configured here, once, for the whole server.
+_log_level = deployment_config().LOG_LEVEL
+logging.basicConfig(level=_log_level)
+# httpx logs the URL of each request at INFO. A URL can hold words from a
+# user's query, such as the term of a Snowstorm search, so it is logged only
+# at DEBUG.
+if _log_level == "INFO":
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
 _domain = get_domain(deployment_config().DEPLOYMENT_TYPE)
 

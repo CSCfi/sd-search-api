@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -89,7 +89,7 @@ async def test_the_cache_follows_what_has_been_synced(monkeypatch):
         assert beacon.calls == [], "counted an index no load has reached"
 
         # Changes to refresh (_max_synced_at is not None).
-        synced_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        synced_at = datetime(2026, 1, 1, tzinfo=UTC)
         await asyncio.sleep(0.05)
         assert beacon.calls, "did not fill after documents were synced"
 
@@ -99,7 +99,7 @@ async def test_the_cache_follows_what_has_been_synced(monkeypatch):
         assert beacon.calls == [], "refilled while nothing was synced"
 
         # Changes to refresh (_max_synced_at moved).
-        synced_at = datetime(2026, 1, 2, tzinfo=timezone.utc)
+        synced_at = datetime(2026, 1, 2, tzinfo=UTC)
         await asyncio.sleep(0.05)
         assert beacon.calls, "did not refill after a later sync"
     finally:

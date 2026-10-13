@@ -10,9 +10,9 @@ from typing import override
 
 from fsspec.implementations.zip import ZipFileSystem  # type: ignore
 
-from search_api.conf import sd_submit_sync_config
 from search_api.api.bigpicture.extract.document import extract_dataset_documents
 from search_api.api.opensearch.models import ExtractedDocument
+from search_api.conf import sd_submit_sync_config
 from search_api.exceptions import UserException
 from search_api.services.fetch import (
     DocumentSource,
@@ -20,6 +20,8 @@ from search_api.services.fetch import (
     SourceDocuments,
 )
 from search_api.utils.token import sign_service_token
+
+logger = logging.getLogger(__name__)
 
 
 def _extract_archive(archive: bytes) -> Iterator[ExtractedDocument]:
@@ -80,7 +82,7 @@ class BigpictureRemoteSource(DocumentSource):
         )
         async with SdSubmitFetchClient(config.SD_SUBMIT_API_URL, token) as client:
             submissions = await client.get_published_submissions(published_since)
-            logging.info(
+            logger.info(
                 "%d submission(s) published %s.",
                 len(submissions),
                 f"since {published_since.isoformat()}"
@@ -99,14 +101,13 @@ class BigpictureRemoteSource(DocumentSource):
                         for document in _extract_archive(archive)
                     ]
                 except Exception:
-                    logging.error(
+                    logger.exception(
                         "Failed to extract documents from submission %s.",
                         submission.submission_id,
-                        exc_info=True,
                     )
                     raise
 
-                logging.info(
+                logger.info(
                     "Fetched submission %s with %d document(s).",
                     submission.submission_id,
                     len(documents),

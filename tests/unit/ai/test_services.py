@@ -58,7 +58,6 @@ from search_api.services.ontology.cache.models import (
 from search_api.services.ontology.cache.service import CachedOntologyService
 from search_api.services.ontology.cache.store import OntologyCacheStore
 
-
 # Test data and mocks.
 #
 
@@ -473,9 +472,11 @@ async def test_interpret_times_out(monkeypatch, ontology, beacon_service):
         await asyncio.sleep(1)
         return ModelResponse(parts=[TextPart("too late")])
 
-    with ai_service._agent.override(model=FunctionModel(respond)):
-        with pytest.raises(SystemException):
-            await ai_service.interpret("anything", beacon_service, TERM_CACHES)
+    with (
+        ai_service._agent.override(model=FunctionModel(respond)),
+        pytest.raises(SystemException),
+    ):
+        await ai_service.interpret("anything", beacon_service, TERM_CACHES)
 
 
 def test_ai_service_rejects_fields_sharing_a_label():
@@ -592,9 +593,11 @@ async def test_interpret_raises_system_exception_when_model_fails(
     ai_service, beacon_service, error
 ):
     # interpret fails with a SystemException, which the route turns into a 503.
-    with ai_service._agent.override(model=_model_answering(error)):
-        with pytest.raises(SystemException):
-            await ai_service.interpret("anything", beacon_service, TERM_CACHES)
+    with (
+        ai_service._agent.override(model=_model_answering(error)),
+        pytest.raises(SystemException),
+    ):
+        await ai_service.interpret("anything", beacon_service, TERM_CACHES)
 
 
 # Test interpret: the current filters the query edits.
@@ -1047,9 +1050,11 @@ async def test_interpret_logs_conversation(ai_service, beacon_service, caplog):
         [{"field": LABEL_DIAGNOSIS, "value": PREFERRED_TERM_DUCTAL_CARCINOMA}],
         find={"field": LABEL_DIAGNOSIS, "text": "ductal"},
     )
-    with caplog.at_level("DEBUG", logger="search_api.ai.services"):
-        with ai_service._agent.override(model=llm.model):
-            await ai_service.interpret("ductal", beacon_service, TERM_CACHES)
+    with (
+        caplog.at_level("DEBUG", logger="search_api.ai.services"),
+        ai_service._agent.override(model=llm.model),
+    ):
+        await ai_service.interpret("ductal", beacon_service, TERM_CACHES)
     assert "AI conversation for the query 'ductal'" in caplog.text
     assert "- model was told: There are no current filters." in caplog.text
     assert (
@@ -1087,8 +1092,10 @@ async def test_interpret_logs_conversation_without_valid_answer(
 ):
     # The conversation is logged when the model gives no valid answer too,
     # which is when it matters most.
-    with caplog.at_level("DEBUG", logger="search_api.ai.services"):
-        with ai_service._agent.override(model=_model_answering(answer)):
-            await ai_service.interpret("anything", beacon_service, TERM_CACHES)
+    with (
+        caplog.at_level("DEBUG", logger="search_api.ai.services"),
+        ai_service._agent.override(model=_model_answering(answer)),
+    ):
+        await ai_service.interpret("anything", beacon_service, TERM_CACHES)
     assert answer_logged in caplog.text
     assert correction_logged in caplog.text

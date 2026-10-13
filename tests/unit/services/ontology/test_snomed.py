@@ -1,8 +1,9 @@
 """Unit tests for SNOMED OntologyService hooks called by ``prepare_ontology_filter`` template method."""
 
-import pytest
 from typing import NamedTuple
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from search_api.api.bigpicture.models import BP_FILTERING_TERM_BY_ID
 from search_api.exceptions import SystemException
@@ -255,9 +256,9 @@ async def test_import_snomed_release(tmp_path):
     with (
         patch.object(snomed_module, "_client", return_value=client),
         patch.object(snomed_module, "_snowstorm_url", return_value=MOCK_SNOWSTORM_URL),
+        pytest.raises(SystemException),
     ):
-        with pytest.raises(SystemException):
-            await import_snomed_release(release_file)
+        await import_snomed_release(release_file)
 
 
 def _mock_fetch_concept(concept_id: str, active: bool, **associations) -> dict:

@@ -4,6 +4,7 @@ import logging
 
 import httpx
 import pytest
+
 from search_api.api.beacon.models import BeaconQueryFilter
 from search_api.api.bigpicture.models import BP_FILTERING_TERM_BY_ID
 from search_api.services.ontology.snomed import (

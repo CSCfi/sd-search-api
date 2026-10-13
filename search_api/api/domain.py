@@ -6,33 +6,32 @@ from typing import Any
 
 from fastapi import FastAPI
 
+# Imported for its side effects: populates the ontology service and term cache
+# registries that this module looks up below.
+import search_api.services.ontology.registrations  # noqa: F401
 from search_api.api.beacon.models import (
     BeaconFilteringScope,
     BeaconResultSetsResponse,
 )
 from search_api.api.beacon.services import BeaconQueryService, BeaconService
-from search_api.services.fetch import DocumentSource
+from search_api.api.opensearch.client import create_search
 from search_api.api.opensearch.models import (
     OpenSearchBeaconFilteringTerm,
     OpenSearchField,
 )
-from search_api.api.opensearch.client import create_search
+from search_api.api.scopes import scope_field
 from search_api.conf import cache_config
 from search_api.database.repository import close_pool, open_pool
-from search_api.api.scopes import scope_field
+from search_api.services.fetch import DocumentSource
 from search_api.services.ontology.service import (
     get_ontology_id_by_field,
     get_ontology_service,
 )
-from search_api.services.value_counts import ValueCountsUpdater
 from search_api.services.ontology.term_cache import (
     OntologyTermCache,
     create_term_caches,
 )
-
-# Imported for its side effects: populates the ontology service and term cache
-# registries that this module looks up below.
-import search_api.services.ontology.registrations  # noqa: F401
+from search_api.services.value_counts import ValueCountsUpdater
 
 
 @dataclass(frozen=True)

@@ -149,7 +149,7 @@ class AIConfiguration(BaseSettings):
     )
 
     @model_validator(mode="after")
-    def validate_openai_settings(self) -> "AIConfiguration":
+    def validate_openai_settings(self) -> AIConfiguration:
         if self.LLM_PROVIDER == "openai" and not (
             self.LLM_BASE_URL and self.LLM_API_KEY
         ):

@@ -10,7 +10,6 @@ from nacl.public import PrivateKey
 
 from search_api.utils.crypt import load_c4gh_keys, read_file, resolve_path
 
-
 # resolve_path
 #
 

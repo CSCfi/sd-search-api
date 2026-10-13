@@ -2,10 +2,10 @@ import pytest
 from pydantic import ValidationError
 
 from search_api.api.beacon.models import (
-    BeaconFilteringTerm,
-    BeaconFilteringOntology,
-    OntologyRestriction,
     SNOMED_ONTOLOGY_ID,
+    BeaconFilteringOntology,
+    BeaconFilteringTerm,
+    OntologyRestriction,
 )
 
 SNOMED_ONTOLOGY = BeaconFilteringOntology(id=SNOMED_ONTOLOGY_ID)

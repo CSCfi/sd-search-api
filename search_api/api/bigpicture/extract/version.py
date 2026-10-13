@@ -4,7 +4,7 @@ import re
 from enum import StrEnum
 from pathlib import Path
 
-from lxml.etree import _ElementTree as ElementTree  # noqa
+from lxml.etree import _ElementTree as ElementTree
 
 from search_api.exceptions import UserException
 from search_api.utils.xml import get_xml_value

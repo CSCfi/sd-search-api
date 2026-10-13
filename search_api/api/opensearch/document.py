@@ -1,11 +1,11 @@
 from typing import Any
 
+from search_api.api.opensearch.clauses import iso8601_duration_to_days
 from search_api.api.opensearch.models import (
     ExtractedDocument,
     OpenSearchFieldValue,
     OpenSearchGroup,
 )
-from search_api.api.opensearch.clauses import iso8601_duration_to_days
 from search_api.api.scopes import SCOPE_FIELD
 
 

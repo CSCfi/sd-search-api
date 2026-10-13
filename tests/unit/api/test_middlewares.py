@@ -14,7 +14,6 @@ import pytest
 from search_api.api.middlewares import AuthMiddleware
 from search_api.services.session import create_jwt_token
 
-
 PROTECTED_PATH = "/protected"
 
 

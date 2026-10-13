@@ -3,19 +3,12 @@ from pathlib import Path
 from typing import cast, get_args
 
 from search_api.api.beacon.models import (
-    BeaconQueryRequest,
     BeaconQuery,
-    BeaconQueryGranularity,
     BeaconQueryFilter,
-)
-from search_api.api.bigpicture.models import (
-    BP_FILTERING_TERMS,
-    BP_FILTERING_TERMS_RESPONSE,
-    BP_INFO_RESPONSE,
+    BeaconQueryGranularity,
+    BeaconQueryRequest,
 )
 from search_api.api.bigpicture.domain import BP_DOMAIN
-from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorService
-from search_api.api.opensearch.models import OpenSearchOntologyOrValue
 from search_api.api.bigpicture.extract.models import (
     BigpictureCodeAttributeValue,
     BigpictureFields,
@@ -23,6 +16,13 @@ from search_api.api.bigpicture.extract.models import (
     BigpictureSpecimenFields,
     BigpictureStainingFields,
 )
+from search_api.api.bigpicture.models import (
+    BP_FILTERING_TERMS,
+    BP_FILTERING_TERMS_RESPONSE,
+    BP_INFO_RESPONSE,
+)
+from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorService
+from search_api.api.opensearch.models import OpenSearchOntologyOrValue
 from search_api.services.validate import validate_json
 
 # Map each OpenSearch nested group to the model that holds its fields.

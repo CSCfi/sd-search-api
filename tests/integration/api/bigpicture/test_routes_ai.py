@@ -17,7 +17,7 @@ requires_feature_ai = pytest.mark.skipif(
 
 # Longer than the server's LLM_TIMEOUT. A model that is too slow then fails the
 # test with a 503, not with a client timeout.
-_TIMEOUT = float(os.environ.get("LLM_TIMEOUT", 60)) + 30
+_TIMEOUT = float(os.environ.get("LLM_TIMEOUT", "60")) + 30
 
 
 @pytest.fixture(scope="module")

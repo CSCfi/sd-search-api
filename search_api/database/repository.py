@@ -7,8 +7,9 @@ If the pool is not open, connections are made directly.
 """
 
 import logging
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any, AsyncGenerator
+from typing import Any
 
 from psycopg import AsyncConnection, AsyncCursor
 from psycopg.rows import tuple_row
@@ -91,7 +92,7 @@ async def close_pool() -> None:
 
 
 @asynccontextmanager
-async def get_connection() -> AsyncGenerator[AsyncConnection, None]:
+async def get_connection() -> AsyncGenerator[AsyncConnection]:
     """
     Get a database connection, from the pool if one is open.
 
@@ -111,15 +112,14 @@ async def get_connection() -> AsyncGenerator[AsyncConnection, None]:
 
 
 @asynccontextmanager
-async def get_cursor() -> AsyncGenerator[AsyncCursor, None]:
+async def get_cursor() -> AsyncGenerator[AsyncCursor]:
     """
     Get a new database cursor.
 
     :return: a new database cursor.
     """
-    async with get_connection() as con:
-        async with con.cursor(row_factory=tuple_row) as cur:
-            yield cur
+    async with get_connection() as con, con.cursor(row_factory=tuple_row) as cur:
+        yield cur
 
 
 async def is_healthy() -> bool:

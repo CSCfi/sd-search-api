@@ -3,8 +3,8 @@ from uuid import uuid4
 
 import pytest
 
-from search_api.database.repository import get_connection
 from search_api.database.ontology_cache import ONTOLOGY_CACHE_TABLE
+from search_api.database.repository import get_connection
 from search_api.services.ontology.cache.models import (
     CachedOntology,
     CachedOntologyConcept,
@@ -87,13 +87,12 @@ async def test_read_write_replace_and_ontology_isolation():
         assert other_by_id["C3"].synonyms == frozenset()
         assert other_by_id["C3"].parent_ids == frozenset()
     finally:
-        async with get_connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    f"DELETE FROM {ONTOLOGY_CACHE_TABLE} WHERE ontology_id = %s",
-                    (ontology_id,),
-                )
-                await cur.execute(
-                    f"DELETE FROM {ONTOLOGY_CACHE_TABLE} WHERE ontology_id = %s",
-                    (other_ontology_id,),
-                )
+        async with get_connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                f"DELETE FROM {ONTOLOGY_CACHE_TABLE} WHERE ontology_id = %s",
+                (ontology_id,),
+            )
+            await cur.execute(
+                f"DELETE FROM {ONTOLOGY_CACHE_TABLE} WHERE ontology_id = %s",
+                (other_ontology_id,),
+            )

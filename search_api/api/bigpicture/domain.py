@@ -3,32 +3,33 @@
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
+from search_api.api.bigpicture.ai import BP_AI_ASSISTANT_DESCRIPTION
+from search_api.api.bigpicture.extract.models import validate_observation_types
+from search_api.api.bigpicture.local import BigpictureLocalSource
 from search_api.api.bigpicture.models import (
     BP_BEACON_ID,
     BP_BEACON_NAME,
     BP_DOMAIN_NAME,
     BP_FILTERING_SCOPES,
-    BP_FILTERING_TERMS,
     BP_FILTERING_TERM_BY_ID,
+    BP_FILTERING_TERMS,
     BP_NON_FILTERING_FIELDS,
     BP_OPENSEARCH_INDEX,
     BP_SCHEMAS,
     BigpictureBeaconDatasetResultSetsResponse,
     BigpictureBeaconImageResultSetsResponse,
 )
-from search_api.api.bigpicture.ai import BP_AI_ASSISTANT_DESCRIPTION
 from search_api.api.bigpicture.opensearch import (
     BigpictureDatasetBeaconService,
     BigpictureImageBeaconService,
 )
+from search_api.api.bigpicture.remote import BigpictureRemoteSource
 from search_api.api.domain import BeaconQueryEndpoint, Domain
 from search_api.api.opensearch.beacon import OpenSearchBeaconService
-from search_api.api.bigpicture.extract.models import validate_observation_types
-from search_api.api.bigpicture.local import BigpictureLocalSource
-from search_api.api.bigpicture.remote import BigpictureRemoteSource
 from search_api.conf import sd_submit_sync_config
 from search_api.utils.token import public_key_jwk
-from pydantic import ValidationError
 
 # Validate fields.yaml observation_type configuration against extract
 # models.

@@ -1,6 +1,7 @@
-import pytest
-import fsspec
 from pathlib import Path
+
+import fsspec
+import pytest
 
 from search_api.utils.dir import list_directories
 

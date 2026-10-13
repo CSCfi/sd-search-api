@@ -1,7 +1,7 @@
 from search_api.api.beacon.models import (
+    SNOMED_ONTOLOGY_ID,
     BeaconFilteringOntology,
     OntologyRestriction,
-    SNOMED_ONTOLOGY_ID,
 )
 from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorService
 from search_api.api.opensearch.models import (

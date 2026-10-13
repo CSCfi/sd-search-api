@@ -19,7 +19,6 @@ from jwt import jwks_client
 from jwt.algorithms import ECAlgorithm, RSAAlgorithm
 
 import search_api.services.access_token as access_token_module
-
 from search_api.exceptions import SystemException
 from search_api.services.access_token import (
     AccessTokenValidator,

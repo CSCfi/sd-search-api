@@ -14,22 +14,22 @@ import pytest_asyncio
 
 from search_api.api.beacon.models import BeaconQueryFilter
 from search_api.api.beacon.services import BeaconQueryService, BeaconService
+from search_api.api.bigpicture import opensearch as bp_opensearch
 from search_api.api.bigpicture.models import (
     BP_FILTERING_SCOPES,
     BP_FILTERING_TERMS,
     BigpictureBeaconDatasetResult,
     BigpictureBeaconImageResult,
 )
-from search_api.api.bigpicture import opensearch as bp_opensearch
 from search_api.api.bigpicture.opensearch import (
     BigpictureDatasetBeaconService,
     BigpictureImageBeaconService,
 )
-from search_api.api.opensearch.models import OpenSearchBeaconFilteringTerm
 from search_api.api.opensearch import keywords
 from search_api.api.opensearch.clauses import build_match_clause
 from search_api.api.opensearch.index import create_index, index_documents
 from search_api.api.opensearch.keywords import fetch_indexed_keywords
+from search_api.api.opensearch.models import OpenSearchBeaconFilteringTerm
 from search_api.api.opensearch.search import iter_paged_buckets, iter_paged_documents
 from tests.integration.conftest import bp_search
 

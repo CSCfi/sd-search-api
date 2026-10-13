@@ -39,7 +39,6 @@ from search_api.services.field_values import get_field_suggestions, get_field_va
 from search_api.services.ontology.service import get_ontology_service
 from search_api.services.ontology.term_cache import OntologyTermCache
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -164,7 +163,7 @@ def validate_filters(
                 try:
                     for duration in value.split("-", 1):
                         iso8601_duration_to_days(duration)
-                except Exception:
+                except Exception:  # noqa: BLE001
                     errors.append(
                         f"Field '{term.label}' value '{value}' is not an ISO-8601 "
                         "duration or range, such as P40Y or P40Y-P60Y."

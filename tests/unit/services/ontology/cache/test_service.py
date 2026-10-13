@@ -1,6 +1,6 @@
 import asyncio
 from collections.abc import Sequence
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -94,7 +94,7 @@ class MockStore:
     async def write(self, fetched: CachedOntology) -> None:
         self.write_count += 1
         self.stored = fetched
-        self.stored_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        self.stored_at = datetime(2026, 1, 1, tzinfo=UTC)
 
     async def updated_at(self) -> datetime | None:
         return self.stored_at
@@ -311,7 +311,7 @@ async def test_reloads_when_another_process_writes_the_store():
 
     # Another process replaced the stored ontology.
     store.stored = cached_ontology(V2_CONCEPTS, version="v2", sha256="hash2")
-    store.stored_at = datetime(2026, 2, 1, tzinfo=timezone.utc)
+    store.stored_at = datetime(2026, 2, 1, tzinfo=UTC)
 
     await service.start()
     try:

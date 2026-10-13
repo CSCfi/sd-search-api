@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import IO, cast
 
 from lxml import etree
-from lxml.etree import _Element as Element  # noqa
-from lxml.etree import _ElementTree as ElementTree  # noqa
+from lxml.etree import _Element as Element
+from lxml.etree import _ElementTree as ElementTree
 
 _xml_schema_cache: dict[str, etree.XMLSchema] = {}
 
@@ -83,10 +83,7 @@ def get_xml_value(
     :param field_name: If provided, used in error messages instead of the XPath expression.
     :return: The text or attribute value as a string, or None if optional and not found.
     """
-    try:
-        result = xml.xpath(path)
-    except Exception as e:
-        raise e
+    result = xml.xpath(path)
 
     field_name = field_name or f"XPath '{path}'"
 
@@ -112,7 +109,7 @@ def get_xml_value(
 
         return cast(str, value.text)
 
-    raise ValueError(f"{field_name} unexpected type: {type(value).__name__}")
+    raise TypeError(f"{field_name} unexpected type: {type(value).__name__}")
 
 
 def get_xml_values(
@@ -131,10 +128,7 @@ def get_xml_values(
     :param field_name: If provided, used in error messages instead of the XPath expression.
     :return: List of text/attribute values. Returns empty list if optional=True and no matches found.
     """
-    try:
-        results = xml.xpath(path)
-    except Exception as e:
-        raise e
+    results = xml.xpath(path)
 
     field_name = field_name or f"XPath '{path}'"
 
@@ -154,7 +148,7 @@ def get_xml_values(
             if value.text:
                 values.append(cast(str, value.text))
         else:
-            raise ValueError(f"{field_name} unexpected type: {type(value).__name__}")
+            raise TypeError(f"{field_name} unexpected type: {type(value).__name__}")
 
     if not values and not optional:
         raise ValueError(f"{field_name} not found.")

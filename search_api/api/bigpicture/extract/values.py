@@ -3,28 +3,28 @@ from collections.abc import Iterable
 from typing import Any, Literal, cast
 
 import isodate  # type: ignore[import-untyped]
-from lxml.etree import _Element as Element, _ElementTree as ElementTree  # noqa
+from lxml.etree import _Element as Element
+from lxml.etree import _ElementTree as ElementTree
 
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
 from search_api.api.bigpicture.extract.models import (
     BigpictureCodeAttributeValue,
+    BigpictureExtractedObject,
     BigpictureObservationFields,
     BigpictureSampleBiologicalBeingFields,
     BigpictureSampleBlockFields,
     BigpictureSampleSpecimenFields,
     BigpictureStainingFields,
-    BigpictureExtractedObject,
 )
 from search_api.api.bigpicture.extract.refs import object_ids
-from search_api.exceptions import UserException
-from search_api.services.ontology.send import SEND_ONTOLOGY_ID
 from search_api.api.extract_logs import (
     ExtractLog,
     invalid_duration_log,
     invalid_scheme_log,
     repeated_value_log,
 )
-
+from search_api.exceptions import UserException
+from search_api.services.ontology.send import SEND_ONTOLOGY_ID
 
 _UNCODED_SCHEME = "Other"
 

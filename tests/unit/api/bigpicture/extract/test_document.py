@@ -1,5 +1,5 @@
 import shutil
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -278,18 +278,18 @@ def mock_fs():
 def test_get_last_modification_time_mtime(mock_fs):
     """mtime as a UNIX timestamp (float) is converted to a UTC datetime."""
     ts = 1_700_000_000.0
-    expected = datetime.fromtimestamp(ts, tz=timezone.utc)
+    expected = datetime.fromtimestamp(ts, tz=UTC)
     fs = mock_fs({"/a": {"mtime": ts}})
 
     result = get_last_modification_time(fs, ["/a"])
 
     assert result == expected
-    assert result.tzinfo == timezone.utc
+    assert result.tzinfo == UTC
 
 
 def test_get_last_modification_time_last_modified(mock_fs):
     """last_modified as a tz-aware datetime is returned unchanged."""
-    dt = datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+    dt = datetime(2024, 1, 15, 12, 0, 0, tzinfo=UTC)
     fs = mock_fs({"/a": {"last_modified": dt}})
 
     result = get_last_modification_time(fs, ["/a"])
@@ -299,19 +299,19 @@ def test_get_last_modification_time_last_modified(mock_fs):
 
 def test_get_last_modification_time_LastModified(mock_fs):
     """LastModified (S3 key) as a naive datetime gets UTC attached."""
-    naive = datetime(2024, 6, 1, 8, 30, 0)
+    naive = datetime(2024, 6, 1, 8, 30, 0)  # noqa: DTZ001
     fs = mock_fs({"/a": {"LastModified": naive}})
 
     result = get_last_modification_time(fs, ["/a"])
 
-    assert result == naive.replace(tzinfo=timezone.utc)
-    assert result.tzinfo == timezone.utc
+    assert result == naive.replace(tzinfo=UTC)
+    assert result.tzinfo == UTC
 
 
 def test_get_last_modification_time_returns_max(mock_fs):
     """The newest mtime across multiple paths is returned."""
-    older = datetime(2023, 1, 1, tzinfo=timezone.utc)
-    newer = datetime(2024, 6, 1, tzinfo=timezone.utc)
+    older = datetime(2023, 1, 1, tzinfo=UTC)
+    newer = datetime(2024, 6, 1, tzinfo=UTC)
     fs = mock_fs({"/a": {"mtime": older}, "/b": {"mtime": newer}})
 
     result = get_last_modification_time(fs, ["/a", "/b"])

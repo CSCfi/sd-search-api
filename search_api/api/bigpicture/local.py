@@ -17,6 +17,8 @@ from search_api.services.fetch import DocumentSource, SourceDocuments
 from search_api.utils.crypt import load_c4gh_keys
 from search_api.utils.dir import list_directories
 
+logger = logging.getLogger(__name__)
+
 # What makes a directory a dataset directory rather than a parent of them.
 _DATASET_FILE = "METADATA/dataset.xml"
 
@@ -89,20 +91,19 @@ class BigpictureLocalSource(DocumentSource):
 
         for directory, modified_at in sorted_dirs:
             if modified_since is not None and modified_at <= modified_since:
-                logging.info("Skipping dataset %s already loaded.", directory)
+                logger.info("Skipping dataset %s already loaded.", directory)
                 continue
 
             try:
                 documents = list(extract_dataset_documents(directory, fs, keys))
             except Exception:
-                logging.error(
+                logger.exception(
                     "Failed to extract documents from dataset %s.",
                     directory,
-                    exc_info=True,
                 )
                 raise
 
-            logging.info(
+            logger.info(
                 "Read dataset %s with %d document(s).", directory, len(documents)
             )
             yield SourceDocuments(marker=modified_at.isoformat(), documents=documents)

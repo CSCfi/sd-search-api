@@ -1,13 +1,14 @@
 from io import BytesIO
 from pathlib import Path
-from lxml import etree
+
 import pytest
+from lxml import etree
 
 from search_api.utils.xml import (
-    parse_xml,
-    validate_xml,
     get_xml_value,
     get_xml_values,
+    parse_xml,
+    validate_xml,
 )
 
 

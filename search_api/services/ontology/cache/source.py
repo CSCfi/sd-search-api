@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+
 from search_api.services.ontology.cache.models import CachedOntology
 
 

@@ -1,18 +1,18 @@
 import pytest
 
 from search_api.api.beacon.models import BeaconQueryFilter
-from search_api.exceptions import UserException
-from search_api.api.opensearch.beacon import (
-    OpenSearchQueryBeaconService,
-    build_filtering_term_clause,
-)
 from search_api.api.bigpicture.models import (
     BP_FILTERING_SCOPES,
     BP_FILTERING_TERMS,
 )
 from search_api.api.bigpicture.opensearch import BigpictureDatasetBeaconService
 from search_api.api.models import ValueCounts, ValueCountsKey
+from search_api.api.opensearch.beacon import (
+    OpenSearchQueryBeaconService,
+    build_filtering_term_clause,
+)
 from search_api.api.opensearch.models import ONTOLOGY_OTHER_VALUE_FIELD_SUFFIX
+from search_api.exceptions import UserException
 
 
 def get_term(field_id: str):

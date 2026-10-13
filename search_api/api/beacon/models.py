@@ -1,6 +1,8 @@
+from collections.abc import Sequence
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.json_schema import SkipJsonSchema
-from typing import Generic, Literal, Sequence, TypeVar
 
 BEACON_API_VERSION = "v2.0"
 BEACON_ORGANISATION_ID = "fi.csc"
@@ -117,11 +119,8 @@ class BeaconResultSetResult(BaseModel):
     """Beacon V2 result sets result. Schema is deployment-specific."""
 
 
-R = TypeVar("R", bound=BeaconResultSetResult)
-
-
 # https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/responses/sections/beaconResultsets.json
-class BeaconResultSet(BaseModel, Generic[R]):
+class BeaconResultSet[R: BeaconResultSetResult](BaseModel):
     """Beacon V2 result set. Parameterise with the deployment-specific result type."""
 
     id: str
@@ -131,14 +130,14 @@ class BeaconResultSet(BaseModel, Generic[R]):
 
 
 # https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/responses/sections/beaconResultsets.json
-class BeaconResultSets(BaseModel, Generic[R]):
+class BeaconResultSets[R: BeaconResultSetResult](BaseModel):
     """Beacon V2 result sets response. Parameterise with the deployment-specific result type."""
 
     resultSet: list[BeaconResultSet[R]] = Field(default_factory=list)
 
 
 # https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/responses/beaconResultsetsResponse.json
-class BeaconResultSetsResponse(BaseModel, Generic[R]):
+class BeaconResultSetsResponse[R: BeaconResultSetResult](BaseModel):
     """Beacon V2 result sets response. Subclass and pin R to the deployment-specific result type."""
 
     meta: BeaconResponseMeta

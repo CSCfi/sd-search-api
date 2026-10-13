@@ -419,35 +419,33 @@ async def snomed_terms(client: httpx.Client):
     """Initialise database SNOMED preferred terms cache."""
 
     # Insert values to database SNOMED preferred terms cache.
-    async with get_connection() as conn:
-        async with conn.cursor() as cur:
-            await cur.executemany(
-                f"INSERT INTO {TERMS_CACHE_TABLE} "
-                "(ontology_id, concept_id, field_id, preferred_term, updated_at)"
-                " VALUES (%s, %s, %s, %s, now())"
-                " ON CONFLICT (ontology_id, concept_id, field_id) DO UPDATE"
-                " SET preferred_term = EXCLUDED.preferred_term, updated_at = now()",
-                [
-                    (SNOMED_ONTOLOGY_ID, concept_id, field_id, term)
-                    for concept_id, field_id, term in SNOMED_TERMS
-                ],
-            )
+    async with get_connection() as conn, conn.cursor() as cur:
+        await cur.executemany(
+            f"INSERT INTO {TERMS_CACHE_TABLE} "
+            "(ontology_id, concept_id, field_id, preferred_term, updated_at)"
+            " VALUES (%s, %s, %s, %s, now())"
+            " ON CONFLICT (ontology_id, concept_id, field_id) DO UPDATE"
+            " SET preferred_term = EXCLUDED.preferred_term, updated_at = now()",
+            [
+                (SNOMED_ONTOLOGY_ID, concept_id, field_id, term)
+                for concept_id, field_id, term in SNOMED_TERMS
+            ],
+        )
 
     _reload_caches(client)
 
     yield
 
     # Delete values from the database SNOMED preferred terms cache.
-    async with get_connection() as conn:
-        async with conn.cursor() as cur:
-            await cur.executemany(
-                f"DELETE FROM {TERMS_CACHE_TABLE} "
-                "WHERE ontology_id = %s AND concept_id = %s AND field_id = %s",
-                [
-                    (SNOMED_ONTOLOGY_ID, concept_id, field_id)
-                    for concept_id, field_id, _ in SNOMED_TERMS
-                ],
-            )
+    async with get_connection() as conn, conn.cursor() as cur:
+        await cur.executemany(
+            f"DELETE FROM {TERMS_CACHE_TABLE} "
+            "WHERE ontology_id = %s AND concept_id = %s AND field_id = %s",
+            [
+                (SNOMED_ONTOLOGY_ID, concept_id, field_id)
+                for concept_id, field_id, _ in SNOMED_TERMS
+            ],
+        )
 
 
 def get_filters(

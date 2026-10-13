@@ -2,7 +2,7 @@
 
 import os
 from base64 import b64encode
-from datetime import timedelta
+from datetime import UTC, timedelta
 
 import jwt
 import pytest
@@ -85,12 +85,12 @@ def test_validate_jwt_token_missing_exp_raises():
 
 
 def test_validate_jwt_token_missing_sub_raises():
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from search_api.conf import jwt_config
 
     cfg = jwt_config()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     token = jwt.encode(
         {"iss": cfg.JWT_ISSUER, "exp": now + timedelta(days=1)},
         cfg.JWT_KEY,

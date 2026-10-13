@@ -2,33 +2,12 @@ import pytest
 from lxml import etree
 from lxml.etree import (
     _Element as Element,
+)
+from lxml.etree import (
     _ElementTree as ElementTree,
 )
 
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
-from search_api.api.bigpicture.extract.values import (
-    _FIELD_ID_BY_XML_TAG,
-    _XML_TAG_BY_FIELD_ID,
-    _field_id,
-    _xml_tag,
-    extract_sample_biological_being_fields,
-    extract_sample_block_fields,
-    extract_sample_specimen_fields,
-    extract_diagnoses,
-    extract_finding,
-    extract_scope,
-    extract_staining_fields,
-    _extract_iso8601_duration,
-    _extract_age_at_extraction,
-    _extract_anatomical_sites,
-    _extract_code_attribute_value,
-    _extract_code_attribute_values,
-    _extract_fixation_type,
-    _extract_string_attribute_value,
-    _filter_values_by_scheme,
-    _matches_scheme,
-    _filter_value_by_scheme,
-)
 from search_api.api.bigpicture.extract.models import (
     BigpictureCodeAttributeValue,
     BigpictureSampleBiologicalBeingFields,
@@ -36,14 +15,37 @@ from search_api.api.bigpicture.extract.models import (
     BigpictureSampleSpecimenFields,
     ObjectIds,
 )
-from search_api.exceptions import UserException
-from search_api.services.ontology.send import SEND_ONTOLOGY_ID
+from search_api.api.bigpicture.extract.values import (
+    _FIELD_ID_BY_XML_TAG,
+    _XML_TAG_BY_FIELD_ID,
+    _extract_age_at_extraction,
+    _extract_anatomical_sites,
+    _extract_code_attribute_value,
+    _extract_code_attribute_values,
+    _extract_fixation_type,
+    _extract_iso8601_duration,
+    _extract_string_attribute_value,
+    _field_id,
+    _filter_value_by_scheme,
+    _filter_values_by_scheme,
+    _matches_scheme,
+    _xml_tag,
+    extract_diagnoses,
+    extract_finding,
+    extract_sample_biological_being_fields,
+    extract_sample_block_fields,
+    extract_sample_specimen_fields,
+    extract_scope,
+    extract_staining_fields,
+)
 from search_api.api.extract_logs import (
     ExtractLog,
     invalid_duration_log,
     invalid_scheme_log,
     repeated_value_log,
 )
+from search_api.exceptions import UserException
+from search_api.services.ontology.send import SEND_ONTOLOGY_ID
 
 
 def _code(scheme: str | None) -> BigpictureCodeAttributeValue:

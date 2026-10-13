@@ -1,54 +1,52 @@
 import json
-from unittest.mock import ANY, AsyncMock
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import override
+from unittest.mock import ANY, AsyncMock
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from search_api.api.beacon import routes
 from search_api.api.beacon.models import (
     SNOMED_ONTOLOGY_ID,
-    BeaconQueryFilter,
-    BeaconQuery,
-    BeaconQueryRequest,
     BeaconBooleanResponse,
     BeaconCountResponse,
+    BeaconQuery,
+    BeaconQueryFilter,
+    BeaconQueryRequest,
     BeaconResultSet,
     BeaconResultSets,
 )
-from search_api.api.bigpicture.models import (
-    BigpictureBeaconDatasetResult,
-    BigpictureBeaconDatasetResultSetsResponse,
-    BigpictureBeaconImageResult,
-    BigpictureBeaconImageResultSetsResponse,
+from search_api.api.beacon.routes import (
+    get_beacon_query_services,
+    get_beacon_service,
+    get_ontology_term_services,
+    make_beacon_router,
 )
 from search_api.api.beacon.services import (
     BeaconQueryResult,
     BeaconQueryService,
     BeaconService,
 )
-from search_api.api.opensearch.models import (
-    OpenSearchBeaconFilteringTerm,
-    OpenSearchOntologyOrValue,
-)
+from search_api.api.bigpicture.domain import BP_DOMAIN
 from search_api.api.bigpicture.models import (
     BP_FILTERING_SCOPES,
     BP_FILTERING_TERM_BY_ID,
     BP_FILTERING_TERMS,
-    BP_INFO_RESPONSE,
     BP_FILTERING_TERMS_RESPONSE,
-)
-from search_api.api.bigpicture.domain import BP_DOMAIN
-from search_api.api.beacon import routes
-from search_api.api.beacon.routes import (
-    get_beacon_service,
-    get_beacon_query_services,
-    get_ontology_term_services,
-    make_beacon_router,
+    BP_INFO_RESPONSE,
+    BigpictureBeaconDatasetResult,
+    BigpictureBeaconDatasetResultSetsResponse,
+    BigpictureBeaconImageResult,
+    BigpictureBeaconImageResultSetsResponse,
 )
 from search_api.api.exception_handlers import register_exception_handlers
 from search_api.api.models import FieldValue, ValueCounts
+from search_api.api.opensearch.models import (
+    OpenSearchBeaconFilteringTerm,
+    OpenSearchOntologyOrValue,
+)
 
 app = FastAPI()
 app.include_router(make_beacon_router(BP_DOMAIN))
@@ -133,7 +131,9 @@ class MockBeaconImageService(BeaconQueryService[BigpictureBeaconImageResult]):
     async def query(
         self, filters, granularity="record", scope=None
     ) -> BeaconQueryResult[BigpictureBeaconImageResult]:
-        self.calls.append(dict(filters=filters, granularity=granularity, scope=scope))
+        self.calls.append(
+            {"filters": filters, "granularity": granularity, "scope": scope}
+        )
         return get_mock_image_query_result()
 
 
@@ -493,7 +493,7 @@ def test_filtering_term_rejects_a_scope_the_field_is_not_in(
     )
 
 
-_MOCK_LAST_INDEXED = datetime(2026, 8, 12, 9, 15, 22, tzinfo=timezone.utc)
+_MOCK_LAST_INDEXED = datetime(2026, 8, 12, 9, 15, 22, tzinfo=UTC)
 
 
 def _mock_status_database_calls(monkeypatch, pending_by_scope: dict[str, int]) -> None:

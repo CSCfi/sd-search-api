@@ -1,6 +1,6 @@
 import os
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import NamedTuple
 from unittest.mock import AsyncMock
 
@@ -9,8 +9,8 @@ import pytest_asyncio
 
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
 from search_api.database.repository import get_connection
-from search_api.services.ontology.snomed import SnomedService
 from search_api.database.terms_cache import TERMS_CACHE_TABLE, read_updated_at
+from search_api.services.ontology.snomed import SnomedService
 from search_api.services.ontology.term_cache import (
     OntologyTermCache,
 )
@@ -36,14 +36,13 @@ async def _stored_term(
     concept_id: str, field_id: str = _FIELD_ID
 ) -> _StoredTerm | None:
     """Return the row stored for (concept_id, field_id), or None if there is none."""
-    async with get_connection() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                f"SELECT preferred_term, updated_at FROM {TERMS_CACHE_TABLE} "
-                "WHERE ontology_id = %s AND concept_id = %s AND field_id = %s",
-                (SNOMED_ONTOLOGY_ID, concept_id, field_id),
-            )
-            row = await cur.fetchone()
+    async with get_connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            f"SELECT preferred_term, updated_at FROM {TERMS_CACHE_TABLE} "
+            "WHERE ontology_id = %s AND concept_id = %s AND field_id = %s",
+            (SNOMED_ONTOLOGY_ID, concept_id, field_id),
+        )
+        row = await cur.fetchone()
     return _StoredTerm(row[0], row[1]) if row else None
 
 
@@ -59,12 +58,11 @@ async def _clear_cache():
     concept_ids = list(CACHED_TERMS.keys())
 
     async def _delete() -> None:
-        async with get_connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    f"DELETE FROM {TERMS_CACHE_TABLE} WHERE concept_id = ANY(%s)",
-                    (concept_ids,),
-                )
+        async with get_connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                f"DELETE FROM {TERMS_CACHE_TABLE} WHERE concept_id = ANY(%s)",
+                (concept_ids,),
+            )
 
     await _delete()
     yield
@@ -73,17 +71,16 @@ async def _clear_cache():
 
 @pytest_asyncio.fixture
 async def fill_cache() -> OntologyTermCache:
-    async with get_connection() as conn:
-        async with conn.cursor() as cur:
-            await cur.executemany(
-                f"INSERT INTO {TERMS_CACHE_TABLE} "
-                "(ontology_id, concept_id, field_id, preferred_term, updated_at) "
-                "VALUES (%s, %s, %s, %s, now())",
-                [
-                    (SNOMED_ONTOLOGY_ID, cid, _FIELD_ID, term)
-                    for cid, term in CACHED_TERMS.items()
-                ],
-            )
+    async with get_connection() as conn, conn.cursor() as cur:
+        await cur.executemany(
+            f"INSERT INTO {TERMS_CACHE_TABLE} "
+            "(ontology_id, concept_id, field_id, preferred_term, updated_at) "
+            "VALUES (%s, %s, %s, %s, now())",
+            [
+                (SNOMED_ONTOLOGY_ID, cid, _FIELD_ID, term)
+                for cid, term in CACHED_TERMS.items()
+            ],
+        )
     service = _service()
     await service.load()
     return service
@@ -91,17 +88,16 @@ async def fill_cache() -> OntologyTermCache:
 
 @pytest.mark.asyncio
 async def test_load():
-    async with get_connection() as conn:
-        async with conn.cursor() as cur:
-            await cur.executemany(
-                f"INSERT INTO {TERMS_CACHE_TABLE} "
-                "(ontology_id, concept_id, field_id, preferred_term, updated_at) "
-                "VALUES (%s, %s, %s, %s, now())",
-                [
-                    (SNOMED_ONTOLOGY_ID, cid, _FIELD_ID, term)
-                    for cid, term in CACHED_TERMS.items()
-                ],
-            )
+    async with get_connection() as conn, conn.cursor() as cur:
+        await cur.executemany(
+            f"INSERT INTO {TERMS_CACHE_TABLE} "
+            "(ontology_id, concept_id, field_id, preferred_term, updated_at) "
+            "VALUES (%s, %s, %s, %s, now())",
+            [
+                (SNOMED_ONTOLOGY_ID, cid, _FIELD_ID, term)
+                for cid, term in CACHED_TERMS.items()
+            ],
+        )
 
     service = _service()
     assert await service.get_terms_by_concept_id(_FIELD_ID, set(CACHED_TERMS)) == {}
@@ -244,20 +240,19 @@ async def test_reloads_changes():
     extra_terms = {str(uuid.uuid4()): f"Term {i}" for i in range(extra_term_cnt)}
     all_concept_ids = list(initial_terms) + list(extra_terms)
 
-    initial_ts = datetime.now(timezone.utc) - timedelta(seconds=10)
+    initial_ts = datetime.now(UTC) - timedelta(seconds=10)
 
     try:
-        async with get_connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.executemany(
-                    f"INSERT INTO {TERMS_CACHE_TABLE} "
-                    "(ontology_id, concept_id, field_id, preferred_term, updated_at) "
-                    "VALUES (%s, %s, %s, %s, %s)",
-                    [
-                        (SNOMED_ONTOLOGY_ID, concept_id, _FIELD_ID, term, initial_ts)
-                        for concept_id, term in initial_terms.items()
-                    ],
-                )
+        async with get_connection() as conn, conn.cursor() as cur:
+            await cur.executemany(
+                f"INSERT INTO {TERMS_CACHE_TABLE} "
+                "(ontology_id, concept_id, field_id, preferred_term, updated_at) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                [
+                    (SNOMED_ONTOLOGY_ID, concept_id, _FIELD_ID, term, initial_ts)
+                    for concept_id, term in initial_terms.items()
+                ],
+            )
 
         service = _service()
         await service.load()
@@ -269,18 +264,17 @@ async def test_reloads_changes():
             == initial_terms
         )
 
-        future_ts = datetime.now(timezone.utc) + timedelta(seconds=10)
-        async with get_connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.executemany(
-                    f"INSERT INTO {TERMS_CACHE_TABLE} "
-                    "(ontology_id, concept_id, field_id, preferred_term, updated_at) "
-                    "VALUES (%s, %s, %s, %s, %s)",
-                    [
-                        (SNOMED_ONTOLOGY_ID, concept_id, _FIELD_ID, term, future_ts)
-                        for concept_id, term in extra_terms.items()
-                    ],
-                )
+        future_ts = datetime.now(UTC) + timedelta(seconds=10)
+        async with get_connection() as conn, conn.cursor() as cur:
+            await cur.executemany(
+                f"INSERT INTO {TERMS_CACHE_TABLE} "
+                "(ontology_id, concept_id, field_id, preferred_term, updated_at) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                [
+                    (SNOMED_ONTOLOGY_ID, concept_id, _FIELD_ID, term, future_ts)
+                    for concept_id, term in extra_terms.items()
+                ],
+            )
 
         # The extra rows changed updated_at, which is what a poll would notice.
         assert await read_updated_at(SNOMED_ONTOLOGY_ID) > stored_at
@@ -294,9 +288,8 @@ async def test_reloads_changes():
             == initial_terms | extra_terms
         )
     finally:
-        async with get_connection() as conn:
-            async with conn.cursor() as cur:
-                await cur.execute(
-                    f"DELETE FROM {TERMS_CACHE_TABLE} WHERE concept_id = ANY(%s)",
-                    (all_concept_ids,),
-                )
+        async with get_connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                f"DELETE FROM {TERMS_CACHE_TABLE} WHERE concept_id = ANY(%s)",
+                (all_concept_ids,),
+            )

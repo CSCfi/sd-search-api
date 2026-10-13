@@ -1,6 +1,6 @@
 """Session JWT issuance and validation for the OIDC relying party."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import jwt
@@ -14,7 +14,7 @@ def create_jwt_token(
     user_id: str, user_name: str, expiration: timedelta = JWT_EXPIRATION
 ) -> str:
     """Create a signed session JWT for the given user."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": user_id,
         "user_name": user_name,

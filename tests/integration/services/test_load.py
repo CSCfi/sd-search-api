@@ -11,9 +11,9 @@ from search_api.api.extract_logs import ExtractLog
 from search_api.api.opensearch.models import (
     ONTOLOGY_OTHER_VALUE_FIELD_SUFFIX,
     ExtractedDocument,
+    OpenSearchBeaconFilteringTerm,
     OpenSearchField,
     OpenSearchFieldType,
-    OpenSearchBeaconFilteringTerm,
     OpenSearchFieldValue,
 )
 from search_api.database.document import DOCUMENT_TABLE, get_document
@@ -21,9 +21,9 @@ from search_api.database.document_log import (
     DOCUMENT_LOG_TABLE,
     read_document_logs,
 )
+from search_api.database.models import StoredTerm
 from search_api.database.ontology_cache import ONTOLOGY_CACHE_TABLE
 from search_api.database.repository import get_cursor
-from search_api.database.models import StoredTerm
 from search_api.database.terms_cache import (
     TERMS_CACHE_TABLE,
     insert_terms,
@@ -308,8 +308,10 @@ async def test_load_invalid_concept_id(
     assert [(log.severity, log.message) for log in logs] == [
         (
             "WARNING",
-            f"The provided concept id '{provided_concept_id}' is invalid for "
-            f"field '{_FIELD_ID}' of ontology '{single_concept_ontology_id}'.",
+            (
+                f"The provided concept id '{provided_concept_id}' is invalid for "
+                f"field '{_FIELD_ID}' of ontology '{single_concept_ontology_id}'."
+            ),
         ),
         (
             "ERROR",
@@ -337,8 +339,10 @@ async def test_replace_concept_true(replacement_ontology_id, document_id):
     assert [(log.severity, log.message) for log in logs] == [
         (
             "WARNING",
-            f"Provided concept id '{_REPLACED_CONCEPT_ID}' was replaced by "
-            f"'{_REPLACEMENT_CONCEPT_ID}' for field '{_FIELD_ID}'.",
+            (
+                f"Provided concept id '{_REPLACED_CONCEPT_ID}' was replaced by "
+                f"'{_REPLACEMENT_CONCEPT_ID}' for field '{_FIELD_ID}'."
+            ),
         )
     ]
     # The replacement is cached.
@@ -388,13 +392,17 @@ async def test_resolve_concept_id_from_meaning(single_concept_ontology_id, docum
     assert [(log.severity, log.message) for log in logs] == [
         (
             "WARNING",
-            f"The provided concept id 'C404' is invalid for field '{_FIELD_ID}' "
-            f"of ontology '{single_concept_ontology_id}'.",
+            (
+                f"The provided concept id 'C404' is invalid for field '{_FIELD_ID}' "
+                f"of ontology '{single_concept_ontology_id}'."
+            ),
         ),
         (
             "WARNING",
-            f"Concept id '{_CONCEPT_ID}' was resolved from the provided textual "
-            f"concept value '{_PREFERRED_TERM.lower()}' for field '{_FIELD_ID}'.",
+            (
+                f"Concept id '{_CONCEPT_ID}' was resolved from the provided textual "
+                f"concept value '{_PREFERRED_TERM.lower()}' for field '{_FIELD_ID}'."
+            ),
         ),
     ]
     # Test cached preferred term.
@@ -423,14 +431,18 @@ async def test_resolve_multiple_concepts_id_from_meaning(
     assert [(log.severity, log.message) for log in logs] == [
         (
             "WARNING",
-            f"The provided concept id 'C404' is invalid for field '{_FIELD_ID}' "
-            f"of ontology '{shared_term_and_parent_ontology_id}'.",
+            (
+                f"The provided concept id 'C404' is invalid for field '{_FIELD_ID}' "
+                f"of ontology '{shared_term_and_parent_ontology_id}'."
+            ),
         ),
         (
             "ERROR",
-            f"Textual concept value '{_SHARED_PREFERRED_TERM}' resolves to several "
-            f"concept ids for field '{_FIELD_ID}': "
-            f"{_CHILD_CONCEPT_ID}, {_ORPHAN_CONCEPT_ID}.",
+            (
+                f"Textual concept value '{_SHARED_PREFERRED_TERM}' resolves to several "
+                f"concept ids for field '{_FIELD_ID}': "
+                f"{_CHILD_CONCEPT_ID}, {_ORPHAN_CONCEPT_ID}."
+            ),
         ),
         (
             "ERROR",
@@ -459,19 +471,25 @@ async def test_resolve_retired_concept_id_from_meaning(
     assert [(log.severity, log.message) for log in logs] == [
         (
             "WARNING",
-            f"The provided concept id 'C404' is invalid for field '{_FIELD_ID}' "
-            f"of ontology '{replacement_ontology_id}'.",
+            (
+                f"The provided concept id 'C404' is invalid for field '{_FIELD_ID}' "
+                f"of ontology '{replacement_ontology_id}'."
+            ),
         ),
         (
             "WARNING",
-            f"Concept id '{_REPLACED_CONCEPT_ID}' was resolved from the provided "
-            f"textual concept value '{_REPLACED_PREFERRED_TERM}' "
-            f"for field '{_FIELD_ID}'.",
+            (
+                f"Concept id '{_REPLACED_CONCEPT_ID}' was resolved from the provided "
+                f"textual concept value '{_REPLACED_PREFERRED_TERM}' "
+                f"for field '{_FIELD_ID}'."
+            ),
         ),
         (
             "WARNING",
-            f"Provided concept id '{_REPLACED_CONCEPT_ID}' was replaced by "
-            f"'{_REPLACEMENT_CONCEPT_ID}' for field '{_FIELD_ID}'.",
+            (
+                f"Provided concept id '{_REPLACED_CONCEPT_ID}' was replaced by "
+                f"'{_REPLACEMENT_CONCEPT_ID}' for field '{_FIELD_ID}'."
+            ),
         ),
     ]
 
@@ -541,8 +559,10 @@ async def test_ambiguous_meaning_resolved_by_restriction(
     assert [(log.severity, log.message) for log in logs] == [
         (
             "WARNING",
-            f"Concept id '{_CHILD_CONCEPT_ID}' was resolved from the provided "
-            f"textual concept value '{_SHARED_PREFERRED_TERM}' for field '{_FIELD_ID}'.",
+            (
+                f"Concept id '{_CHILD_CONCEPT_ID}' was resolved from the provided "
+                f"textual concept value '{_SHARED_PREFERRED_TERM}' for field '{_FIELD_ID}'."
+            ),
         )
     ]
 
@@ -567,8 +587,10 @@ async def test_provided_concept_id_outside_restriction(
     assert [(log.severity, log.message) for log in logs] == [
         (
             "ERROR",
-            f"Concept id '{_ORPHAN_CONCEPT_ID}' is not among the ontology "
-            f"'{shared_term_and_parent_ontology_id}' concepts allowed for field '{_FIELD_ID}'.",
+            (
+                f"Concept id '{_ORPHAN_CONCEPT_ID}' is not among the ontology "
+                f"'{shared_term_and_parent_ontology_id}' concepts allowed for field '{_FIELD_ID}'."
+            ),
         )
     ]
     assert await read_terms(shared_term_and_parent_ontology_id) == []
@@ -674,8 +696,10 @@ async def test_resolve_concept_id_from_free_text(
     assert [(log.severity, log.message) for log in logs] == [
         (
             "WARNING",
-            f"Concept id '{_CONCEPT_ID}' was resolved from the provided textual "
-            f"concept value '{_PREFERRED_TERM.lower()}' for field '{_FIELD_ID}'.",
+            (
+                f"Concept id '{_CONCEPT_ID}' was resolved from the provided textual "
+                f"concept value '{_PREFERRED_TERM.lower()}' for field '{_FIELD_ID}'."
+            ),
         )
     ]
     # read_terms reads the terms cache table. The load cached the concept's
@@ -723,8 +747,10 @@ async def test_resolve_multiple_concepts_id_from_free_text(
     assert [(log.severity, log.message) for log in logs] == [
         (
             "ERROR",
-            f"Textual concept value '{_SHARED_PREFERRED_TERM}' resolves to several "
-            f"concept ids for field '{_FIELD_ID}': "
-            f"{_CHILD_CONCEPT_ID}, {_ORPHAN_CONCEPT_ID}.",
+            (
+                f"Textual concept value '{_SHARED_PREFERRED_TERM}' resolves to several "
+                f"concept ids for field '{_FIELD_ID}': "
+                f"{_CHILD_CONCEPT_ID}, {_ORPHAN_CONCEPT_ID}."
+            ),
         )
     ]

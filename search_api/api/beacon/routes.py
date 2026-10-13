@@ -5,15 +5,13 @@ import os
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 
-from search_api.database.document import max_synced_at, pending_by_scope
-from search_api.database.repository import is_healthy as is_database_healthy
 from search_api.ai.models import AIInterpretation
 from search_api.ai.services import AIService
 from search_api.api.beacon.models import (
     BeaconBooleanResponse,
     BeaconCountResponse,
-    BeaconFilteringTerm,
     BeaconFilteringScope,
+    BeaconFilteringTerm,
     BeaconFilteringTerms,
     BeaconFilteringTermsResponse,
     BeaconInfo,
@@ -42,6 +40,8 @@ from search_api.api.models import (
     ScopedCounts,
 )
 from search_api.conf import feature_config
+from search_api.database.document import max_synced_at, pending_by_scope
+from search_api.database.repository import is_healthy as is_database_healthy
 from search_api.exceptions import SystemException, UserException
 from search_api.services.field_values import (
     get_field_suggestions,

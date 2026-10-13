@@ -69,7 +69,7 @@ class AuthMiddleware:
 
         try:
             user_id, _ = validate_jwt_token(token)
-        except Exception:
+        except Exception:  # noqa: BLE001
             # Anything that goes wrong validating token (a malformed/expired/tampered
             # JWT, or a config error reading JWT_KEY/JWT_ISSUER) must become a 401 here
             await _send_unauthorized(scope, receive, send)

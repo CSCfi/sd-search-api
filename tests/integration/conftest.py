@@ -11,10 +11,10 @@ import pytest_asyncio
 from dotenv import load_dotenv
 from opensearchpy import helpers
 
-load_dotenv(Path(__file__).parent / ".env")
-
 from search_api.api.opensearch.client import create_search
 from tests.integration.mockauth import MockAuthProvider
+
+load_dotenv(Path(__file__).parent / ".env")
 
 bp_search = create_search()
 

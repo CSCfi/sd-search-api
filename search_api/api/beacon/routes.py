@@ -283,6 +283,7 @@ def make_beacon_router(domain: Domain) -> APIRouter:
                 beacon_service,
                 ontology_term_services,
                 validate_scope(request.requestedScope),
+                request.filters,
             )
 
     if feature_config().FEATURE_AI:

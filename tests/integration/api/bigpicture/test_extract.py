@@ -20,19 +20,24 @@ from search_api.services.ontology.service import (
 )
 from search_api.services.ontology.term_cache import OntologyTermCache
 from search_api.api.bigpicture.local import BigpictureLocalSource
-from search_api.database.document import DOCUMENT_TABLE, get_document
+from search_api.database.document import get_document
 from search_api.database.repository import get_connection
 from search_api.services.load import LoadService
+
+from tests.integration.bigpicture import (
+    assert_dataset_images_stored,
+    delete_dataset_images,
+)
+from tests.utils.bigpicture import (
+    CLINICAL_2_0_DATASET_DIR,
+    CLINICAL_2_0_DATASET_ID,
+    CLINICAL_2_0_IMAGE_IDS,
+    VERSION_DIRS,
+)
 
 os.environ.setdefault("POSTGRES_DB", os.environ["BP_POSTGRES_DB"])
 os.environ.setdefault("POSTGRES_PORT", os.environ["BP_POSTGRES_PORT"])
 
-_XML_DIR = (
-    Path(__file__).resolve().parent.parent.parent.parent
-    / "files"
-    / "bigpicture"
-    / "xml"
-)
 _XML_METADATA_FILES = [
     "METADATA/dataset.xml",
     "METADATA/image.xml",
@@ -40,21 +45,6 @@ _XML_METADATA_FILES = [
     "METADATA/sample.xml",
     "METADATA/staining.xml",
 ]
-_CLINICAL_DATASET_DIR = "dataset_clinical"
-_CLINICAL_DATASET_ID = "bb-dataset-hy4m2v-9tq7cx"
-_CLINICAL_IMAGE_IDS = ["bb-image-k3n8pw-6dz2rj", "bb-image-q7v5tb-m4hs8n"]
-_NON_CLINICAL_DATASET_ID = "bb-dataset-w2j6fd-3npx7k"
-_NON_CLINICAL_IMAGE_IDS = ["bb-image-z9c4gs-7bqm2t", "bb-image-v6h3rn-8kwd5p"]
-
-_EXPECTED_DOCUMENTS = {
-    **{
-        image_id: (_CLINICAL_DATASET_ID, "clinical") for image_id in _CLINICAL_IMAGE_IDS
-    },
-    **{
-        image_id: (_NON_CLINICAL_DATASET_ID, "non_clinical")
-        for image_id in _NON_CLINICAL_IMAGE_IDS
-    },
-}
 
 
 async def _documents(root: str, c4gh_key_file: str | None = None) -> Iterator:
@@ -137,10 +127,7 @@ async def delete_images():
     async def _delete() -> None:
         async with get_connection() as conn:
             async with conn.cursor() as cur:
-                for image_id in _EXPECTED_DOCUMENTS:
-                    await cur.execute(
-                        f"DELETE FROM {DOCUMENT_TABLE} WHERE id = %s", (image_id,)
-                    )
+                await delete_dataset_images(cur)
 
     await _delete()
     yield
@@ -149,21 +136,18 @@ async def delete_images():
 
 @pytest.mark.asyncio
 async def test_extract_and_load_fields_plain():
-    """Both clinical and non-clinical datasets are extracted and loaded."""
-    await LoadService(
+    """Clinical and non-clinical datasets of every metadata standard version are loaded."""
+    load_service = LoadService(
         term_caches=_mock_term_caches(),
         filtering_terms=BP_DOMAIN.filtering_terms,
         filtering_scopes=BP_DOMAIN.filtering_scopes,
-    ).store_documents(await _documents(str(_XML_DIR)))
+    )
+    for version_dir in VERSION_DIRS:
+        await load_service.store_documents(await _documents(str(version_dir)))
 
     async with get_connection() as conn:
         async with conn.cursor() as cur:
-            for image_id, (dataset_id, scope) in _EXPECTED_DOCUMENTS.items():
-                payload = await get_document(cur, image_id)
-                assert payload is not None, f"{image_id!r} was not loaded"
-                assert payload["image_id"] == image_id
-                assert payload["dataset_id"] == dataset_id
-                assert payload["scope"] == scope
+            await assert_dataset_images_stored(cur)
 
 
 @pytest.mark.asyncio
@@ -178,10 +162,10 @@ async def test_extract_and_load_fields_c4gh(tmp_path):
     sender_sk = bytes(PrivateKey.generate())
 
     # Mirror the clinical dataset directory, replacing each XML with a .c4gh version.
-    metadata_dir = tmp_path / _CLINICAL_DATASET_DIR / "METADATA"
+    metadata_dir = tmp_path / CLINICAL_2_0_DATASET_DIR.name / "METADATA"
     metadata_dir.mkdir(parents=True)
     for xml_file in _XML_METADATA_FILES:
-        src = _XML_DIR / _CLINICAL_DATASET_DIR / xml_file
+        src = CLINICAL_2_0_DATASET_DIR / xml_file
         dst = metadata_dir / (Path(xml_file).name + ".c4gh")
         with dst.open("wb") as outfile:
             c4gh_encrypt(
@@ -198,8 +182,8 @@ async def test_extract_and_load_fields_c4gh(tmp_path):
 
     async with get_connection() as conn:
         async with conn.cursor() as cur:
-            for image_id in _CLINICAL_IMAGE_IDS:
+            for image_id in CLINICAL_2_0_IMAGE_IDS:
                 payload = await get_document(cur, image_id)
                 assert payload is not None, f"{image_id!r} was not loaded"
                 assert payload["image_id"] == image_id
-                assert payload["dataset_id"] == _CLINICAL_DATASET_ID
+                assert payload["dataset_id"] == CLINICAL_2_0_DATASET_ID

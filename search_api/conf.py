@@ -136,6 +136,17 @@ class AIConfiguration(BaseSettings):
     LLM_API_KEY: str | None = Field(
         default=None, description="LLM API key, for the 'openai' provider."
     )
+    LLM_MAX_TOKENS: int = Field(
+        default=1024,
+        gt=0,
+        description="The most tokens the model may generate in one reply.",
+    )
+    LLM_TIMEOUT: float = Field(
+        default=60,
+        gt=0,
+        description="Maximum amount of seconds the model may take to answer one query, all "
+        "tool calls and corrections included.",
+    )
 
     @model_validator(mode="after")
     def validate_openai_settings(self) -> "AIConfiguration":

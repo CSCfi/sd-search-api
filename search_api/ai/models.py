@@ -9,6 +9,10 @@ class AIInterpretation(BaseModel):
     """How the AI understood a query, and the filters it recommends for it."""
 
     interpretation: str
+    # Whether the query could be expressed as filters. If not then the input
+    # filters are returned unchanged.
+    answerable: bool
+    # Every filter in the query as understood by the AI.
     filters: list[BeaconQueryFilter]
 
 

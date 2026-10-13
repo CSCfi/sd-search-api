@@ -41,10 +41,10 @@ search_api/
 │   ├── {admin,auth,beacon,jwk,opensearch}/   # generic routers and services
 │   └── bigpicture/     # everything Bigpicture-specific, nowhere else:
 │       ├── domain.py models.py ai.py opensearch.py local.py remote.py   # its two DocumentSources
-│       ├── extract/    # XML in, one document per image out: models.py refs.py values.py document.py
+│       ├── extract/    # XML in, one document per image out: models.py refs.py values.py version.py document.py
 │       ├── config/     # hand-edited fields/scopes YAML
 │       ├── index/      # GENERATED mapping (`index generate` writes it)
-│       └── schemas/    # XSDs
+│       └── schemas/    # XSDs, one directory per metadata standard version (2.0/, 3.0/)
 ├── services/
 │   ├── ontology/       # service.py registrations.py snomed.py send.py term_cache.py values.py
 │   │   └── cache/      # one whole small ontology in memory
@@ -72,7 +72,10 @@ the **query-less** service behind `/status`, `/health`, `/values`, `/suggestions
 service because each has a different result shape. The `Domain`'s `ai_assistant_description` is the persona behind
 `POST /ai/filters` (only under `FEATURE_AI`). **The model only recommends filters**: the route returns the
 interpretation and the filters and runs no query, so the model never sees a record; the client shows the filters and
-the user runs them through `/datasets` or `/images`. **A keyword or ontology value must be in the index**, so a
+the user runs them through `/datasets` or `/images`. **A query may edit the current filters** sent with it, and the
+response gives every filter that results: the model gives only the filters it adds or changes, and a field with no
+value to remove its filter, and the code keeps the rest, so it cannot drop or alter them; `answerable` is `false`, with the current
+filters unchanged, when the query cannot be expressed as filters. **A keyword or ontology value must be in the index**, so a
 client can select it among `/values`: the model finds values with a `get_values(field_id, text,
 include_descendants)` tool (`ai/services.py`), built on the very code behind `/suggestions`
 (`services/field_values.py`), and its answer is checked against `/values` and sent back to correct otherwise. An
@@ -80,7 +83,7 @@ ontology value comes back as its concept id; a name the ontology knows the conce
 resolved as a query resolves it, and with `includeDescendantTerms` a broader concept is replaced by its listed
 descendants, since a client must be able to display every value. A `requestedScope` shows the model only the fields
 indexed for it, since a filter on any other field would constrain nothing there. A model that never gives a valid
-answer gets no filters and a fixed explanation, as for a query no filter can express, so a `503` means that the
+answer gets the current filters unchanged and a fixed explanation, as for a query no filter can express, so a `503` means that the
 model's server could not be reached or answered with an HTTP error, or that a store the model's tools read failed.
 `make_lifespan` builds one term cache per ontology into `app.state.ontology_term_services` and one `app.state.beacon_service`; routes must read **that** instance, since
 value counts are cached in a dict on it and filled in the background, so a per-request one would start empty.
@@ -121,7 +124,12 @@ out on `logs` and becomes `document_log` rows, replaced on every reload.
 (id, title, description), `image` (ids, slide mappings), `policy` (scope), `sample` (biological beings, cases,
 specimens, blocks), `staining`, and `observation` (diagnoses and findings, the only optional one).
 `dataset_files(fs, root)` resolves the same six paths alone (plain or `.c4gh`), so `local.py` can date a dataset
-without reading it. `scope` is the part of the policy's `type_of_dataset` before the `/`. Every `CODE_ATTRIBUTE`
+without reading it. **The dataset's `METADATA_STANDARD` picks the XML schemas** every one of the six files is
+validated against (`extract/version.py`, one `schemas/<version>/` directory per supported version), so it is read
+before anything is validated and an unsupported version is a `UserException`. Only validation is version-aware:
+3.0 adds `BIGPICTURE_NODE` and `LANDING_PAGE_REF` to the dataset, drops the observation's `ANNOTATION_REF` and
+restricts an image to one `IMAGE_OF`, none of which is indexed, so one extraction path serves both versions.
+`scope` is the part of the policy's `type_of_dataset` before the `/`. Every `CODE_ATTRIBUTE`
 contributes the pair `(CODE, MEANING)`, the meaning being the fallback when the code is no concept id; a value
 whose scheme is not the field's ontology is dropped with an error, and an **`ontologyOrValue`** field takes its
 code in precedence over free text, so `<id>_other` is filled only when no code was read. Fields and filtering
@@ -209,7 +217,7 @@ default would match on one word, far too broad given that results are never rank
 
 Settings (`conf.py`) are mostly **required** — no hardcoded host/db/password. Defaults: `POSTGRES_PORT=5432`,
 `POSTGRES_POOL_{MIN_SIZE=2,MAX_SIZE=10,MAX_LIFETIME=3600,TIMEOUT=5}`, `OPENSEARCH_PORT=9200`, `DEPLOYMENT_ENV=dev`, `LOG_LEVEL=INFO`,
-`{TERM,ONTOLOGY,VALUE_COUNT}_CACHE_REFRESH=300`, `FEATURE_AI=false`, `LLM_PROVIDER=openai`, `ADMIN_KEY=None`, `OIDC_SECURE_COOKIE=true`,
+`{TERM,ONTOLOGY,VALUE_COUNT}_CACHE_REFRESH=300`, `FEATURE_AI=false`, `LLM_PROVIDER=openai`, `LLM_MAX_TOKENS=1024`, `LLM_TIMEOUT=60`, `ADMIN_KEY=None`, `OIDC_SECURE_COOKIE=true`,
 `JWT_ALGORITHM=HS256`. There is **one class per source**, since a `BaseSettings` validates every field it declares:
 bundled, a `load <dir>` would demand submit API settings it never uses. **The server pools its Postgres connections
 and nothing else does** (`database/repository.py`): with no pool open, `get_connection()` connects directly.
@@ -218,6 +226,11 @@ and nothing else does** (`database/repository.py`): with no pool open, `get_conn
 
 `tests/` mirrors the package. `tests/unit/` is what `tox` runs and needs nothing external; `tests/integration/`
 needs Postgres and OpenSearch (`tests/integration/.env` is a working config set); `tests/performance/` is Locust.
+The Bigpicture XML fixtures sit under `tests/files/bigpicture/xml/<version>/<dataset>/`, one directory per metadata
+standard version beside the schemas, and `tests/utils/bigpicture.py` is the one place their paths and accessions are
+written down; `tests/integration/bigpicture.py` checks and deletes what loading them stores. **A read takes one
+dataset directory or a parent of several, never a parent of parents**, so a test loading every dataset loads each
+version directory in turn.
 Integration `conftest.py` gives `bp_opensearch_docs` (override with inline documents) and `bp_opensearch_index` (a
 `bp-image-index-test-<uuid>`, so runs are isolated). `@pytest.mark.requires_snowstorm` is skipped by
 `SKIP_SNOWSTORM_TESTS=true`, set in CI, which cannot reach the internal-only Snowstorm, while

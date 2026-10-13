@@ -3,7 +3,6 @@
 import logging
 from collections.abc import Iterable, Iterator, Set
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 import fsspec  # type: ignore
@@ -42,6 +41,10 @@ from search_api.api.bigpicture.extract.refs import (
     object_ids,
     object_keys,
     related_ids,
+)
+from search_api.api.bigpicture.extract.version import (
+    extract_version,
+    xml_schema_dir,
 )
 from search_api.api.extract_logs import ExtractLog
 from search_api.api.opensearch.models import (
@@ -121,8 +124,6 @@ POLICY_XML_FILE = "METADATA/policy.xml"
 SAMPLE_XML_FILE = "METADATA/sample.xml"
 STAINING_XML_FILE = "METADATA/staining.xml"
 OBSERVATION_XML_FILE = "METADATA/observation.xml"
-
-XML_SCHEMA_DIR = Path(__file__).resolve().parent.parent / "schemas"
 
 DATASET_XML_SCHEMA_FILE = "BP.dataset.xsd"
 IMAGE_XML_SCHEMA_FILE = "BP.image.xsd"
@@ -236,7 +237,10 @@ def extract_dataset_documents(
     #
 
     dataset_xml = parse_xml(read_file(fs, files.dataset, keys))
-    validate_xml(dataset_xml, XML_SCHEMA_DIR, DATASET_XML_SCHEMA_FILE)
+    # The dataset XML declares the metadata standard version.
+    version = extract_version(dataset_xml)
+    schema_dir = xml_schema_dir(version)
+    validate_xml(dataset_xml, schema_dir, DATASET_XML_SCHEMA_FILE)
     # The dataset is identified by its accession.
     dataset_id = get_xml_value(
         "/DATASET/@accession | /DATASET_SET/DATASET/@accession",
@@ -264,7 +268,7 @@ def extract_dataset_documents(
     #
 
     image_xml = parse_xml(read_file(fs, files.image, keys))
-    validate_xml(image_xml, XML_SCHEMA_DIR, IMAGE_XML_SCHEMA_FILE)
+    validate_xml(image_xml, schema_dir, IMAGE_XML_SCHEMA_FILE)
 
     for xml in image_xml.xpath("/IMAGE | /IMAGE_SET/IMAGE"):
         image_ids = object_ids(xml)
@@ -284,7 +288,7 @@ def extract_dataset_documents(
     #
 
     policy_xml = parse_xml(read_file(fs, files.policy, keys))
-    validate_xml(policy_xml, XML_SCHEMA_DIR, POLICY_XML_SCHEMA_FILE)
+    validate_xml(policy_xml, schema_dir, POLICY_XML_SCHEMA_FILE)
     scope = extract_scope(policy_xml, files.policy)
     is_clinical = scope == "clinical"
 
@@ -292,7 +296,7 @@ def extract_dataset_documents(
     #
 
     sample_xml = parse_xml(read_file(fs, files.sample, keys))
-    validate_xml(sample_xml, XML_SCHEMA_DIR, SAMPLE_XML_SCHEMA_FILE)
+    validate_xml(sample_xml, schema_dir, SAMPLE_XML_SCHEMA_FILE)
 
     for xml in sample_xml.xpath("/SLIDE | /SAMPLE_SET/SLIDE"):
         slide_ids = object_ids(xml)
@@ -336,7 +340,7 @@ def extract_dataset_documents(
     #
 
     staining_xml = parse_xml(read_file(fs, files.staining, keys))
-    validate_xml(staining_xml, XML_SCHEMA_DIR, STAINING_XML_SCHEMA_FILE)
+    validate_xml(staining_xml, schema_dir, STAINING_XML_SCHEMA_FILE)
 
     for xml in staining_xml.xpath("/STAINING | /STAINING_SET/STAINING"):
         # Extract fields from XML.
@@ -395,7 +399,7 @@ def extract_dataset_documents(
     # non-clinical one findings; the statement type decides which.
     if files.observation is not None:
         observation_xml = parse_xml(read_file(fs, files.observation, keys))
-        validate_xml(observation_xml, XML_SCHEMA_DIR, OBSERVATION_XML_SCHEMA_FILE)
+        validate_xml(observation_xml, schema_dir, OBSERVATION_XML_SCHEMA_FILE)
 
         for observation in observation_xml.xpath(
             "/OBSERVATION | /OBSERVATION_SET/OBSERVATION"

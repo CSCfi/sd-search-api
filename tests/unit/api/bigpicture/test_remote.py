@@ -11,35 +11,36 @@ from search_api.api.bigpicture.extract.document import extract_dataset_documents
 from search_api.api.bigpicture.remote import BigpictureRemoteSource, _extract_archive
 from search_api.exceptions import UserException
 from search_api.services.fetch import SdSubmitFetchClient, SdSubmitPublishedSubmission
-from tests.utils.keys import base64_pem_private_key
-
-CLINICAL_DATASET_DIR = (
-    Path(__file__).parent.parent.parent.parent
-    / "files"
-    / "bigpicture"
-    / "xml"
-    / "dataset_clinical"
+from tests.utils.bigpicture import (
+    CLINICAL_2_0_DATASET_DIR,
+    CLINICAL_3_0_DATASET_DIR,
 )
+from tests.utils.keys import base64_pem_private_key
 
 SUBMISSION_ID = "submission_1"
 PUBLISHED = datetime(2026, 1, 2, 12, 0, tzinfo=timezone.utc)
 
 
-def _clinical_dataset_archive() -> bytes:
-    """Clinical test dataset in the SD Submit API archive format."""
+def _dataset_archive(dataset_dir: Path) -> bytes:
+    """A test dataset in the SD Submit API archive format."""
 
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
-        for path in sorted((CLINICAL_DATASET_DIR / "METADATA").glob("*.xml")):
+        for path in sorted((dataset_dir / "METADATA").glob("*.xml")):
             archive.writestr(f"METADATA/{path.name}", path.read_text(encoding="utf-8"))
     return buffer.getvalue()
 
 
-def test_extract_archive() -> None:
-    """Compare clinical test dataset against its SD Submit API archive."""
+@pytest.mark.parametrize(
+    "dataset_dir",
+    [CLINICAL_2_0_DATASET_DIR, CLINICAL_3_0_DATASET_DIR],
+    ids=lambda path: path.parent.name,
+)
+def test_extract_archive(dataset_dir: Path) -> None:
+    """An archive of a dataset reads like its directory."""
 
-    from_archive = list(_extract_archive(_clinical_dataset_archive()))
-    from_directory = list(extract_dataset_documents(str(CLINICAL_DATASET_DIR)))
+    from_archive = list(_extract_archive(_dataset_archive(dataset_dir)))
+    from_directory = list(extract_dataset_documents(str(dataset_dir)))
 
     assert from_archive
     assert from_archive == [
@@ -70,7 +71,7 @@ def mock_sd_submit_api(monkeypatch):
 
     async def get_submission_objects(self, submission_id):
         assert submission_id == SUBMISSION_ID
-        return _clinical_dataset_archive()
+        return _dataset_archive(CLINICAL_2_0_DATASET_DIR)
 
     monkeypatch.setenv("SD_SUBMIT_API_URL", "test")
     monkeypatch.setenv("SD_SUBMIT_PRIVATE_KEY", base64_pem_private_key())

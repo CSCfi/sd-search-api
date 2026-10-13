@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from search_api.api.beacon.models import BeaconQueryFilter
+
 
 class FieldValue(BaseModel):
     value: str
@@ -59,3 +61,10 @@ class ValueCountsKey(BaseModel):
 class AIQueryRequest(BaseModel):
     query: str
     requestedScope: str | None = None
+    filters: list[BeaconQueryFilter] = Field(
+        default_factory=list,
+        description=(
+            "The current filters. The query may add, change or remove filters. "
+            "The response returns every filter after these changes."
+        ),
+    )

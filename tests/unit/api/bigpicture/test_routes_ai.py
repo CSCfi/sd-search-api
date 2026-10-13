@@ -21,6 +21,7 @@ from search_api.exceptions import SystemException
 QUERY = "images of females"
 INTERPRETATION = AIInterpretation(
     interpretation="Female images.",
+    answerable=True,
     filters=[BeaconQueryFilter(id="sex", value="Female")],
 )
 
@@ -56,7 +57,20 @@ def test_ai_filters_returns_interpretation(client, interpret):
     assert resp.status_code == 200
     assert AIInterpretation.model_validate(resp.json()) == INTERPRETATION
     interpret.assert_awaited_once_with(
-        QUERY, sentinel.beacon_service, sentinel.term_caches, None
+        QUERY, sentinel.beacon_service, sentinel.term_caches, None, []
+    )
+
+
+def test_ai_filters_passes_current_filters(client, interpret):
+    filters = [{"id": "sex", "value": "Female", "operator": "="}]
+    resp = client.post("/ai/filters", json={"query": QUERY, "filters": filters})
+    assert resp.status_code == 200
+    interpret.assert_awaited_once_with(
+        QUERY,
+        sentinel.beacon_service,
+        sentinel.term_caches,
+        None,
+        [BeaconQueryFilter(id="sex", value="Female")],
     )
 
 
@@ -65,7 +79,7 @@ def test_ai_filters_passes_scope(client, interpret):
     resp = client.post("/ai/filters", json={"query": QUERY, "requestedScope": scope})
     assert resp.status_code == 200
     interpret.assert_awaited_once_with(
-        QUERY, sentinel.beacon_service, sentinel.term_caches, scope
+        QUERY, sentinel.beacon_service, sentinel.term_caches, scope, []
     )
 
 

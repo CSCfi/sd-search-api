@@ -427,32 +427,19 @@ uv run python scripts/admin.py Bigpicture refresh snomed
 
 ## LLM search
 
-The experimental Bigpicture LLM search endpoint uses a small local [Ollama](https://ollama.com) model. Install and
-start it before running the API:
+The AI endpoint `POST /ai/filters` is configured with these environment variables:
 
-```bash
-brew install ollama
-ollama pull qwen2.5:7b
-ollama serve
-```
+| Variable         | Default   | Description                                                                            |
+|------------------|-----------|----------------------------------------------------------------------------------------|
+| `FEATURE_AI`     | `false`   | Set to `true` to enable the AI endpoint.                                               |
+| `LLM_PROVIDER`   | `openai`  | The model provider, as pydantic-ai names it. `openai` is any OpenAI-compatible server. |
+| `LLM_MODEL`      |           | The model name, as the provider names it.                                              |
+| `LLM_BASE_URL`   |           | The server's API URL. Required for `openai`.                                           |
+| `LLM_API_KEY`    |           | The server's API key. Required for `openai`.                                           |
+| `LLM_MAX_TOKENS` | `1024`    | The most tokens the model may generate in one reply.                                   |
+| `LLM_TIMEOUT`    | `60`      | Seconds the model may take to answer one query. After that the endpoint answers `503`. |
 
-The AI endpoint is mounted only when `FEATURE_AI=true`:
-
-```bash
-FEATURE_AI=true docker compose --env-file tests/integration/.env --profile dev up --build
-```
-
-`LLM_PROVIDER` (default `openai`: any OpenAI-compatible server, such as Ollama), `LLM_MODEL`, `LLM_BASE_URL` and
-`LLM_API_KEY` choose the model, and `tests/integration/.env` sets them for Ollama on the host. Other providers,
-such as `anthropic`, read their credentials from their own environment variables.
-To see each conversation with the model in the API's log, set `LOG_LEVEL=DEBUG`. It logs the user's query
-too, which can reveal what they are researching, so it is not for production.
-
-The AI integration tests call the model, so they run only with `FEATURE_AI=true`:
-
-```bash
-FEATURE_AI=true uv run pytest tests/integration/api/bigpicture/test_routes_ai.py -v
-```
+Providers other than `openai`, such as `anthropic`, read their credentials from their own environment variables.
 
 ## Performance tests
 

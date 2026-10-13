@@ -7,12 +7,14 @@ explained until they read clearly. That was not a thorough review, and the tests
 have not been thoroughly reviewed by a human.
 """
 
+import asyncio
 import copy
 from types import SimpleNamespace
 from typing import override
 
 import pytest
 import pytest_asyncio
+from pydantic_ai import ModelRetry
 from pydantic_ai.exceptions import (
     ModelAPIError,
     ModelHTTPError,
@@ -25,16 +27,18 @@ from pydantic_ai.messages import (
     TextPart,
     ToolCallPart,
     ToolReturnPart,
+    UserPromptPart,
 )
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from search_api.ai import services as ai_services
-from search_api.ai.models import AIFilterableField
+from search_api.ai.models import AIFilter, AIFilterableField
 from search_api.ai.services import (
     _NO_VALID_ANSWER,
     AIService,
     _Deps,
     _replace_with_indexed_values,
+    final_result,
     get_filtering_terms,
     get_values,
     validate_filters,
@@ -45,7 +49,7 @@ from search_api.api.beacon.models import (
     BeaconQueryFilter,
 )
 from search_api.api.models import FieldValue, ValueCounts
-from search_api.exceptions import SystemException
+from search_api.exceptions import SystemException, UserException
 from search_api.services import field_values
 from search_api.services.ontology.cache.models import (
     CachedOntology,
@@ -252,7 +256,10 @@ class _MockLLM:
 
     A real LLM reads the user's query and chooses filters. This one ignores the
     query and answers with the filters it was created with. When its answer is
-    rejected, it answers with the next filters it was given, if any.
+    rejected, it answers with the next filters it was given, if any. An answer
+    given as a dict sets the answer's other arguments too, such as answerable. It
+    keeps the prompt and the instructions it was sent in prompt and instructions,
+    so a test can check them.
 
     Before answering, it asks AIService which fields it may filter on, as a real
     LLM does. It keeps their labels in offered_fields, so a test can check them.
@@ -260,10 +267,15 @@ class _MockLLM:
     """
 
     def __init__(
-        self, filters: list[dict], *retry_filters: list[dict], find: dict | None = None
+        self,
+        filters: list[dict] | dict,
+        *retry_filters: list[dict] | dict,
+        find: dict | None = None,
     ) -> None:
         self.answers = [filters, *retry_filters]
         self.find = find
+        self.prompt: object = None
+        self.instructions: str | None = None
         self.offered_fields: list[str] = []
         self.found: object = None
         # pydantic-ai calls _respond wherever it would call the real LLM.
@@ -281,6 +293,14 @@ class _MockLLM:
           purpose, named in info.output_tools. If AIService rejects the answer, the
           error is added to the conversation and this is called again.
         """
+        [self.prompt] = [
+            part.content
+            for message in messages
+            for part in message.parts
+            if isinstance(part, UserPromptPart)
+        ]
+        self.instructions = messages[0].instructions
+
         # The results of the tools called so far.
         tool_returns = [
             part.content
@@ -310,8 +330,10 @@ class _MockLLM:
             for message in messages
             for part in message.parts
         )
-        filters = self.answers[min(rejected, len(self.answers) - 1)]
-        answer = {"interpretation": "i", "filters": filters}
+        answer = self.answers[min(rejected, len(self.answers) - 1)]
+        if isinstance(answer, list):
+            answer = {"filters": answer}
+        answer = {"interpretation": "i", "answerable": True, "filters": [], **answer}
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, answer)])
 
 
@@ -433,6 +455,29 @@ def ai_service(ontology) -> AIService:
     return AIService(FILTERING_TERMS, "a test assistant", ONTOLOGY_ID_BY_FIELD)
 
 
+def test_ai_service_limits_reply_length(monkeypatch):
+    # LLM_MAX_TOKENS ends a reply that repeats itself.
+    monkeypatch.setenv("LLM_MAX_TOKENS", "100")
+    ai_service = AIService(FILTERING_TERMS, "a test assistant", ONTOLOGY_ID_BY_FIELD)
+    assert ai_service._agent.model_settings == {"max_tokens": 100}
+
+
+@pytest.mark.asyncio
+async def test_interpret_times_out(monkeypatch, ontology, beacon_service):
+    # LLM_TIMEOUT bounds the whole conversation. A model that takes longer
+    # fails with a SystemException, which the route turns into a 503.
+    monkeypatch.setenv("LLM_TIMEOUT", "0.01")
+    ai_service = AIService(FILTERING_TERMS, "a test assistant", ONTOLOGY_ID_BY_FIELD)
+
+    async def respond(_: object, __: AgentInfo) -> ModelResponse:
+        await asyncio.sleep(1)
+        return ModelResponse(parts=[TextPart("too late")])
+
+    with ai_service._agent.override(model=FunctionModel(respond)):
+        with pytest.raises(SystemException):
+            await ai_service.interpret("anything", beacon_service, TERM_CACHES)
+
+
 def test_ai_service_rejects_fields_sharing_a_label():
     # The model names fields by their labels, so each must name one field.
     terms = [_term("title", "text"), _term("name", "text", label="title")]
@@ -469,7 +514,7 @@ async def test_interpret_uses_only_the_scope(
 async def test_interpret_maps_labels_to_field_ids(ai_service, beacon_service):
     # The model names each field by its label, in any letter case and with
     # spaces around it. The filters returned name each field by its id. An id
-    # the model gives is accepted too.
+    # the model gives is accepted too. A single value is returned as a list.
     llm = _MockLLM(
         [
             {"field": f" {LABEL_IMAGE_ID.upper()} ", "value": "img1"},
@@ -480,8 +525,20 @@ async def test_interpret_maps_labels_to_field_ids(ai_service, beacon_service):
         result = await ai_service.interpret("image img1", beacon_service, TERM_CACHES)
     assert result.filters == [
         BeaconQueryFilter(id="image_id", value=["img1"]),
-        BeaconQueryFilter(id="sex", value="Female"),
+        BeaconQueryFilter(id="sex", value=["Female"]),
     ]
+
+
+@pytest.mark.asyncio
+async def test_interpret_spells_controlled_values_as_declared(
+    ai_service, beacon_service
+):
+    # The model gives a controlled value in another letter case. It is returned
+    # spelled as the field declares it, not sent back to the model.
+    llm = _MockLLM([{"field": LABEL_SEX, "value": ["female", "MALE"]}])
+    with ai_service._agent.override(model=llm.model):
+        result = await ai_service.interpret("females", beacon_service, TERM_CACHES)
+    assert result.filters == [BeaconQueryFilter(id="sex", value=["Female", "Male"])]
 
 
 @pytest.mark.asyncio
@@ -518,6 +575,7 @@ async def test_interpret_returns_no_filters_without_valid_answer(
         result = await ai_service.interpret("anything", beacon_service, TERM_CACHES)
     assert result.filters == []
     assert result.interpretation == _NO_VALID_ANSWER
+    assert not result.answerable
 
 
 @pytest.mark.parametrize(
@@ -537,6 +595,200 @@ async def test_interpret_raises_system_exception_when_model_fails(
     with ai_service._agent.override(model=_model_answering(error)):
         with pytest.raises(SystemException):
             await ai_service.interpret("anything", beacon_service, TERM_CACHES)
+
+
+# Test interpret: the current filters the query edits.
+#
+
+FILTER_SEX_FEMALE = BeaconQueryFilter(id="sex", value="Female")
+FILTER_IMAGE_IMG1 = BeaconQueryFilter(id="image_id", value=["img1"])
+FILTER_DUCTAL_CARCINOMA = BeaconQueryFilter(
+    id=FIELD_ID_DIAGNOSIS, value=[CONCEPT_ID_DUCTAL_CARCINOMA]
+)
+
+
+async def _interpret(
+    ai_service: AIService,
+    beacon_service: MockBeaconService,
+    llm: _MockLLM,
+    current_filters: list[BeaconQueryFilter],
+    scope: str | None = None,
+):
+    with ai_service._agent.override(model=llm.model):
+        return await ai_service.interpret(
+            "query", beacon_service, TERM_CACHES, scope, current_filters
+        )
+
+
+@pytest.mark.asyncio
+async def test_interpret_shows_current_filters(ai_service, beacon_service):
+    # The model is told the current filters in its instructions. Each field is
+    # named by its label and each concept by its preferred term, as the model
+    # knows them. The user's message is only the query.
+    llm = _MockLLM([])
+    await _interpret(
+        ai_service, beacon_service, llm, [FILTER_SEX_FEMALE, FILTER_DUCTAL_CARCINOMA]
+    )
+    assert llm.prompt == "query"
+    assert llm.instructions == (
+        "The current filters, in the form you answer in: "
+        '[{"field":"Sex","value":["Female"],"includeDescendantTerms":false},'
+        '{"field":"Diagnosed disease","value":["Ductal carcinoma"],'
+        '"includeDescendantTerms":false}]'
+    )
+
+
+@pytest.mark.asyncio
+async def test_interpret_says_when_there_are_no_current_filters(
+    ai_service, beacon_service
+):
+    # The model is told so, so it does not try to remove a filter.
+    llm = _MockLLM([])
+    await _interpret(ai_service, beacon_service, llm, [])
+    assert llm.prompt == "query"
+    assert llm.instructions == "There are no current filters."
+
+
+@pytest.mark.asyncio
+async def test_interpret_replaces_and_keeps_current_filters(ai_service, beacon_service):
+    # A filter the model gives replaces the field's current filter. The model
+    # does not repeat the filters it leaves alone, and they are kept.
+    llm = _MockLLM([{"field": LABEL_SEX, "value": "Male"}])
+    result = await _interpret(
+        ai_service, beacon_service, llm, [FILTER_SEX_FEMALE, FILTER_IMAGE_IMG1]
+    )
+    assert result.answerable
+    assert result.filters == [
+        FILTER_IMAGE_IMG1,
+        BeaconQueryFilter(id="sex", value=["Male"]),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_interpret_removes_current_filters(ai_service, beacon_service):
+    llm = _MockLLM([{"field": LABEL_SEX, "value": []}])
+    result = await _interpret(
+        ai_service, beacon_service, llm, [FILTER_SEX_FEMALE, FILTER_IMAGE_IMG1]
+    )
+    assert result.answerable
+    assert result.filters == [FILTER_IMAGE_IMG1]
+
+
+@pytest.mark.asyncio
+async def test_interpret_keeps_current_filters_outside_scope(
+    ai_service, beacon_service
+):
+    # Diagnosis is a clinical field, so the non-clinical scope hides its filter
+    # from the model. The filter is kept, since the model cannot change it.
+    llm = _MockLLM([{"field": LABEL_SEX, "value": []}])
+    result = await _interpret(
+        ai_service,
+        beacon_service,
+        llm,
+        [FILTER_DUCTAL_CARCINOMA, FILTER_SEX_FEMALE],
+        scope="non_clinical",
+    )
+    assert llm.instructions == (
+        "The current filters, in the form you answer in: "
+        '[{"field":"Sex","value":["Female"],"includeDescendantTerms":false}]'
+    )
+    assert result.filters == [FILTER_DUCTAL_CARCINOMA]
+
+
+@pytest.mark.asyncio
+async def test_interpret_keeps_current_filters_when_not_answerable(
+    ai_service, beacon_service
+):
+    # The model says the query cannot be expressed as filters. Its
+    # interpretation is returned with the current filters, unchanged, and any
+    # filters it gave anyway are ignored.
+    llm = _MockLLM(
+        {
+            "interpretation": "Off topic.",
+            "answerable": False,
+            "filters": [{"field": LABEL_SEX, "value": "Male"}],
+        }
+    )
+    result = await _interpret(ai_service, beacon_service, llm, [FILTER_SEX_FEMALE])
+    assert not result.answerable
+    assert result.interpretation == "Off topic."
+    assert result.filters == [FILTER_SEX_FEMALE]
+
+
+@pytest.mark.asyncio
+async def test_interpret_keeps_current_filters_without_valid_answer(
+    ai_service, beacon_service
+):
+    with ai_service._agent.override(
+        model=_model_answering(FILTERS_IN_PLAIN_TEXT_RESPONSE)
+    ):
+        result = await ai_service.interpret(
+            "anything", beacon_service, TERM_CACHES, None, [FILTER_SEX_FEMALE]
+        )
+    assert not result.answerable
+    assert result.interpretation == _NO_VALID_ANSWER
+    assert result.filters == [FILTER_SEX_FEMALE]
+
+
+@pytest.mark.asyncio
+async def test_interpret_rejects_unknown_current_filter(ai_service, beacon_service):
+    # The client sent a filter on a field the deployment does not have. The
+    # route turns the UserException into a 400.
+    with pytest.raises(UserException, match="'colour'"):
+        await ai_service.interpret(
+            "anything",
+            beacon_service,
+            TERM_CACHES,
+            None,
+            [BeaconQueryFilter(id="colour", value="red")],
+        )
+
+
+@pytest.mark.parametrize(
+    "label,advice",
+    [
+        (LABEL_SEX, "Give it a value, or leave it out."),
+        # A field whose values the model looks up is pointed to get_values.
+        (
+            LABEL_IMAGE_ID,
+            "Use get_values to find a value. If it finds none, leave the field out.",
+        ),
+    ],
+)
+@pytest.mark.parametrize("value", [[], ""])
+@pytest.mark.asyncio
+async def test_final_result_rejects_no_value_without_current_filter(
+    deps, label, advice, value
+):
+    # A field given no value removes its current filter. Without one, the
+    # filter goes back to the model to correct, whatever the field's type.
+    # Otherwise it would come back as a filter that matches nothing.
+    with pytest.raises(ModelRetry) as error:
+        await final_result(
+            SimpleNamespace(deps=deps), "i", True, [AIFilter(field=label, value=value)]
+        )
+    assert (
+        str(error.value) == f"Field '{label}' has no current filter to remove. {advice}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_final_result_rejects_field_given_twice(deps):
+    # Removing a field and giving it a value contradict each other, so the
+    # answer goes back to the model to correct.
+    deps.current_filters = [FILTER_SEX_FEMALE]
+    with pytest.raises(ModelRetry) as error:
+        await final_result(
+            SimpleNamespace(deps=deps),
+            "i",
+            True,
+            [AIFilter(field=LABEL_SEX, value=[]), AIFilter(field="sex", value="Male")],
+        )
+    assert str(error.value) == (
+        f"Field '{LABEL_SEX}' is given more than once. "
+        "Give it once, with all its values. "
+        "To remove its filter, give it once with no value."
+    )
 
 
 # Test _replace_with_indexed_values.
@@ -595,9 +847,8 @@ async def test_replace_concept_with_listed_descendants(deps):
 async def test_replace_reports_values_matching_nothing(deps):
     # A value that matches no indexed field value gets an error, which is sent
     # back to the model. With includeDescendantTerms, the error says that none
-    # of its descendants matched. If no values is given, an error is sent back
-    # to the model.
-    _, [neoplasm_error, unknown_error, empty_error] = await _replace(
+    # of its descendants matched.
+    _, [neoplasm_error, unknown_error] = await _replace(
         deps,
         # Neoplasm is a concept, but no document has it.
         BeaconQueryFilter(id=FIELD_ID_DIAGNOSIS, value=CONCEPT_ID_NEOPLASM),
@@ -605,14 +856,9 @@ async def test_replace_reports_values_matching_nothing(deps):
         BeaconQueryFilter(
             id=FIELD_ID_DIAGNOSIS, value=CONCEPT_ID_UNKNOWN, includeDescendantTerms=True
         ),
-        BeaconQueryFilter(id="image_id", value=[]),
     )
     assert f"'{CONCEPT_ID_NEOPLASM}'. Use get_values" in neoplasm_error
     assert f"'{CONCEPT_ID_UNKNOWN}' or its descendants" in unknown_error
-    assert empty_error == (
-        f"Field '{LABEL_IMAGE_ID}' has no value. "
-        "Use get_values to find one. If get_values finds none, leave the field out."
-    )
 
 
 @pytest.mark.asyncio
@@ -805,6 +1051,7 @@ async def test_interpret_logs_conversation(ai_service, beacon_service, caplog):
         with ai_service._agent.override(model=llm.model):
             await ai_service.interpret("ductal", beacon_service, TERM_CACHES)
     assert "AI conversation for the query 'ductal'" in caplog.text
+    assert "- model was told: There are no current filters." in caplog.text
     assert (
         'model called get_values({"field":"Diagnosed disease","text":"ductal"'
         in caplog.text

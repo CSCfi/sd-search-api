@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, Request
 
 from search_api.api.admin.auth import require_admin
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
-from search_api.services.ontology.term_cache import OntologyTermCache
 from search_api.services.ontology.snomed import SnomedService
+from search_api.services.ontology.term_cache import OntologyTermCache
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)])
 

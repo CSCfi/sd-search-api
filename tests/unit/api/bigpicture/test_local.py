@@ -1,7 +1,7 @@
 """Tests for reading submissions from a directory."""
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import fsspec  # type: ignore
@@ -98,4 +98,4 @@ def test_bigpicture_dataset_modified_at() -> None:
         path.stat().st_mtime
         for path in (CLINICAL_2_0_DATASET_DIR / "METADATA").glob("*.xml")
     )
-    assert modified_at == datetime.fromtimestamp(newest, tz=timezone.utc)
+    assert modified_at == datetime.fromtimestamp(newest, tz=UTC)

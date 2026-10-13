@@ -1,29 +1,21 @@
 """Bigpicture document XML extraction."""
 
 import logging
-from collections.abc import Iterable, Iterator, Set
-from datetime import datetime, timezone
+from collections.abc import Iterable, Iterator
+from collections.abc import Set as AbstractSet
+from datetime import UTC, datetime
 from typing import Any
 
 import fsspec  # type: ignore
-from lxml.etree import _Element as Element, _ElementTree as ElementTree  # noqa
+from lxml.etree import _Element as Element  # noqa
 from pydantic import BaseModel, ConfigDict
 
-from search_api.api.bigpicture.models import BP_DOCUMENT_FIELDS
-from search_api.api.bigpicture.extract.values import (
-    extract_diagnoses,
-    extract_finding,
-    extract_sample_biological_being_fields,
-    extract_sample_block_fields,
-    extract_sample_specimen_fields,
-    extract_scope,
-    extract_staining_fields,
-)
 from search_api.api.bigpicture.extract.models import (
-    BigpictureExtractedObject,
+    NESTED_GROUPS,
     OBSERVATION_CANDIDATE,
     OBSERVATION_CONFIRMED,
     BigpictureCodeAttributeValue,
+    BigpictureExtractedObject,
     BigpictureFields,
     BigpictureSampleBiologicalBeingFields,
     BigpictureSampleBlockFields,
@@ -31,7 +23,6 @@ from search_api.api.bigpicture.extract.models import (
     BigpictureSpecimenFields,
     BigpictureStainingFields,
     ObjectIds,
-    NESTED_GROUPS,
 )
 from search_api.api.bigpicture.extract.refs import (
     OBSERVATION_IMAGE_REF,
@@ -42,10 +33,20 @@ from search_api.api.bigpicture.extract.refs import (
     object_keys,
     related_ids,
 )
+from search_api.api.bigpicture.extract.values import (
+    extract_diagnoses,
+    extract_finding,
+    extract_sample_biological_being_fields,
+    extract_sample_block_fields,
+    extract_sample_specimen_fields,
+    extract_scope,
+    extract_staining_fields,
+)
 from search_api.api.bigpicture.extract.version import (
     extract_version,
     xml_schema_dir,
 )
+from search_api.api.bigpicture.models import BP_DOCUMENT_FIELDS
 from search_api.api.extract_logs import ExtractLog
 from search_api.api.opensearch.models import (
     ExtractedDocument,
@@ -56,12 +57,14 @@ from search_api.exceptions import SystemException
 from search_api.utils.crypt import read_file, resolve_path
 from search_api.utils.xml import get_xml_value, parse_xml, validate_xml
 
+logger = logging.getLogger(__name__)
+
 
 def _has_value(value: Any) -> bool:
     """Whether a parsed field carries an indexable value."""
     if value is None:
         return False
-    if isinstance(value, Set):
+    if isinstance(value, AbstractSet):
         return len(value) > 0
     return True
 
@@ -83,7 +86,7 @@ def to_opensearch_values(
             return [
                 OpenSearchFieldValue(field=field, value=(value.code, value.meaning))
             ]
-        if isinstance(value, Set) and all(
+        if isinstance(value, AbstractSet) and all(
             isinstance(code, BigpictureCodeAttributeValue) for code in value
         ):
             # A multivalued field of code attributes.
@@ -151,13 +154,11 @@ def get_last_modification_time(
             if mtime is None:
                 continue
             if isinstance(mtime, (int, float)):
-                mtimes.append(datetime.fromtimestamp(mtime, tz=timezone.utc))
+                mtimes.append(datetime.fromtimestamp(mtime, tz=UTC))
             elif isinstance(mtime, datetime):
-                mtimes.append(
-                    mtime if mtime.tzinfo else mtime.replace(tzinfo=timezone.utc)
-                )
-        except Exception:
-            logging.warning("Could not extract last modification time for %s.", path)
+                mtimes.append(mtime if mtime.tzinfo else mtime.replace(tzinfo=UTC))
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not extract last modification time for %s.", path)
     return max(mtimes) if mtimes else None
 
 
@@ -248,9 +249,7 @@ def extract_dataset_documents(
         optional=True,
     )
     if dataset_id is None:
-        raise ValueError(
-            f"Failed to extract dataset accession from {str(files.dataset)}"
-        )
+        raise ValueError(f"Failed to extract dataset accession from {files.dataset!s}")
     dataset_short_name = get_xml_value(
         "/DATASET/DESCRIPTION | /DATASET_SET/DATASET/SHORT_NAME",
         dataset_xml,

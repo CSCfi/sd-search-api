@@ -13,17 +13,16 @@ from nacl.public import PrivateKey
 
 from search_api.api.beacon.models import BeaconFilteringTerm, OntologyRestriction
 from search_api.api.bigpicture.domain import BP_DOMAIN
+from search_api.api.bigpicture.local import BigpictureLocalSource
+from search_api.database.document import get_document
+from search_api.database.repository import get_connection
+from search_api.services.load import LoadService
 from search_api.services.ontology.service import (
     OntologyService,
     get_ontology_service,
     register_ontology_service,
 )
 from search_api.services.ontology.term_cache import OntologyTermCache
-from search_api.api.bigpicture.local import BigpictureLocalSource
-from search_api.database.document import get_document
-from search_api.database.repository import get_connection
-from search_api.services.load import LoadService
-
 from tests.integration.bigpicture import (
     assert_dataset_images_stored,
     delete_dataset_images,
@@ -125,9 +124,8 @@ async def delete_images():
     """Delete images before and after each test."""
 
     async def _delete() -> None:
-        async with get_connection() as conn:
-            async with conn.cursor() as cur:
-                await delete_dataset_images(cur)
+        async with get_connection() as conn, conn.cursor() as cur:
+            await delete_dataset_images(cur)
 
     await _delete()
     yield
@@ -145,9 +143,8 @@ async def test_extract_and_load_fields_plain():
     for version_dir in VERSION_DIRS:
         await load_service.store_documents(await _documents(str(version_dir)))
 
-    async with get_connection() as conn:
-        async with conn.cursor() as cur:
-            await assert_dataset_images_stored(cur)
+    async with get_connection() as conn, conn.cursor() as cur:
+        await assert_dataset_images_stored(cur)
 
 
 @pytest.mark.asyncio
@@ -180,10 +177,9 @@ async def test_extract_and_load_fields_c4gh(tmp_path):
         filtering_scopes=BP_DOMAIN.filtering_scopes,
     ).store_documents(await _documents(str(tmp_path), c4gh_key_file=str(seckey_path)))
 
-    async with get_connection() as conn:
-        async with conn.cursor() as cur:
-            for image_id in CLINICAL_2_0_IMAGE_IDS:
-                payload = await get_document(cur, image_id)
-                assert payload is not None, f"{image_id!r} was not loaded"
-                assert payload["image_id"] == image_id
-                assert payload["dataset_id"] == CLINICAL_2_0_DATASET_ID
+    async with get_connection() as conn, conn.cursor() as cur:
+        for image_id in CLINICAL_2_0_IMAGE_IDS:
+            payload = await get_document(cur, image_id)
+            assert payload is not None, f"{image_id!r} was not loaded"
+            assert payload["image_id"] == image_id
+            assert payload["dataset_id"] == CLINICAL_2_0_DATASET_ID

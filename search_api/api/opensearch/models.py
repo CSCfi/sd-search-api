@@ -89,7 +89,7 @@ class OpenSearchBeaconFilteringTerm(BeaconFilteringTerm, OpenSearchField):
         return base
 
     @model_validator(mode="after")
-    def _validate_ontology_or_value(self) -> "OpenSearchBeaconFilteringTerm":
+    def _validate_ontology_or_value(self) -> OpenSearchBeaconFilteringTerm:
         if self.type == "ontologyOrValue" and self.multivalued:
             raise ValueError(
                 f"Field '{self.id}' has type 'ontologyOrValue' which does not support multivalued=True."
@@ -120,10 +120,11 @@ class OpenSearchFieldValue(BaseModel):
     resolved_concept_id: str | None = None
 
     @model_validator(mode="after")
-    def validate_value(self) -> "OpenSearchFieldValue":
+    def validate_value(self) -> OpenSearchFieldValue:
         expected = _VALUE_TYPES[self.field.type]
         if not isinstance(self.value, expected):
-            raise ValueError(
+            # Pydantic turns only a ValueError into a ValidationError.
+            raise ValueError(  # noqa: TRY004
                 f"Value for field '{self.field.id}' (type '{self.field.type}') "
                 f"must be {expected}."
             )
@@ -137,7 +138,7 @@ class OpenSearchGroup(BaseModel):
     values: list[OpenSearchFieldValue]
 
     @model_validator(mode="after")
-    def validate_group(self) -> "OpenSearchGroup":
+    def validate_group(self) -> OpenSearchGroup:
         misplaced = sorted(
             value.field.id
             for value in self.values

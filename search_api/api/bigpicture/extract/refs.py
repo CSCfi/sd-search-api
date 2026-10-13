@@ -1,11 +1,10 @@
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import TypeVar, cast
+from typing import cast
 
-from lxml.etree import _Element as Element  # noqa
+from lxml.etree import _Element as Element
 
 from search_api.api.bigpicture.extract.models import ObjectIds, ObjectKey
-
 
 OBSERVATION_IMAGE_REF = "IMAGE_REF"
 OBSERVATION_SLIDE_REF = "SLIDE_REF"
@@ -21,9 +20,6 @@ type IdMap = dict[ObjectKey, set[ObjectIds]]
 
 # Maps object's key to image accessions if present, else the image aliases.
 type ImageIdMap = dict[ObjectKey, set[str]]
-
-
-RelatedIdType = TypeVar("RelatedIdType", ObjectIds, str)
 
 
 @dataclass(frozen=True)
@@ -63,7 +59,7 @@ class BigpictureReferences:
         return self.image_ids_from_specimens(specimen_keys)
 
 
-def related_ids(
+def related_ids[RelatedIdType: (ObjectIds, str)](
     keys: Iterable[ObjectKey], key_to_ids: dict[ObjectKey, set[RelatedIdType]]
 ) -> set[RelatedIdType]:
     return {related_id for key in keys for related_id in key_to_ids.get(key, set())}
@@ -90,7 +86,7 @@ def object_ids(elem: Element) -> ObjectIds:
     )
 
 
-def map_ref(
+def map_ref[RelatedIdType: (ObjectIds, str)](
     elem: Element,
     ref_tag: str,
     key_to_ids: dict[ObjectKey, set[RelatedIdType]],

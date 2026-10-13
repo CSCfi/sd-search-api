@@ -10,15 +10,21 @@ from psycopg import AsyncCursor
 from search_api.api.opensearch.client import create_search
 from search_api.api.opensearch.index import (
     delete_all_documents as delete_all_opensearch_documents,
+)
+from search_api.api.opensearch.index import (
     index_documents,
 )
 from search_api.database.document import (
     delete_all_documents as delete_all_database_documents,
+)
+from search_api.database.document import (
     iter_unsynced,
     mark_synced,
     unsynced_count,
 )
 from search_api.database.repository import get_cursor
+
+logger = logging.getLogger(__name__)
 
 # OpenSearch index batch size.
 BATCH_SIZE = 1000
@@ -39,7 +45,7 @@ class SyncService:
     def start(self, interval_seconds: float = 60.0) -> None:
         """Start a periodic background task that syncs the database to OpenSearch."""
         if self._task is not None and not self._task.done():
-            logging.warning("Sync background task is already running.")
+            logger.warning("Sync background task is already running.")
             return
         self._task = asyncio.create_task(self._sync_loop(interval_seconds))
 
@@ -58,7 +64,7 @@ class SyncService:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logging.exception("Error during periodic sync.")
+                logger.exception("Error during periodic sync.")
             await asyncio.sleep(interval_seconds)
 
     async def sync_fields(self, cur: AsyncCursor, doc_id: str | None = None) -> None:
@@ -69,7 +75,7 @@ class SyncService:
         :param doc_id: An optional document id to restrict the sync to.
         """
 
-        logging.info("Finding documents to sync to OpenSearch.")
+        logger.info("Finding documents to sync to OpenSearch.")
 
         ids_batch: list[str] = []
         docs_batch: list[dict[str, Any]] = []
@@ -78,13 +84,13 @@ class SyncService:
 
             async def flush_batch():
                 # Flush the OpenSearch batch.
-                logging.info(f"Syncing {len(docs_batch)} documents to OpenSearch.")
+                logger.info(f"Syncing {len(docs_batch)} documents to OpenSearch.")
                 await index_documents(
                     self._search, self._opensearch_index, ids_batch, docs_batch
                 )
 
                 # Update sync state in the document store.
-                logging.info("Updating sync status.")
+                logger.info("Updating sync status.")
                 await mark_synced(update_cur, ids_batch)
 
                 # Clear the OpenSearch batch.
@@ -111,12 +117,12 @@ class SyncService:
     async def delete_all_documents(self, cur: AsyncCursor) -> None:
         """Delete all documents from the database and the OpenSearch index."""
         database_count = await delete_all_database_documents(cur)
-        logging.info("Deleted %d document(s) from the database.", database_count)
+        logger.info("Deleted %d document(s) from the database.", database_count)
 
         opensearch_count = await delete_all_opensearch_documents(
             self._search, self._opensearch_index
         )
-        logging.info(
+        logger.info(
             "Deleted %d document(s) from the '%s' OpenSearch index.",
             opensearch_count,
             self._opensearch_index,

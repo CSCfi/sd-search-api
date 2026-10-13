@@ -1,7 +1,7 @@
 """Tests for the client of the SD submit fetch API."""
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from itertools import count
 
 import httpx
@@ -17,8 +17,8 @@ from search_api.services.fetch import (
 SD_SUBMIT_API_URL = "https://submitter.example/api"
 SD_SUBMIT_TOKEN = "sync_token"
 
-SINCE = datetime(2026, 1, 1, tzinfo=timezone.utc)
-UNTIL = datetime(2026, 2, 1, tzinfo=timezone.utc)
+SINCE = datetime(2026, 1, 1, tzinfo=UTC)
+UNTIL = datetime(2026, 2, 1, tzinfo=UTC)
 
 
 def _mock_response(payload: object) -> httpx.Response:
@@ -126,9 +126,9 @@ async def test_sd_submit_get_published_submissions_period(
 @pytest.mark.parametrize(
     "published_start,published_end",
     [
-        (datetime(2026, 1, 1), None),
-        (None, datetime(2026, 2, 1)),
-        (SINCE, datetime(2026, 2, 1)),
+        (datetime(2026, 1, 1), None),  # noqa: DTZ001
+        (None, datetime(2026, 2, 1)),  # noqa: DTZ001
+        (SINCE, datetime(2026, 2, 1)),  # noqa: DTZ001
     ],
 )
 @pytest.mark.asyncio

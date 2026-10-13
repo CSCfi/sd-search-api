@@ -54,7 +54,7 @@ class ValueCountsKey(BaseModel):
     scope: str | None = None
 
     @classmethod
-    def of(cls, field_id: str, scope: str | None = None) -> "ValueCountsKey":
+    def of(cls, field_id: str, scope: str | None = None) -> ValueCountsKey:
         return cls(field_id=field_id, scope=scope)
 
 

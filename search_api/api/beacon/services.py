@@ -1,7 +1,6 @@
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Generic, TypeVar
 
 from search_api.api.beacon.models import (
     BeaconFilteringTerm,
@@ -13,11 +12,8 @@ from search_api.api.beacon.models import (
 from search_api.api.models import ValueCounts
 from search_api.exceptions import UserException
 
-T = TypeVar("T", bound=BeaconFilteringTerm)
-S = TypeVar("S", bound=BeaconResultSetResult)
 
-
-class BeaconService(ABC, Generic[T]):
+class BeaconService[T: BeaconFilteringTerm](ABC):
     """Beacon V2 endpoints except queries."""
 
     def __init__(self, filtering_terms: Sequence[T]) -> None:
@@ -51,18 +47,17 @@ class BeaconService(ABC, Generic[T]):
         ``scope`` optionally restricts what is counted.
         Raises ValueError if field_id is unknown.
         """
-        pass
 
 
 @dataclass
-class BeaconQueryResult(Generic[S]):
+class BeaconQueryResult[S: BeaconResultSetResult]:
     """A query's total match count, and its records for record granularity."""
 
     total: int
     result_sets: BeaconResultSets[S]
 
 
-class BeaconQueryService(ABC, Generic[S]):
+class BeaconQueryService[S: BeaconResultSetResult](ABC):
     """Beacon V2 query endpoint."""
 
     @abstractmethod

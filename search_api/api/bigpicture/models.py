@@ -5,22 +5,22 @@ from pydantic import Field
 
 from search_api.api.beacon.models import (
     BeaconFilteringScope,
-    BeaconFilteringTermsResponse,
     BeaconFilteringTerms,
-    BeaconInfoResponse,
+    BeaconFilteringTermsResponse,
+    BeaconInfo,
     BeaconInfoMeta,
+    BeaconInfoResponse,
     BeaconResultSetResult,
     BeaconResultSetsResponse,
     BeaconSchema,
-    BeaconInfo,
 )
 from search_api.api.fields import load_fields_config
-from search_api.api.scopes import load_scopes_config, validate_filtering_scopes
-from search_api.exceptions import SystemException
 from search_api.api.opensearch.models import (
     OpenSearchField,
     OpenSearchOntologyOrValue,
 )
+from search_api.api.scopes import load_scopes_config, validate_filtering_scopes
+from search_api.exceptions import SystemException
 
 
 class BigpictureBeaconDatasetResult(BeaconResultSetResult):

@@ -1,14 +1,14 @@
 """UpdatedPoller: when it refreshes, and when it leaves things alone."""
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
 from search_api.services.poller import UpdatedPoller
 
-_T1 = datetime(2026, 1, 1, tzinfo=timezone.utc)
-_T2 = datetime(2026, 2, 1, tzinfo=timezone.utc)
+_T1 = datetime(2026, 1, 1, tzinfo=UTC)
+_T2 = datetime(2026, 2, 1, tzinfo=UTC)
 
 
 class _Store:

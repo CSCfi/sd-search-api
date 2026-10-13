@@ -1,8 +1,7 @@
 """The public keys this deployment signs with."""
 
-from typing import Any
-
 from collections.abc import Callable
+from typing import Any
 
 from fastapi import APIRouter
 

@@ -2,7 +2,7 @@
 
 import io
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -18,7 +18,7 @@ from tests.utils.bigpicture import (
 from tests.utils.keys import base64_pem_private_key
 
 SUBMISSION_ID = "submission_1"
-PUBLISHED = datetime(2026, 1, 2, 12, 0, tzinfo=timezone.utc)
+PUBLISHED = datetime(2026, 1, 2, 12, 0, tzinfo=UTC)
 
 
 def _dataset_archive(dataset_dir: Path) -> bytes:

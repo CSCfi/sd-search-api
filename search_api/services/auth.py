@@ -125,56 +125,12 @@ class AuthServiceHandler:
     async def callback(self, state: str, code: str) -> TokenSet:
         """Exchange the authorization code and return the identity provider's tokens."""
         async with self._rph_lock:
+            # However the callback ends, this login is over: its state is dropped
+            # rather than kept for the life of the process.
             try:
-                session_info = await asyncio.to_thread(
-                    self.rph.get_session_information, state
-                )
-            except KeyError as exc:
-                raise HTTPException(
-                    status_code=401, detail="Unknown or expired login session."
-                ) from exc
-
-            session_info["code"] = code
-
-            try:
-                session = await asyncio.to_thread(
-                    self.rph.finalize, oidc_config().OIDC_URL, session_info
-                )
-            except KeyError as exc:
-                # RPHandler.finalize looks up the issuer in its own client registry
-                # internally; a mismatch (e.g. configured OIDC_URL doesn't match the
-                # IdP's reported issuer) raises KeyError, not a parsed protocol error.
-                raise HTTPException(
-                    status_code=401,
-                    detail="OIDC issuer not recognized for this login session.",
-                ) from exc
-            except (OidcMsgError, OidcServiceError) as exc:
-                # idpyoidc's own parsed protocol-error types: the IdP rejected the code
-                # itself (invalid/expired/already used) or the token/ID-token response
-                # otherwise failed validation. Protocol-validity failure -> 401.
-                raise HTTPException(
-                    status_code=401,
-                    detail="OIDC provider rejected the authorization code.",
-                ) from exc
-            except RequestException as exc:
-                # Connection/timeout-level failure talking to the IdP -> dependency
-                # failure, not a bad credential -> 503.
-                raise SystemException("OIDC token exchange failed.") from exc
-
-            if "error" in session:
-                raise HTTPException(
-                    status_code=401, detail="OIDC provider returned an error."
-                )
-
-            # finalize returns only the access token; the rest of the token response
-            # is kept in the client's per-login state.
-            client = self.rph.get_client_from_session_key(state)
-            token_response = client.get_context().cstate.get_set(
-                state, claim=["access_token", "expires_in", "refresh_token"]
-            )
-            # The login is complete: drop its state rather than keep it for the life
-            # of the process.
-            self.rph.clear_session(state)
+                token_response = await self._exchange_code(state, code)
+            finally:
+                self._forget_login(state)
 
         access_token = token_response.get("access_token")
         if not access_token:
@@ -187,6 +143,56 @@ class AuthServiceHandler:
             access_token=access_token,
             expires_in=int(expires_in) if expires_in is not None else None,
             refresh_token=token_response.get("refresh_token"),
+        )
+
+    async def _exchange_code(self, state: str, code: str) -> dict[str, Any]:
+        """Finalize the login `state` with `code`; return the token response."""
+        try:
+            session_info = await asyncio.to_thread(
+                self.rph.get_session_information, state
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=401, detail="Unknown or expired login session."
+            ) from exc
+
+        session_info["code"] = code
+
+        try:
+            session = await asyncio.to_thread(
+                self.rph.finalize, oidc_config().OIDC_URL, session_info
+            )
+        except KeyError as exc:
+            # RPHandler.finalize looks up the issuer in its own client registry
+            # internally; a mismatch (e.g. configured OIDC_URL doesn't match the
+            # IdP's reported issuer) raises KeyError, not a parsed protocol error.
+            raise HTTPException(
+                status_code=401,
+                detail="OIDC issuer not recognized for this login session.",
+            ) from exc
+        except (OidcMsgError, OidcServiceError) as exc:
+            # idpyoidc's own parsed protocol-error types: the IdP rejected the code
+            # itself (invalid/expired/already used) or the token/ID-token response
+            # otherwise failed validation. Protocol-validity failure -> 401.
+            raise HTTPException(
+                status_code=401,
+                detail="OIDC provider rejected the authorization code.",
+            ) from exc
+        except RequestException as exc:
+            # Connection/timeout-level failure talking to the IdP -> dependency
+            # failure, not a bad credential -> 503.
+            raise SystemException("OIDC token exchange failed.") from exc
+
+        if "error" in session:
+            raise HTTPException(
+                status_code=401, detail="OIDC provider returned an error."
+            )
+
+        # finalize returns only the access token; the rest of the token response
+        # is kept in the client's per-login state.
+        client = self.rph.get_client_from_session_key(state)
+        return client.get_context().cstate.get_set(
+            state, claim=["access_token", "expires_in", "refresh_token"]
         )
 
     async def refresh(self, refresh_token: str) -> TokenSet:
@@ -252,6 +258,13 @@ class AuthServiceHandler:
             # Kept when the provider does not rotate it.
             refresh_token=body.get("refresh_token") or refresh_token,
         )
+
+    def _forget_login(self, state: str) -> None:
+        """Drop a login's state from RPHandler, whether or not it still has any."""
+        try:
+            self.rph.clear_session(state)
+        except KeyError:
+            pass  # unknown to RPHandler: never begun, or already dropped
 
     async def _check_access_token(self, access_token: str) -> None:
         """Refuse a token the middleware would reject, before it becomes the session."""

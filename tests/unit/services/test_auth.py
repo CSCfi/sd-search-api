@@ -150,6 +150,21 @@ async def test_callback_protocol_failure_raises_401(setup):
         await handler.callback("known-state", "some-code")
 
     assert exc_info.value.status_code == 401
+    # A failed login is over too: its state does not stay in memory.
+    mock_rph.clear_session.assert_called_once_with("known-state")
+
+
+@pytest.mark.asyncio
+async def test_callback_for_a_state_unknown_to_rphandler_still_answers_401():
+    handler, mock_rph = _handler_with_mock_rph()
+    mock_rph.get_session_information.side_effect = KeyError("unknown-state")
+    # RPHandler raises KeyError for a state it does not have; that is not an error.
+    mock_rph.clear_session.side_effect = KeyError("unknown-state")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await handler.callback("unknown-state", "some-code")
+
+    assert exc_info.value.status_code == 401
 
 
 @pytest.mark.asyncio
@@ -174,6 +189,7 @@ async def test_callback_finalize_connection_error_raises_system_exception():
 
     with pytest.raises(SystemException):
         await handler.callback("known-state", "some-code")
+    mock_rph.clear_session.assert_called_once_with("known-state")
 
 
 @pytest.mark.asyncio

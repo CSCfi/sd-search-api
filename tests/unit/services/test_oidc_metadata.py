@@ -81,22 +81,26 @@ async def test_failed_fetch_is_not_kept(issuer):
 
 
 @pytest.mark.asyncio
-async def test_error_status_raises_system_exception(issuer):
-    issuer["responses"] = [httpx.Response(500)]
-    with pytest.raises(SystemException):
-        await ProviderMetadata().get()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("document", [["issuer", "jwks_uri"], "issuer", 42])
-async def test_document_that_is_not_an_object_is_refused(issuer, document):
-    issuer["responses"] = [httpx.Response(200, json=document)]
-    with pytest.raises(SystemException):
-        await ProviderMetadata().get()
-
-
-@pytest.mark.asyncio
-async def test_document_missing_endpoints_is_refused(issuer):
-    issuer["responses"] = [httpx.Response(200, json={"issuer": DOCUMENT["issuer"]})]
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(500),
+        httpx.Response(200, text="<html>Service Unavailable</html>"),
+        httpx.Response(200, json=["issuer", "jwks_uri"]),
+        httpx.Response(200, json="issuer"),
+        httpx.Response(200, json=42),
+        httpx.Response(200, json={"issuer": DOCUMENT["issuer"]}),
+    ],
+    ids=[
+        "error-status",
+        "not-json",
+        "json-list",
+        "json-string",
+        "json-number",
+        "missing-endpoints",
+    ],
+)
+async def test_unusable_document_raises_system_exception(issuer, response):
+    issuer["responses"] = [response]
     with pytest.raises(SystemException):
         await ProviderMetadata().get()

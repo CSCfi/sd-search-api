@@ -71,6 +71,14 @@ def test_callback_initiates_web_session(auth_service, client):
     auth_service.initiate_web_session.assert_called_once_with(TOKENS)
     assert resp.status_code == 303
     assert resp.headers["location"] == "/docs"
+    # The login is over: its state cookie goes, on the path it was set with.
+    (state_cookie,) = [
+        c
+        for c in resp.headers.get_list("set-cookie")
+        if c.startswith(OIDC_STATE_COOKIE)
+    ]
+    assert "Max-Age=0" in state_cookie
+    assert "Path=/callback" in state_cookie
 
 
 def test_callback_without_state_cookie_returns_401_and_skips_callback(

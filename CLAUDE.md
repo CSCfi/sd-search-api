@@ -160,16 +160,18 @@ puts it in the `access_token` cookie (`HttpOnly`, `SameSite=Strict`, `Path=/`, `
 the UI's nginx can forward it unchanged as a bearer token to Dataset-on-Demand. A login's state (PKCE verifier,
 nonce) lives in `RPHandler`'s memory from `/login` to its callback, which drops it **however it ends**.
 
-`AuthMiddleware` takes the token from that cookie or `Authorization: Bearer` and **validates it locally** against the
-issuer's JWKS, never by introspection: asymmetric `alg` only (refusing HS256 and `none` before any lookup), `typ`
-`at+jwt` (RFC 9068 — what keeps out ID and refresh tokens signed with the very same key), a `kid`, `iss` equal to
-the **discovered** issuer (LS AAI's has a trailing slash), `aud` containing `OIDC_CLIENT_ID`, `exp` and `sub`.
-A cached key is checked on the event loop; only a fetch goes to a thread. An unknown `kid`, or a cached key set that
-cannot be used, refetches the keys **at most once a minute**, since anyone can name a key; within that minute it is
-a `503`, not a `401`, since it may be a key just rotated in. Keys or discovery unreachable or unusable (an HTML error
-page, JSON that is no key set) are a `503` as well, so a client does not loop through `/refresh` and `/login`.
-`/callback` and `/refresh` run **the middleware's own validator before setting the cookie**, so a provider issuing
-tokens this API rejects (audience, `typ`, issuer) is a logged `503` at login, not a login whose every call is a `401`.
+`AuthMiddleware` takes the token from that cookie (parsed leniently, as Starlette's `request.cookies` is:
+`SimpleCookie` stops at the first cookie it deems invalid, losing ours behind another's) or `Authorization: Bearer`
+and **validates it locally** against the issuer's JWKS, never by introspection: asymmetric `alg` only (refusing HS256
+and `none` before any lookup), `typ` `at+jwt` (RFC 9068 — what keeps out ID and refresh tokens signed with the very
+same key), a `kid`, `iss` equal to the **discovered** issuer (LS AAI's has a trailing slash), `aud` containing
+`OIDC_CLIENT_ID`, `exp` and `sub`. A cached key is checked on the event loop; only a fetch goes to a thread. An
+unknown `kid`, or a cached key set that cannot be used, refetches the keys **at most once a minute**, since anyone can
+name a key; within that minute it is a `503`, not a `401`, since it may be a key just rotated in. Keys or discovery
+unreachable or unusable (an HTML error page, JSON that is no key set) are a `503` as well, so a client does not loop
+through `/refresh` and `/login`. `/callback` and `/refresh` run **the middleware's own validator before setting the
+cookie**, so a provider issuing tokens this API rejects (audience, `typ`, issuer) is a logged `503` at login, not a
+login whose every call is a `401`.
 
 **The refresh token rides only to `/refresh`** (cookie `Path=/refresh`, `Max-Age` from its unverified `exp`, about a
 month): `POST /refresh` redeems it at the token endpoint directly with httpx, not through `RPHandler`, whose login

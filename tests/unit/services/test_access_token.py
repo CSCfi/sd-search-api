@@ -135,14 +135,6 @@ async def test_non_rsa_signing_key_is_accepted(jwks):
     assert await _validator().validate(token) == SUB
 
 
-@pytest.mark.asyncio
-async def test_keys_are_cached_between_validations(jwks):
-    validator = _validator()
-    await validator.validate(_token())
-    await validator.validate(_token())
-    assert jwks["fetches"] == 1
-
-
 @pytest.fixture
 def threads(monkeypatch):
     """Count the lookups sent to a worker thread."""
@@ -158,7 +150,7 @@ def threads(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_cached_key_is_used_without_a_worker_thread(jwks, threads):
+async def test_cached_key_is_used_without_a_fetch_or_a_worker_thread(jwks, threads):
     validator = _validator()
     await validator.validate(_token())  # the first lookup fetches, in a thread
     assert threads["count"] == 1
@@ -166,6 +158,27 @@ async def test_cached_key_is_used_without_a_worker_thread(jwks, threads):
     for _ in range(5):
         assert await validator.validate(_token()) == SUB
     assert threads["count"] == 1
+    assert jwks["fetches"] == 1
+
+
+@pytest.mark.asyncio
+async def test_cached_key_set_is_parsed_once(jwks, monkeypatch):
+    # PyJWKClient would rebuild every key from the JSON on each lookup.
+    parses = {"count": 0}
+    real = access_token_module.PyJWKSet.from_dict
+
+    def from_dict(data):
+        parses["count"] += 1
+        return real(data)
+
+    monkeypatch.setattr(access_token_module.PyJWKSet, "from_dict", from_dict)
+    validator = _validator()
+    await validator.validate(_token())
+    parses["count"] = 0  # the first lookup's own parse, by PyJWKClient
+
+    for _ in range(5):
+        await validator.validate(_token())
+    assert parses["count"] == 1
 
 
 @pytest.mark.asyncio
@@ -371,6 +384,8 @@ async def test_unreachable_keys_raise_signing_keys_unavailable(jwks):
     jwks["responses"] = [URLError("connection refused")]
     with pytest.raises(SigningKeysUnavailable):
         await _validator().validate(_token())
+    # Unreachable is not unusable: no second fetch to hammer an issuer that is down.
+    assert jwks["fetches"] == 1
 
 
 @pytest.mark.asyncio

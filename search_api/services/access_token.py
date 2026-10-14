@@ -4,9 +4,10 @@ import asyncio
 import math
 import threading
 import time
+from typing import Any
 
 import jwt
-from jwt import PyJWK, PyJWKClient
+from jwt import PyJWK, PyJWKClient, PyJWKSet
 
 from search_api.conf import oidc_config
 from search_api.exceptions import SystemException
@@ -55,6 +56,11 @@ class AccessTokenValidator:
     def __init__(self, metadata: ProviderMetadata) -> None:
         self._metadata = metadata
         self._jwks_client: PyJWKClient | None = None
+        # Read once, with the discovery document: not from the environment per request.
+        self._audience = ""
+        # The cached key set PyJWKClient last held, and its signing keys by `kid`:
+        # PyJWKClient would parse every key afresh on each lookup.
+        self._parsed: tuple[Any, dict[str, PyJWK]] | None = None
         self._last_refetch = -math.inf
         # The lookup runs in worker threads, which must not both take one refetch slot.
         self._refetch_lock = threading.Lock()
@@ -84,12 +90,15 @@ class AccessTokenValidator:
                 lifespan=JWKS_CACHE_LIFESPAN,
                 timeout=JWKS_TIMEOUT,
             )
+            self._audience = oidc_config().OIDC_CLIENT_ID
 
         try:
-            # PyJWKClient fetches with blocking urllib, on a cache miss.
-            signing_key = await asyncio.to_thread(
-                self._find_signing_key, self._jwks_client, header.get("kid")
-            )
+            signing_key = self._cached_signing_key(header.get("kid"))
+            if signing_key is None:
+                # A fetch is due: PyJWKClient fetches with blocking urllib.
+                signing_key = await asyncio.to_thread(
+                    self._find_signing_key, self._jwks_client, header.get("kid")
+                )
         except InvalidAccessToken:
             raise  # the token names a key the valid key set does not have
         except (jwt.PyJWTError, ValueError) as exc:
@@ -103,13 +112,41 @@ class AccessTokenValidator:
                 signing_key,
                 algorithms=[algorithm],
                 issuer=metadata["issuer"],
-                audience=oidc_config().OIDC_CLIENT_ID,
+                audience=self._audience,
                 options={"require": ["exp", "sub"]},
             )
         except jwt.PyJWTError as exc:
             raise InvalidAccessToken(str(exc)) from exc
 
         return str(claims["sub"])
+
+    def _cached_signing_key(self, kid: str | None) -> PyJWK | None:
+        """The key named `kid` in the cached key set, or `None` when a fetch is due.
+
+        Reads PyJWKClient's in-memory cache, which never fetches, so the steady state
+        stays on the event loop. Anything unusable in the cache is left to the slow
+        path, which reports it.
+        """
+        if kid is None:
+            return None  # no signing key lacks a `kid`, so the slow path refuses it
+        cache = self._jwks_client.jwk_set_cache if self._jwks_client else None
+        data: Any = cache.get() if cache else None  # the raw JSON, until it expires
+        if not isinstance(data, dict):
+            return None
+        parsed = self._parsed
+        if parsed is None or parsed[0] is not data:
+            try:
+                keys = PyJWKSet.from_dict(data).keys
+            except jwt.PyJWTError:
+                return None
+            # The keys PyJWKClient counts as signing keys: `sig` or unspecified, with a `kid`.
+            signing = {
+                k.key_id: k
+                for k in keys
+                if k.public_key_use in ("sig", None) and k.key_id
+            }
+            parsed = self._parsed = (data, signing)
+        return parsed[1].get(kid)
 
     def _find_signing_key(self, client: PyJWKClient, kid: str | None) -> PyJWK:
         """Find the key named `kid`, refetching the key set at most once a minute."""

@@ -162,8 +162,8 @@ cookie or `Authorization: Bearer` and **validates it locally** against the issue
 asymmetric `alg` only (refusing HS256 and `none` before any lookup), `typ` `at+jwt` (RFC 9068 — what keeps out ID
 and refresh tokens signed with the very same key), `iss` equal to the **discovered** issuer (LS AAI's has a trailing
 slash), `aud` containing `OIDC_CLIENT_ID`, `exp` and `sub` required. An unknown `kid` refetches the keys, at most once
-a minute since anyone can name one; keys or discovery unreachable is a `503`, not a `401`, so a client does not loop
-through `/refresh` and `/login`. `/callback` and `/refresh` run **the middleware's own validator before setting the cookie**,
+a minute since anyone can name one; keys or discovery unreachable or unusable (an HTML error page, JSON that is no
+key set) is a `503`, not a `401`, so a client does not loop through `/refresh` and `/login`. `/callback` and `/refresh` run **the middleware's own validator before setting the cookie**,
 so a provider issuing tokens this API rejects (audience, `typ`, issuer) is a logged `503` at login, not a login
 whose every call is a `401`. **The refresh token rides only to `/refresh`** (cookie `Path=/refresh`, `Max-Age`
 from its unverified `exp`, about a month): `POST /refresh` redeems it at the token endpoint directly with httpx,

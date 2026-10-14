@@ -43,6 +43,8 @@ class ProviderMetadata:
         except (httpx.HTTPError, ValueError) as exc:
             raise SystemException("OIDC discovery failed.") from exc
 
+        if not isinstance(metadata, dict):
+            raise SystemException("OIDC discovery document is not a JSON object.")
         missing = {"issuer", "jwks_uri", "token_endpoint"} - set(metadata)
         if missing:
             raise SystemException(

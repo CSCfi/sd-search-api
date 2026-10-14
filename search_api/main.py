@@ -40,10 +40,12 @@ app = FastAPI(
     lifespan=make_lifespan(_domain),
 )
 
-# One discovery document for the login flow and for validating its tokens.
+# One discovery document and one validator for the login flow and the middleware: the
+# token a login has just checked is then already in the validator's key cache.
 _provider_metadata = ProviderMetadata()
-app.state.auth_service = AuthServiceHandler(_provider_metadata)
-app.add_middleware(AuthMiddleware, validator=AccessTokenValidator(_provider_metadata))
+_validator = AccessTokenValidator(_provider_metadata)
+app.state.auth_service = AuthServiceHandler(_provider_metadata, _validator)
+app.add_middleware(AuthMiddleware, validator=_validator)
 
 app.include_router(make_beacon_router(_domain))
 app.include_router(auth_router)

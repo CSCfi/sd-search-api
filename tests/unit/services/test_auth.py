@@ -22,6 +22,7 @@ from starlette.responses import Response
 
 from search_api.exceptions import SystemException
 from search_api.services import auth as auth_module
+from search_api.services.access_token import InvalidAccessToken
 from search_api.services.auth import AuthServiceHandler, RefreshRejected, TokenSet
 
 TOKEN_ENDPOINT = "http://localhost:9999/token"
@@ -36,10 +37,28 @@ class FakeMetadata:
         }
 
 
+class FakeValidator:
+    """Accepts every access token, or raises `error`; records what it was shown."""
+
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.seen: list[str] = []
+
+    async def validate(self, token: str) -> str:
+        self.seen.append(token)
+        if self.error:
+            raise self.error
+        return "user-123"
+
+
 def _handler_with_mock_rph(
     token_response: dict | None = None,
+    validator: FakeValidator | None = None,
 ) -> tuple[AuthServiceHandler, MagicMock]:
-    handler = AuthServiceHandler(FakeMetadata())  # type: ignore[arg-type]
+    handler = AuthServiceHandler(
+        FakeMetadata(),  # type: ignore[arg-type]
+        validator or FakeValidator(),  # type: ignore[arg-type]
+    )
     mock_rph = MagicMock()
     cstate = mock_rph.get_client_from_session_key.return_value.get_context.return_value.cstate
     cstate.get_set.return_value = token_response or {}
@@ -175,6 +194,27 @@ async def test_callback_success_returns_identity_provider_tokens():
     )
     # The finished login's state is dropped rather than kept for the process's life.
     mock_rph.clear_session.assert_called_once_with("known-state")
+    # Checked as the middleware will check it, before it becomes the session.
+    assert handler._validator.seen == ["at"]  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_callback_refuses_an_access_token_the_api_would_reject(caplog):
+    validator = FakeValidator(InvalidAccessToken("Invalid audience"))
+    handler, mock_rph = _handler_with_mock_rph(
+        {"access_token": "at", "expires_in": 3599, "refresh_token": "rt"}, validator
+    )
+    mock_rph.get_session_information.return_value = {"iss": "http://localhost:9999"}
+    mock_rph.finalize.return_value = {"userinfo": {"sub": "user-123"}, "token": "at"}
+
+    with pytest.raises(SystemException):
+        await handler.callback("known-state", "good-code")
+
+    # A misconfiguration, logged with the reason, rather than a login that 401s.
+    (record,) = [r for r in caplog.records if r.name == "search_api.services.auth"]
+    assert record.levelname == "ERROR"
+    assert "Invalid audience" in record.getMessage()
+    mock_rph.clear_session.assert_called_once_with("known-state")
 
 
 @pytest.mark.asyncio
@@ -215,6 +255,32 @@ async def test_refresh_posts_refresh_grant_with_basic_auth(token_endpoint):
     }
     expected = base64.b64encode(b"test-client-id:test-client-secret").decode()
     assert request.headers["authorization"] == f"Basic {expected}"
+    assert handler._validator.seen == ["new-at"]  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_refresh_refuses_an_access_token_the_api_would_reject(
+    token_endpoint, caplog
+):
+    token_endpoint["responses"] = [
+        httpx.Response(
+            200,
+            json={
+                "access_token": "new-at",
+                "expires_in": 3599,
+                "refresh_token": "new-rt",
+            },
+        )
+    ]
+    validator = FakeValidator(InvalidAccessToken("Not an access token."))
+    handler, _ = _handler_with_mock_rph(validator=validator)
+
+    with pytest.raises(SystemException):
+        await handler.refresh("old-rt")
+
+    (record,) = [r for r in caplog.records if r.name == "search_api.services.auth"]
+    assert record.levelname == "ERROR"
+    assert "Not an access token." in record.getMessage()
 
 
 @pytest.mark.asyncio

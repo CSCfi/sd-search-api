@@ -18,6 +18,7 @@ from starlette.responses import RedirectResponse, Response
 
 from search_api.conf import oidc_config
 from search_api.exceptions import SystemException
+from search_api.services.access_token import AccessTokenValidator, InvalidAccessToken
 from search_api.services.oidc_metadata import ProviderMetadata
 
 SESSION_COOKIE = "access_token"
@@ -57,8 +58,15 @@ class RefreshRejected(Exception):
 class AuthServiceHandler:
     """OIDC Authorization Code + PKCE relying party, backed by idpyoidc's `RPHandler`."""
 
-    def __init__(self, metadata: ProviderMetadata | None = None) -> None:
+    def __init__(
+        self,
+        metadata: ProviderMetadata | None = None,
+        validator: AccessTokenValidator | None = None,
+    ) -> None:
         self._metadata = metadata or ProviderMetadata()
+        # The middleware's own validator, so that a token is never set as the session
+        # unless every later request will accept it.
+        self._validator = validator or AccessTokenValidator(self._metadata)
         self._rph: RPHandler | None = None
         # RPHandler's calls are synchronous (built on `requests`) and get dispatched to a
         # thread via asyncio.to_thread; the lock keeps concurrent logins from racing on the
@@ -173,6 +181,7 @@ class AuthServiceHandler:
             raise HTTPException(
                 status_code=401, detail="OIDC provider issued no access token."
             )
+        await self._check_access_token(access_token)
         expires_in = token_response.get("expires_in")
         return TokenSet(
             access_token=access_token,
@@ -233,6 +242,7 @@ class AuthServiceHandler:
                 "OIDC token refresh returned no access token."
             ) from exc
 
+        await self._check_access_token(access_token)
         expires_in = body.get("expires_in")
         return TokenSet(
             access_token=access_token,
@@ -240,6 +250,20 @@ class AuthServiceHandler:
             # Kept when the provider does not rotate it.
             refresh_token=body.get("refresh_token") or refresh_token,
         )
+
+    async def _check_access_token(self, access_token: str) -> None:
+        """Refuse a token the middleware would reject, before it becomes the session."""
+        try:
+            await self._validator.validate(access_token)
+        except InvalidAccessToken as exc:
+            logger.error(
+                "OIDC provider issued an access token this API rejects: %s. Check the "
+                "client registration, OIDC_URL and OIDC_CLIENT_ID.",
+                exc,
+            )
+            raise SystemException(
+                "OIDC provider issued an access token this API rejects."
+            ) from exc
 
     def initiate_web_session(self, tokens: TokenSet) -> RedirectResponse:
         """Set the session cookies and redirect to the post-login URL."""

@@ -143,6 +143,60 @@ async def test_keys_are_cached_between_validations(jwks):
     assert jwks["fetches"] == 1
 
 
+@pytest.fixture
+def threads(monkeypatch):
+    """Count the lookups sent to a worker thread."""
+    calls = {"count": 0}
+    real = access_token_module.asyncio.to_thread
+
+    async def to_thread(*args, **kwargs):
+        calls["count"] += 1
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(access_token_module.asyncio, "to_thread", to_thread)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_cached_key_is_used_without_a_worker_thread(jwks, threads):
+    validator = _validator()
+    await validator.validate(_token())  # the first lookup fetches, in a thread
+    assert threads["count"] == 1
+
+    for _ in range(5):
+        assert await validator.validate(_token()) == SUB
+    assert threads["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_expired_key_cache_is_fetched_again_in_a_thread(jwks, threads):
+    validator = _validator()
+    await validator.validate(_token())
+    assert validator._jwks_client is not None
+    validator._jwks_client.jwk_set_cache.lifespan = 0  # expired from now on
+
+    assert await validator.validate(_token()) == SUB
+    assert threads["count"] == 2
+    assert jwks["fetches"] == 2
+
+
+@pytest.mark.asyncio
+async def test_settings_are_read_once(jwks, monkeypatch):
+    reads = {"count": 0}
+    real = access_token_module.oidc_config
+
+    def oidc_config():
+        reads["count"] += 1
+        return real()
+
+    monkeypatch.setattr(access_token_module, "oidc_config", oidc_config)
+    validator = _validator()
+    for _ in range(3):
+        await validator.validate(_token())
+
+    assert reads["count"] == 1
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "claims",

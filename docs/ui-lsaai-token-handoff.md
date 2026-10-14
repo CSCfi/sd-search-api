@@ -27,13 +27,14 @@ The cookies are host-only.
 |---|---|
 | `access_token` cookie | The LS AAI access token. `HttpOnly`, `SameSite=Strict`, `Path=/`, `Max-Age` 1 hour. Set by `/callback` and `/refresh`. |
 | `refresh_token` cookie | The LS AAI refresh token. `HttpOnly`, `SameSite=Strict`, `Path=/refresh`, so the browser sends it only to `/refresh`. |
-| `POST /refresh` | Needs no request body; it reads the refresh cookie. **`204`**: both cookies replaced. **`401`**: the session is over and the user must log in. That covers no refresh cookie, or LS AAI rejecting it, in which case both cookies are also cleared. **`503`**: LS AAI unreachable; cookies unchanged, so this is not a logout. |
+| `POST /refresh` | Needs no request body; it reads the refresh cookie. **`204`**: both cookies replaced. **`401`**: this refresh token is no good: there is no refresh cookie, or LS AAI rejected it. The cookies are left alone, because another tab may just have refreshed and been given new ones (see change 3). **`503`**: LS AAI unreachable; cookies unchanged, so this is not a logout. |
 | Any protected API path | **`401`** when the access token is missing, invalid or expired. **`503`** when the API cannot fetch LS AAI's signing keys. |
 | `/login`, `/callback`, `/logout` | Unchanged. `/logout` now clears both cookies. |
 
-Each refresh replaces the refresh token, and the old one stops working. If two refreshes run in
-parallel, the second one presents a spent token, gets `401`, and logs the user out. **So the UI
-must never run two refreshes at once** (see change 3).
+Each refresh replaces the refresh token, and the old one stops working. The cookies are shared
+by every tab, so a refresh in one tab can race a refresh in another. The tab that loses presents
+a spent token and gets `401`. **So the UI must never run two refreshes at once, across all tabs,
+and must retry its request before treating a refresh `401` as a logout** (see change 3).
 
 ## Changes
 
@@ -72,21 +73,30 @@ path-scoped refresh cookie is not sent.
 
   Document `DOD_URL` in its place.
 
-### 3. One refresh at a time, then retry (`src/services/apiClient.ts`)
+### 3. One refresh at a time across tabs, then retry (`src/services/apiClient.ts`)
 
 Replace the `401` handling in the response interceptor. Today it sends the browser to `/logout`.
 
 - **On a `401` from any request** (other than `/refresh` itself, and other than a request that
-  has already been retried once):
-  1. Call `POST /refresh` with `withCredentials: true`, using plain axios. Do not use `apiClient`,
-     whose `baseURL` is `/api`; `/refresh` is at the root of the origin.
-  2. Share a single in-flight refresh promise. Every `401` that arrives while a refresh is running
-     waits for that same promise; do not start another refresh.
-  3. If the refresh returns `204`, retry the original request once.
-  4. If it returns `401`, do what a `401` does today: clear `postLoginRedirect` and set
+  has already been retried):
+  1. Take the cross-tab lock with the Web Locks API:
+     `navigator.locks.request('session-refresh', async () => { ... })`. Every tab of the origin
+     shares it, so only one tab refreshes at a time. Inside a tab, also share a single in-flight
+     promise, so every `401` that arrives while the tab is waiting or refreshing waits for it.
+  2. Once the lock is held, **retry the original request first**. Another tab may have refreshed
+     while this one waited. JavaScript can't see that, because the cookies are `HttpOnly`, but the
+     retry will succeed with the new cookies. If it does, release the lock and stop.
+  3. Otherwise call `POST /refresh` with `withCredentials: true`, using plain axios. Do not use
+     `apiClient`, whose `baseURL` is `/api`; `/refresh` is at the root of the origin.
+  4. If the refresh returns `204`, retry the original request once.
+  5. If it returns `401`, **retry the original request once more** before logging out. This covers
+     a browser without Web Locks, where another tab's refresh can still win the race. If that
+     retry also gets `401`, do what a `401` does today: clear `postLoginRedirect` and set
      `window.location.href = '/logout'`.
-  5. If it returns `503` or a network error, reject with an `ApiError` (status `503`) and do
+  6. If it returns `503` or a network error, reject with an `ApiError` (status `503`) and do
      **not** log the user out.
+- **Without Web Locks** (`navigator.locks` undefined), fall back to the in-tab promise alone.
+  Steps 2 and 5 still keep the losing tab from logging the user out.
 - **Put the refresh logic in its own module**, for example `src/services/sessionRefresh.ts`. The
   DoD calls (change 4) and the session check (change 5) need the same logic.
 
@@ -124,8 +134,12 @@ guard redirects to `/`.
   and the store and router tests):
   - a `401` followed by a successful refresh retries the original request once
   - parallel `401`s trigger exactly one `POST /refresh`
-  - a refresh `401` redirects to `/logout`
+  - refreshes run under the `session-refresh` Web Lock, and the original request is retried
+    before `/refresh` is called once the lock is held
+  - a refresh `401` followed by a successful retry does not redirect (another tab refreshed)
+  - a refresh `401` followed by a failed retry redirects to `/logout`
   - a refresh `503` does not redirect
+  - without `navigator.locks`, the in-tab promise alone still allows only one refresh
   - a retried request that gets `401` again does not loop
   - the DoD calls hit `/dod...` with `withCredentials: true`, and their body has no `user` field
   - `checkSession()` refreshes before reporting logged out
@@ -137,7 +151,8 @@ guard redirects to `/`.
   For `/dod`, the Vite dev proxy cannot read the cookie and add a header without custom code. Use
   the Docker image to test DoD, and note this in the README.
 - **`.claude/rules/auth.md`:** describe the refresh flow, the rule that only one refresh runs at a
-  time, and that DoD auth is added by nginx from the cookie. Remove "token refresh" from "What Is
+  time across tabs (Web Locks), the retry before logging out, and that DoD auth is added by nginx
+  from the cookie. Remove "token refresh" from "What Is
   Not Implemented Yet".
 
 ## Out of scope
@@ -146,8 +161,6 @@ guard redirects to `/`.
   repository.
 - A Content Security Policy. Making DoD same-origin makes one possible, but leave it for a
   separate change.
-- Keeping two tabs from refreshing at the same moment. This is rare, and the losing tab only goes
-  through `/login` again.
 
 ## Open question that does not block this work
 

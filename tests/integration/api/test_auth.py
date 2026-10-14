@@ -107,24 +107,24 @@ def test_refresh_replaces_both_cookies(client):
     assert client.get(PROTECTED_PATH).status_code == 200
 
 
-def test_spent_refresh_token_is_rejected_and_clears_the_session(client):
+def test_tab_losing_a_refresh_race_does_not_end_the_winners_session(client):
     login(client)
     spent, _ = _cookie(client, "refresh_token")
+
+    # Tab A refreshes first; LS AAI replaces the refresh token.
     assert client.post("/refresh").status_code == 204
 
-    # Present the replaced refresh token again, as a second tab would.
+    # Tab B sent the replaced token at the same moment.
     with httpx.Client(base_url=API_URL, timeout=30.0) as other_tab:
         response = other_tab.post(
             "/refresh", headers={"Cookie": f"refresh_token={spent}"}
         )
 
     assert response.status_code == 401
-    cleared = {
-        header.split("=", 1)[0]
-        for header in response.headers.get_list("set-cookie")
-        if "Max-Age=0" in header
-    }
-    assert cleared == {"access_token", "refresh_token"}
+    assert "set-cookie" not in response.headers
+    # Tab A's new cookies, shared by every tab, still work.
+    assert client.get(PROTECTED_PATH).status_code == 200
+    assert client.post("/refresh").status_code == 204
 
 
 def test_refresh_token_is_not_accepted_as_access_token(client):

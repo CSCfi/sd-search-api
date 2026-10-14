@@ -213,12 +213,14 @@ async def test_unknown_key_refetches_at_most_once_a_minute(jwks, monkeypatch):
     monkeypatch.setattr(access_token_module.time, "monotonic", lambda: clock["now"])
     validator = _validator()
 
+    # Looked up and absent from a fresh key set: the token's fault.
     with pytest.raises(InvalidAccessToken):
         await validator.validate(_token(kid="no-such-key"))
     assert jwks["fetches"] == 2  # the initial fetch and one refetch
 
+    # Within the minute it is not looked up, so it is not yet the token's fault.
     clock["now"] += 59
-    with pytest.raises(InvalidAccessToken):
+    with pytest.raises(SigningKeysUnavailable):
         await validator.validate(_token(kid="another-missing-key"))
     assert jwks["fetches"] == 2
 
@@ -226,6 +228,30 @@ async def test_unknown_key_refetches_at_most_once_a_minute(jwks, monkeypatch):
     with pytest.raises(InvalidAccessToken):
         await validator.validate(_token(kid="yet-another-missing-key"))
     assert jwks["fetches"] == 3
+
+
+@pytest.mark.asyncio
+async def test_made_up_key_cannot_get_a_rotated_key_rejected(jwks, monkeypatch):
+    # A made-up kid takes the refetch slot just before the provider rotates its key:
+    # tokens signed with the new key are a 503 (not a logout), then accepted.
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(access_token_module.time, "monotonic", lambda: clock["now"])
+    jwks["responses"] = [
+        {"keys": [_jwk(KEY, "rsa1")]},
+        {"keys": [_jwk(KEY, "rsa1")]},
+        {"keys": [_jwk(KEY, "rsa1"), _jwk(OTHER_KEY, "rsa2")]},
+    ]
+    validator = _validator()
+    with pytest.raises(InvalidAccessToken):
+        await validator.validate(_token(kid="made-up"))
+
+    rotated = _token(key=OTHER_KEY, kid="rsa2")
+    clock["now"] += 30
+    with pytest.raises(SigningKeysUnavailable):
+        await validator.validate(rotated)
+
+    clock["now"] += 31
+    assert await validator.validate(rotated) == SUB
 
 
 @pytest.mark.asyncio

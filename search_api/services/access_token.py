@@ -2,6 +2,7 @@
 
 import asyncio
 import math
+import threading
 import time
 
 import jwt
@@ -55,6 +56,8 @@ class AccessTokenValidator:
         self._metadata = metadata
         self._jwks_client: PyJWKClient | None = None
         self._last_refetch = -math.inf
+        # The lookup runs in worker threads, which must not both take one refetch slot.
+        self._refetch_lock = threading.Lock()
 
     async def validate(self, token: str) -> str:
         """Return the token's `sub`.
@@ -112,9 +115,14 @@ class AccessTokenValidator:
         """Find the key named `kid`, refetching the key set at most once a minute."""
         for refetch in (False, True):
             if refetch:
-                if time.monotonic() - self._last_refetch < JWKS_MIN_REFETCH_INTERVAL:
-                    break
-                self._last_refetch = time.monotonic()
+                with self._refetch_lock:
+                    now = time.monotonic()
+                    if now - self._last_refetch < JWKS_MIN_REFETCH_INTERVAL:
+                        # Not looked up yet, so not the token's fault yet: it may be
+                        # signed with a key just rotated in. A 503 does not log the
+                        # user out, as a 401 would, and the next slot fetches it.
+                        raise SigningKeysUnavailable("Signing key not yet fetched.")
+                    self._last_refetch = now
             for key in client.get_signing_keys(refresh=refetch):
                 if key.key_id == kid:
                     return key

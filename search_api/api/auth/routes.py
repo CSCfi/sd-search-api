@@ -3,7 +3,7 @@
 from urllib.parse import parse_qs, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.responses import RedirectResponse, Response
 
 from search_api.conf import oidc_config
 from search_api.services.auth import REFRESH_COOKIE, AuthServiceHandler, RefreshRejected
@@ -80,8 +80,11 @@ async def refresh(
 ) -> Response:
     """Renew the session from the refresh cookie, replacing both session cookies.
 
-    `401` means the session is over: log in again. `503` means the identity provider
-    could not be reached; the cookies are left as they were, so a later retry can work.
+    `401` means this refresh token is no good. The cookies are left alone, because
+    LS AAI replaces the refresh token on each use: when two tabs refresh at once, the
+    one that loses presents a spent token, and clearing the cookies would delete the
+    ones the winning tab has just been given. `503` means the identity provider could
+    not be reached; the cookies are left as they were, so a later retry can work.
     """
     refresh_token = request.cookies.get(REFRESH_COOKIE)
     if not refresh_token:
@@ -89,12 +92,8 @@ async def refresh(
 
     try:
         tokens = await auth_service.refresh(refresh_token)
-    except RefreshRejected:
-        rejected = JSONResponse(
-            status_code=401, content={"detail": "Refresh token rejected."}
-        )
-        auth_service.clear_session_cookies(rejected)
-        return rejected
+    except RefreshRejected as exc:
+        raise HTTPException(status_code=401, detail="Refresh token rejected.") from exc
 
     response = Response(status_code=204)
     auth_service.set_session_cookies(response, tokens)

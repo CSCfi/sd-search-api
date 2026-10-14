@@ -80,7 +80,6 @@ class AuthServiceHandler:
                 "client_id": config.OIDC_CLIENT_ID,
                 "client_secret": config.OIDC_CLIENT_SECRET,
                 "client_type": "oidc",
-                "client_authn_methods": ["client_secret_basic"],
                 "redirect_uris": [config.callback_url],
                 "preference": {
                     "response_types_supported": ["code"],
@@ -198,8 +197,13 @@ class AuthServiceHandler:
             raise SystemException("OIDC token refresh failed.") from exc
 
         if response.status_code in (400, 401):
-            # invalid_grant: expired, revoked, or spent by an earlier refresh.
-            raise RefreshRejected(response.text)
+            # Expired, revoked, or spent by an earlier refresh. Only the error code is
+            # kept: LS AAI echoes the refresh token itself in `error_description`.
+            try:
+                error = str(response.json().get("error", response.status_code))
+            except ValueError, AttributeError:
+                error = str(response.status_code)
+            raise RefreshRejected(error)
         if not response.is_success:
             raise SystemException(f"OIDC token refresh failed: {response.status_code}.")
 

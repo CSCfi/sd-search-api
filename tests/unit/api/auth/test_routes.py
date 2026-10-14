@@ -134,19 +134,17 @@ def test_refresh_without_cookie_returns_401_and_skips_provider(
     refreshing_service.refresh.assert_not_awaited()
 
 
-def test_refresh_rejected_returns_401_and_clears_cookies(refreshing_service, client):
+def test_refresh_rejected_returns_401_and_leaves_cookies_alone(
+    refreshing_service, client
+):
+    # Another tab may just have been given new cookies; clearing would delete them.
     refreshing_service.refresh.side_effect = RefreshRejected("invalid_grant")
     client.cookies.set("refresh_token", "spent-rt", path="/refresh")
 
     resp = client.post("/refresh")
 
     assert resp.status_code == 401
-    set_cookies = resp.headers.get_list("set-cookie")
-    assert any(c.startswith("access_token=") and "Max-Age=0" in c for c in set_cookies)
-    assert any(
-        c.startswith("refresh_token=") and "Max-Age=0" in c and "Path=/refresh" in c
-        for c in set_cookies
-    )
+    assert "set-cookie" not in resp.headers
 
 
 def test_refresh_provider_unreachable_returns_503_and_keeps_cookies(

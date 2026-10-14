@@ -244,6 +244,26 @@ async def test_refresh_rejected_by_provider_raises_refresh_rejected(
 
 
 @pytest.mark.asyncio
+async def test_refresh_rejection_does_not_carry_the_token(token_endpoint):
+    # LS AAI echoes the rejected refresh token in error_description.
+    token_endpoint["responses"] = [
+        httpx.Response(
+            400,
+            json={
+                "error": "invalid_token",
+                "error_description": "Invalid refresh token: secret-rt",
+            },
+        )
+    ]
+    handler, _ = _handler_with_mock_rph()
+
+    with pytest.raises(RefreshRejected) as exc_info:
+        await handler.refresh("secret-rt")
+
+    assert str(exc_info.value) == "invalid_token"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "response",
     [

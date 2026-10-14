@@ -231,16 +231,84 @@ async def test_refresh_keeps_refresh_token_when_none_returned(token_endpoint):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", [400, 401])
-async def test_refresh_rejected_by_provider_raises_refresh_rejected(
-    token_endpoint, status
+@pytest.mark.parametrize("error", ["invalid_grant", "invalid_token"])
+async def test_dead_refresh_token_raises_refresh_rejected(
+    token_endpoint, status, error
 ):
-    token_endpoint["responses"] = [
-        httpx.Response(status, json={"error": "invalid_grant"})
-    ]
+    # invalid_grant per RFC 6749; LS AAI answers a spent token with invalid_token.
+    token_endpoint["responses"] = [httpx.Response(status, json={"error": error})]
     handler, _ = _handler_with_mock_rph()
 
     with pytest.raises(RefreshRejected):
         await handler.refresh("spent-rt")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("response", "error"),
+    [
+        (httpx.Response(401, json={"error": "invalid_client"}), "invalid_client"),
+        (
+            httpx.Response(400, json={"error": "unauthorized_client"}),
+            "unauthorized_client",
+        ),
+        (httpx.Response(400, json={"error": "invalid_request"}), "invalid_request"),
+        (httpx.Response(400, json={"error": "invalid_scope"}), "invalid_scope"),
+        (
+            httpx.Response(400, json={"error": "unsupported_grant_type"}),
+            "unsupported_grant_type",
+        ),
+        (httpx.Response(400, text="not json"), "None"),
+        (httpx.Response(400, json={"detail": "no error code"}), "None"),
+        (httpx.Response(500), "None"),
+    ],
+    ids=[
+        "invalid_client",
+        "unauthorized_client",
+        "invalid_request",
+        "invalid_scope",
+        "unsupported_grant_type",
+        "not-json",
+        "no-error-code",
+        "server-error",
+    ],
+)
+async def test_refresh_refused_for_the_client_raises_logged_system_exception(
+    token_endpoint, caplog, response, error
+):
+    # A misconfigured client must not pass for every session expiring.
+    token_endpoint["responses"] = [response]
+    handler, _ = _handler_with_mock_rph()
+
+    with (
+        caplog.at_level("ERROR", logger="search_api.services.auth"),
+        pytest.raises(SystemException),
+    ):
+        await handler.refresh("rt")
+
+    (record,) = [r for r in caplog.records if r.name == "search_api.services.auth"]
+    assert record.levelname == "ERROR"
+    assert error in record.getMessage()
+
+
+@pytest.mark.asyncio
+async def test_refused_refresh_log_leaves_out_the_description(token_endpoint, caplog):
+    token_endpoint["responses"] = [
+        httpx.Response(
+            401,
+            json={
+                "error": "invalid_client",
+                "error_description": "Bad client for token secret-rt",
+            },
+        )
+    ]
+    handler, _ = _handler_with_mock_rph()
+
+    with pytest.raises(SystemException) as exc_info:
+        await handler.refresh("secret-rt")
+
+    assert "secret-rt" not in caplog.text
+    assert "secret-rt" not in str(exc_info.value)
 
 
 @pytest.mark.asyncio
@@ -267,7 +335,6 @@ async def test_refresh_rejection_does_not_carry_the_token(token_endpoint):
 @pytest.mark.parametrize(
     "response",
     [
-        httpx.Response(500),
         httpx.Response(200, json={"token_type": "Bearer"}),
         httpx.Response(200, text="not json"),
         httpx.ConnectError("unreachable"),

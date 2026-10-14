@@ -11,7 +11,8 @@ The authorize endpoint immediately redirects back to the registered `redirect_ur
 with a fresh code. The token endpoint requires `client_secret_basic` but accepts any
 `client_id`/`client_secret`, and issues tokens shaped like LS AAI's: an RFC 9068 access
 token (`typ: at+jwt`) and, only when `offline_access` was requested, a JWT refresh token
-(`typ: JWT`, no `sub`) that each refresh grant replaces, the spent one being refused.
+(`typ: JWT`, no `sub`) that each refresh grant replaces, the spent one being refused
+with `invalid_token`, as LS AAI refuses it.
 """
 
 import base64
@@ -195,7 +196,8 @@ class MockAuthRequestHandler(BaseHTTPRequestHandler):
                     form.get("refresh_token", [""])[0], None
                 )
             if scope is None:
-                self._send_json({"error": "invalid_grant"}, status=400)
+                # As LS AAI answers it; RFC 6749 would say invalid_grant.
+                self._send_json({"error": "invalid_token"}, status=400)
                 return
             response = self._issue_tokens(client_id, scope)
         else:

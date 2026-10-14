@@ -166,10 +166,12 @@ a minute since anyone can name one; keys or discovery unreachable is a `503`, no
 through `/refresh` and `/login`. **The refresh token rides only to `/refresh`** (cookie `Path=/refresh`, `Max-Age`
 from its unverified `exp`, about a month): `POST /refresh` redeems it at the token endpoint directly with httpx,
 not through `RPHandler`, whose login state is in-process memory and gone after a restart or on another replica, and
-**resets both cookies, since LS AAI rotates the refresh token** — a spent one is `invalid_grant`, answered `401`
-**leaving the cookies alone**: they are shared by every tab, and the tab that lost a refresh race would otherwise
-delete the ones the winner was just given. Refresh is client-driven (a `401`, one `POST /refresh` at a time across
-tabs, a retry, and a retry again before a refresh `401` counts as logged out); LS AAI issues no refresh
+**resets both cookies, since LS AAI rotates the refresh token** — a spent or expired one is `invalid_grant` (LS AAI
+says `invalid_token`), answered `401` **leaving the cookies alone**: they are shared by every tab, and the tab that
+lost a refresh race would otherwise delete the ones the winner was just given. **Any other refusal from the token
+endpoint** — the client's credentials or permissions — **is logged and a `503`**, so a misconfiguration cannot pass
+for every session expiring. Refresh is client-driven (a `401`, one `POST /refresh` at a time across tabs, a retry,
+and a retry again before a refresh `401` counts as logged out); LS AAI issues no refresh
 token unless `offline_access` is requested, hence its place in the default `OIDC_SCOPE`. `tests/integration/mockauth.py`
 issues tokens shaped like LS AAI's: an `at+jwt` access token, and a JWT refresh token that is replaced on every use
 and refused once spent, without revoking the one that replaced it.

@@ -28,6 +28,13 @@ REFRESH_COOKIE_PATH = "/refresh"
 
 REFRESH_TIMEOUT = 10.0
 
+# The refresh token itself is dead: expired, revoked or spent. RFC 6749 says
+# invalid_grant; LS AAI answers a spent one with invalid_token. Every other error from
+# the token endpoint is about the client, not the session.
+REFRESH_TOKEN_REJECTED = frozenset({"invalid_grant", "invalid_token"})
+
+logger = logging.getLogger(__name__)
+
 # idpyoidc's RPHandler logs the client config -- including OIDC_CLIENT_SECRET -- at
 # DEBUG on init. Capped here, independent of whatever level the app's own root logger
 # ends up at, so raising verbosity elsewhere can never leak the secret.
@@ -196,16 +203,27 @@ class AuthServiceHandler:
         except httpx.HTTPError as exc:
             raise SystemException("OIDC token refresh failed.") from exc
 
-        if response.status_code in (400, 401):
-            # Expired, revoked, or spent by an earlier refresh. Only the error code is
-            # kept: LS AAI echoes the refresh token itself in `error_description`.
-            try:
-                error = str(response.json().get("error", response.status_code))
-            except ValueError, AttributeError:
-                error = str(response.status_code)
-            raise RefreshRejected(error)
         if not response.is_success:
-            raise SystemException(f"OIDC token refresh failed: {response.status_code}.")
+            # Only the error code is kept and logged: LS AAI echoes the refresh token
+            # itself in `error_description`.
+            try:
+                error = response.json().get("error")
+            except ValueError, AttributeError:
+                error = None
+            if response.status_code in (400, 401) and error in REFRESH_TOKEN_REJECTED:
+                raise RefreshRejected(error)
+            # A refusal of the client itself would otherwise end every session at its
+            # first refresh, looking like nothing more than sessions expiring.
+            logger.error(
+                "OIDC token endpoint refused the refresh: HTTP %s, error %r. Check "
+                "OIDC_CLIENT_ID, OIDC_CLIENT_SECRET and that the client may use "
+                "refresh tokens and offline_access.",
+                response.status_code,
+                error,
+            )
+            raise SystemException(
+                f"OIDC token refresh refused: {response.status_code} {error!r}."
+            )
 
         try:
             body = response.json()

@@ -1,0 +1,414 @@
+"""Unit tests for search_api.services.access_token."""
+
+import io
+import json
+import os
+import time
+from typing import Any
+from urllib.error import URLError
+
+os.environ["BASE_URL"] = "http://localhost:8000"
+os.environ["OIDC_URL"] = "http://localhost:9999"
+os.environ["OIDC_CLIENT_ID"] = "test-client-id"
+os.environ["OIDC_CLIENT_SECRET"] = "test-client-secret"
+
+import jwt
+import pytest
+from cryptography.hazmat.primitives.asymmetric import ec, rsa
+from jwt import jwks_client
+from jwt.algorithms import ECAlgorithm, RSAAlgorithm
+
+import search_api.services.access_token as access_token_module
+from search_api.exceptions import SystemException
+from search_api.services.access_token import (
+    AccessTokenValidator,
+    InvalidAccessToken,
+    SigningKeysUnavailable,
+)
+
+ISSUER = "https://issuer.example/oidc/"
+CLIENT_ID = "test-client-id"
+SUB = "user-1@lifescience-ri.eu"
+
+KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+OTHER_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+
+def _jwk(private_key: Any, kid: str, algorithm: str = "RS256") -> dict[str, Any]:
+    to_jwk = ECAlgorithm.to_jwk if algorithm.startswith("ES") else RSAAlgorithm.to_jwk
+    jwk = to_jwk(private_key.public_key(), as_dict=True)
+    return {**jwk, "kid": kid, "use": "sig", "alg": algorithm}
+
+
+def _token(
+    *,
+    key: Any = KEY,
+    kid: str = "rsa1",
+    typ: str = "at+jwt",
+    algorithm: str = "RS256",
+    **overrides: Any,
+) -> str:
+    now = int(time.time())
+    claims = {
+        "iss": ISSUER,
+        "aud": CLIENT_ID,
+        "sub": SUB,
+        "client_id": CLIENT_ID,
+        "scope": "openid profile email",
+        "iat": now,
+        "exp": now + 3600,
+        "jti": "jti-1",
+    }
+    claims.update(overrides)
+    claims = {k: v for k, v in claims.items() if v is not None}
+    return jwt.encode(
+        claims, key, algorithm=algorithm, headers={"kid": kid, "typ": typ}
+    )
+
+
+class FakeMetadata:
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+
+    async def get(self) -> dict[str, Any]:
+        if self.error:
+            raise self.error
+        return {
+            "issuer": ISSUER,
+            "jwks_uri": "https://issuer.example/oidc/jwk",
+            "token_endpoint": "https://issuer.example/oidc/token",
+        }
+
+
+@pytest.fixture
+def jwks(monkeypatch):
+    """Stub the JWKS endpoint, below PyJWKClient's own caching.
+
+    Each fetch answers with the next entry of `responses`, the last one repeating; an
+    exception entry is raised, as `urlopen` would, and a bytes entry is the raw body.
+    """
+    state: dict[str, Any] = {"responses": [{"keys": [_jwk(KEY, "rsa1")]}], "fetches": 0}
+
+    def urlopen(request, timeout=None, context=None):
+        state["fetches"] += 1
+        responses = state["responses"]
+        response = responses[0] if len(responses) == 1 else responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        if isinstance(response, bytes):
+            return io.BytesIO(response)
+        return io.BytesIO(json.dumps(response).encode())
+
+    monkeypatch.setattr(jwks_client.urllib.request, "urlopen", urlopen)
+    return state
+
+
+def _validator(metadata: FakeMetadata | None = None) -> AccessTokenValidator:
+    return AccessTokenValidator(metadata or FakeMetadata())  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_valid_access_token_returns_sub(jwks):
+    assert await _validator().validate(_token()) == SUB
+
+
+@pytest.mark.asyncio
+async def test_typ_is_case_insensitive_and_accepts_media_type(jwks):
+    validator = _validator()
+    assert await validator.validate(_token(typ="AT+JWT")) == SUB
+    assert await validator.validate(_token(typ="application/at+jwt")) == SUB
+
+
+@pytest.mark.asyncio
+async def test_audience_may_be_a_list_containing_the_client(jwks):
+    token = _token(aud=["another-resource", CLIENT_ID])
+    assert await _validator().validate(token) == SUB
+
+
+@pytest.mark.asyncio
+async def test_non_rsa_signing_key_is_accepted(jwks):
+    ec_key = ec.generate_private_key(ec.SECP256R1())
+    jwks["responses"] = [{"keys": [_jwk(ec_key, "ec1", "ES256")]}]
+
+    token = _token(key=ec_key, kid="ec1", algorithm="ES256")
+
+    assert await _validator().validate(token) == SUB
+
+
+@pytest.fixture
+def threads(monkeypatch):
+    """Count the lookups sent to a worker thread."""
+    calls = {"count": 0}
+    real = access_token_module.asyncio.to_thread
+
+    async def to_thread(*args, **kwargs):
+        calls["count"] += 1
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(access_token_module.asyncio, "to_thread", to_thread)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_cached_key_is_used_without_a_fetch_or_a_worker_thread(jwks, threads):
+    validator = _validator()
+    await validator.validate(_token())  # the first lookup fetches, in a thread
+    assert threads["count"] == 1
+
+    for _ in range(5):
+        assert await validator.validate(_token()) == SUB
+    assert threads["count"] == 1
+    assert jwks["fetches"] == 1
+
+
+@pytest.mark.asyncio
+async def test_cached_key_set_is_parsed_once(jwks, monkeypatch):
+    # PyJWKClient would rebuild every key from the JSON on each lookup.
+    parses = {"count": 0}
+    real = access_token_module.PyJWKSet.from_dict
+
+    def from_dict(data):
+        parses["count"] += 1
+        return real(data)
+
+    monkeypatch.setattr(access_token_module.PyJWKSet, "from_dict", from_dict)
+    validator = _validator()
+    await validator.validate(_token())
+    parses["count"] = 0  # the first lookup's own parse, by PyJWKClient
+
+    for _ in range(5):
+        await validator.validate(_token())
+    assert parses["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_expired_key_cache_is_fetched_again_in_a_thread(jwks, threads):
+    validator = _validator()
+    await validator.validate(_token())
+    assert validator._jwks_client is not None
+    validator._jwks_client.jwk_set_cache.lifespan = 0  # expired from now on
+
+    assert await validator.validate(_token()) == SUB
+    assert threads["count"] == 2
+    assert jwks["fetches"] == 2
+
+
+@pytest.mark.asyncio
+async def test_settings_are_read_once(jwks, monkeypatch):
+    reads = {"count": 0}
+    real = access_token_module.oidc_config
+
+    def oidc_config():
+        reads["count"] += 1
+        return real()
+
+    monkeypatch.setattr(access_token_module, "oidc_config", oidc_config)
+    validator = _validator()
+    for _ in range(3):
+        await validator.validate(_token())
+
+    assert reads["count"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "claims",
+    [
+        {"exp": int(time.time()) - 60, "iat": int(time.time()) - 3660},
+        {"aud": "another-client"},
+        # OIDC_URL's trailing slash matters: the discovered issuer is the reference.
+        {"iss": ISSUER.rstrip("/")},
+        {"sub": None},
+        {"exp": None},
+    ],
+    ids=["expired", "other-audience", "other-issuer", "no-sub", "no-exp"],
+)
+async def test_invalid_claims_are_rejected(jwks, claims):
+    with pytest.raises(InvalidAccessToken):
+        await _validator().validate(_token(**claims))
+
+
+@pytest.mark.asyncio
+async def test_tampered_signature_is_rejected(jwks):
+    header, payload, _ = _token().split(".")
+    forged = _token(key=OTHER_KEY).split(".")[2]
+    with pytest.raises(InvalidAccessToken):
+        await _validator().validate(f"{header}.{payload}.{forged}")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "token",
+    [
+        # ID token and refresh token: same key, iss and aud, but not access tokens.
+        _token(typ="JWT"),
+        _token(typ=""),
+        # The HS256 session tokens this API minted before.
+        jwt.encode(
+            {"sub": SUB, "exp": int(time.time()) + 600},
+            "x" * 32,
+            algorithm="HS256",
+            headers={"typ": "at+jwt"},
+        ),
+        _token(algorithm="none", key=None),
+        "mock-access-token-opaque",
+        # No signing key lacks a `kid`, so this can never match one.
+        jwt.encode(
+            {"sub": SUB, "exp": int(time.time()) + 600},
+            KEY,
+            algorithm="RS256",
+            headers={"typ": "at+jwt"},
+        ),
+    ],
+    ids=[
+        "typ-JWT",
+        "no-typ",
+        "hs256",
+        "alg-none",
+        "not-a-jwt",
+        "no-kid",
+    ],
+)
+async def test_rejected_before_any_key_lookup(jwks, token):
+    with pytest.raises(InvalidAccessToken):
+        await _validator().validate(token)
+    assert jwks["fetches"] == 0
+
+
+@pytest.mark.asyncio
+async def test_rotated_key_is_picked_up_by_a_refetch(jwks):
+    jwks["responses"] = [
+        {"keys": [_jwk(KEY, "rsa1")]},
+        {"keys": [_jwk(KEY, "rsa1"), _jwk(OTHER_KEY, "rsa2")]},
+    ]
+    validator = _validator()
+    assert await validator.validate(_token()) == SUB
+
+    assert await validator.validate(_token(key=OTHER_KEY, kid="rsa2")) == SUB
+    assert jwks["fetches"] == 2
+
+
+@pytest.mark.asyncio
+async def test_unknown_key_refetches_at_most_once_a_minute(jwks, monkeypatch):
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(access_token_module.time, "monotonic", lambda: clock["now"])
+    validator = _validator()
+
+    # Looked up and absent from a fresh key set: the token's fault.
+    with pytest.raises(InvalidAccessToken):
+        await validator.validate(_token(kid="no-such-key"))
+    assert jwks["fetches"] == 2  # the initial fetch and one refetch
+
+    # Within the minute it is not looked up, so it is not yet the token's fault.
+    clock["now"] += 59
+    with pytest.raises(SigningKeysUnavailable):
+        await validator.validate(_token(kid="another-missing-key"))
+    assert jwks["fetches"] == 2
+
+    clock["now"] += 2
+    with pytest.raises(InvalidAccessToken):
+        await validator.validate(_token(kid="yet-another-missing-key"))
+    assert jwks["fetches"] == 3
+
+
+@pytest.mark.asyncio
+async def test_made_up_key_cannot_get_a_rotated_key_rejected(jwks, monkeypatch):
+    # A made-up kid takes the refetch slot just before the provider rotates its key:
+    # tokens signed with the new key are a 503 (not a logout), then accepted.
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(access_token_module.time, "monotonic", lambda: clock["now"])
+    jwks["responses"] = [
+        {"keys": [_jwk(KEY, "rsa1")]},
+        {"keys": [_jwk(KEY, "rsa1")]},
+        {"keys": [_jwk(KEY, "rsa1"), _jwk(OTHER_KEY, "rsa2")]},
+    ]
+    validator = _validator()
+    with pytest.raises(InvalidAccessToken):
+        await validator.validate(_token(kid="made-up"))
+
+    rotated = _token(key=OTHER_KEY, kid="rsa2")
+    clock["now"] += 30
+    with pytest.raises(SigningKeysUnavailable):
+        await validator.validate(rotated)
+
+    clock["now"] += 31
+    assert await validator.validate(rotated) == SUB
+
+
+@pytest.mark.asyncio
+async def test_unusable_cached_key_set_is_refetched(jwks):
+    # PyJWKClient caches whatever JSON it was served: one bad answer must not last
+    # the cache's whole lifespan.
+    jwks["responses"] = [{"keys": []}, {"keys": [_jwk(KEY, "rsa1")]}]
+
+    assert await _validator().validate(_token()) == SUB
+    assert jwks["fetches"] == 2
+
+
+@pytest.mark.asyncio
+async def test_unusable_key_set_is_retried_once_the_minute_has_passed(
+    jwks, monkeypatch
+):
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(access_token_module.time, "monotonic", lambda: clock["now"])
+    jwks["responses"] = [{"keys": []}, {"keys": []}, {"keys": [_jwk(KEY, "rsa1")]}]
+    validator = _validator()
+
+    with pytest.raises(SigningKeysUnavailable):
+        await validator.validate(_token())
+    assert jwks["fetches"] == 2
+
+    clock["now"] += 30
+    with pytest.raises(SigningKeysUnavailable):
+        await validator.validate(_token())
+    assert jwks["fetches"] == 2
+
+    clock["now"] += 31
+    assert await validator.validate(_token()) == SUB
+    assert jwks["fetches"] == 3
+
+
+@pytest.mark.asyncio
+async def test_issuer_outage_spares_tokens_signed_with_cached_keys(jwks):
+    jwks["responses"] = [{"keys": [_jwk(KEY, "rsa1")]}, URLError("connection refused")]
+    validator = _validator()
+    assert await validator.validate(_token()) == SUB
+
+    assert await validator.validate(_token()) == SUB
+    with pytest.raises(SigningKeysUnavailable):
+        await validator.validate(_token(key=OTHER_KEY, kid="rsa2"))
+
+
+@pytest.mark.asyncio
+async def test_unreachable_keys_raise_signing_keys_unavailable(jwks):
+    jwks["responses"] = [URLError("connection refused")]
+    with pytest.raises(SigningKeysUnavailable):
+        await _validator().validate(_token())
+    # Unreachable is not unusable: no second fetch to hammer an issuer that is down.
+    assert jwks["fetches"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "key_set",
+    [
+        b"<html>Service Unavailable</html>",
+        ["not", "a", "key", "set"],
+        {"keys": []},
+        {"keys": [{"kty": "unknown", "kid": "rsa1"}]},
+        {"keys": [{**_jwk(KEY, "rsa1"), "use": "enc"}]},
+    ],
+    ids=["html-page", "json-list", "no-keys", "unusable-key", "encryption-keys-only"],
+)
+async def test_unusable_key_set_raises_signing_keys_unavailable(jwks, key_set):
+    # The provider's fault: a 503, never a 401 that would make every token look bad.
+    jwks["responses"] = [key_set]
+    with pytest.raises(SigningKeysUnavailable):
+        await _validator().validate(_token())
+
+
+@pytest.mark.asyncio
+async def test_unreachable_discovery_raises_system_exception(jwks):
+    validator = _validator(FakeMetadata(SystemException("OIDC discovery failed.")))
+    with pytest.raises(SystemException):
+        await validator.validate(_token())

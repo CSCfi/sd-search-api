@@ -157,28 +157,33 @@ a `400`. `AuthMiddleware` requires a session outside `PUBLIC_PATHS` — hence `/
 
 **The session is the LS AAI access token itself**, nothing minted: `/callback` (idpyoidc `RPHandler`, code + PKCE)
 puts it in the `access_token` cookie (`HttpOnly`, `SameSite=Strict`, `Path=/`, `Max-Age` = `expires_in`, 1 h), so
-the UI's nginx can forward it unchanged as a bearer token to Dataset-on-Demand. `AuthMiddleware` takes it from that
-cookie or `Authorization: Bearer` and **validates it locally** against the issuer's JWKS, never by introspection:
-asymmetric `alg` only (refusing HS256 and `none` before any lookup), `typ` `at+jwt` (RFC 9068 — what keeps out ID
-and refresh tokens signed with the very same key), `iss` equal to the **discovered** issuer (LS AAI's has a trailing
-slash), `aud` containing `OIDC_CLIENT_ID`, `exp` and `sub` required. An unknown `kid` refetches the keys, at most once
-a minute since anyone can name one, and within that minute is a `503`, not a `401`, since it may be a key just
-rotated in and a made-up one must not get real tokens rejected; keys or discovery unreachable or unusable (an HTML error page, JSON that is no
-key set) is a `503`, not a `401`, so a client does not loop through `/refresh` and `/login`. `/callback` and `/refresh` run **the middleware's own validator before setting the cookie**,
-so a provider issuing tokens this API rejects (audience, `typ`, issuer) is a logged `503` at login, not a login
-whose every call is a `401`. A login's state (PKCE verifier, nonce) lives in `RPHandler`'s memory from `/login` to
-its callback, which drops it **however it ends**. **The refresh token rides only to `/refresh`** (cookie `Path=/refresh`, `Max-Age`
-from its unverified `exp`, about a month): `POST /refresh` redeems it at the token endpoint directly with httpx,
-not through `RPHandler`, whose login state is in-process memory and gone after a restart or on another replica, and
-**resets both cookies, since LS AAI rotates the refresh token** — a spent or expired one is `invalid_grant` (LS AAI
-says `invalid_token`), answered `401` **leaving the cookies alone**: they are shared by every tab, and the tab that
-lost a refresh race would otherwise delete the ones the winner was just given. **Any other refusal from the token
-endpoint** — the client's credentials or permissions — **is logged and a `503`**, so a misconfiguration cannot pass
-for every session expiring. Refresh is client-driven (a `401`, one `POST /refresh` at a time across tabs, a retry,
-and a retry again before a refresh `401` counts as logged out); LS AAI issues no refresh
-token unless `offline_access` is requested, hence its place in the default `OIDC_SCOPE`. `tests/integration/mockauth.py`
-issues tokens shaped like LS AAI's: an `at+jwt` access token, and a JWT refresh token that is replaced on every use
-and refused once spent, without revoking the one that replaced it.
+the UI's nginx can forward it unchanged as a bearer token to Dataset-on-Demand. A login's state (PKCE verifier,
+nonce) lives in `RPHandler`'s memory from `/login` to its callback, which drops it **however it ends**.
+
+`AuthMiddleware` takes the token from that cookie or `Authorization: Bearer` and **validates it locally** against the
+issuer's JWKS, never by introspection: asymmetric `alg` only (refusing HS256 and `none` before any lookup), `typ`
+`at+jwt` (RFC 9068 — what keeps out ID and refresh tokens signed with the very same key), a `kid`, `iss` equal to
+the **discovered** issuer (LS AAI's has a trailing slash), `aud` containing `OIDC_CLIENT_ID`, `exp` and `sub`.
+A cached key is checked on the event loop; only a fetch goes to a thread. An unknown `kid`, or a cached key set that
+cannot be used, refetches the keys **at most once a minute**, since anyone can name a key; within that minute it is
+a `503`, not a `401`, since it may be a key just rotated in. Keys or discovery unreachable or unusable (an HTML error
+page, JSON that is no key set) are a `503` as well, so a client does not loop through `/refresh` and `/login`.
+`/callback` and `/refresh` run **the middleware's own validator before setting the cookie**, so a provider issuing
+tokens this API rejects (audience, `typ`, issuer) is a logged `503` at login, not a login whose every call is a `401`.
+
+**The refresh token rides only to `/refresh`** (cookie `Path=/refresh`, `Max-Age` from its unverified `exp`, about a
+month): `POST /refresh` redeems it at the token endpoint directly with httpx, not through `RPHandler`, whose login
+state is in-process memory and gone after a restart or on another replica, and **resets both cookies, since LS AAI
+rotates the refresh token**. A spent or expired one is `invalid_grant` (LS AAI says `invalid_token`), answered `401`
+**leaving the cookies alone**: they are shared by every tab, and the tab that lost a refresh race would otherwise
+delete the ones the winner was just given. **Any other refusal from the token endpoint** — the client's credentials
+or permissions — **is logged and a `503`**, so a misconfiguration cannot pass for every session expiring.
+
+Refresh is client-driven: a `401`, one `POST /refresh` at a time across tabs, a retry, and a retry again before a
+refresh `401` counts as logged out. LS AAI issues no refresh token unless `offline_access` is requested, hence its
+place in the default `OIDC_SCOPE`. `tests/integration/mockauth.py` issues tokens shaped like LS AAI's: an `at+jwt`
+access token, and a JWT refresh token that is replaced on every use and refused once spent, without revoking the one
+that replaced it.
 
 ### Query path
 

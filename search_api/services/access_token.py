@@ -7,7 +7,7 @@ import time
 from typing import Any
 
 import jwt
-from jwt import PyJWK, PyJWKClient, PyJWKSet
+from jwt import PyJWK, PyJWKClient, PyJWKClientConnectionError, PyJWKSet
 
 from search_api.conf import oidc_config
 from search_api.exceptions import SystemException
@@ -81,6 +81,11 @@ class AccessTokenValidator:
             raise InvalidAccessToken(f"Algorithm {algorithm!r} is not accepted.")
         if str(header.get("typ", "")).lower() not in ACCESS_TOKEN_TYPES:
             raise InvalidAccessToken("Not an access token.")
+        kid = header.get("kid")
+        if not isinstance(kid, str) or not kid:
+            # No signing key lacks a `kid`, so none could match: refused before it can
+            # take a refetch slot.
+            raise InvalidAccessToken("No key id.")
 
         metadata = await self._metadata.get()
         if self._jwks_client is None:
@@ -93,11 +98,11 @@ class AccessTokenValidator:
             self._audience = oidc_config().OIDC_CLIENT_ID
 
         try:
-            signing_key = self._cached_signing_key(header.get("kid"))
+            signing_key = self._cached_signing_key(kid)
             if signing_key is None:
                 # A fetch is due: PyJWKClient fetches with blocking urllib.
                 signing_key = await asyncio.to_thread(
-                    self._find_signing_key, self._jwks_client, header.get("kid")
+                    self._find_signing_key, self._jwks_client, kid
                 )
         except InvalidAccessToken:
             raise  # the token names a key the valid key set does not have
@@ -120,15 +125,13 @@ class AccessTokenValidator:
 
         return str(claims["sub"])
 
-    def _cached_signing_key(self, kid: str | None) -> PyJWK | None:
+    def _cached_signing_key(self, kid: str) -> PyJWK | None:
         """The key named `kid` in the cached key set, or `None` when a fetch is due.
 
         Reads PyJWKClient's in-memory cache, which never fetches, so the steady state
         stays on the event loop. Anything unusable in the cache is left to the slow
         path, which reports it.
         """
-        if kid is None:
-            return None  # no signing key lacks a `kid`, so the slow path refuses it
         cache = self._jwks_client.jwk_set_cache if self._jwks_client else None
         data: Any = cache.get() if cache else None  # the raw JSON, until it expires
         if not isinstance(data, dict):
@@ -148,8 +151,12 @@ class AccessTokenValidator:
             parsed = self._parsed = (data, signing)
         return parsed[1].get(kid)
 
-    def _find_signing_key(self, client: PyJWKClient, kid: str | None) -> PyJWK:
-        """Find the key named `kid`, refetching the key set at most once a minute."""
+    def _find_signing_key(self, client: PyJWKClient, kid: str) -> PyJWK:
+        """Find the key named `kid`, refetching the key set at most once a minute.
+
+        An unusable cached set is refetched like a missing key: PyJWKClient caches
+        whatever JSON it was served, and would otherwise fail until the cache expired.
+        """
         for refetch in (False, True):
             if refetch:
                 with self._refetch_lock:
@@ -158,9 +165,17 @@ class AccessTokenValidator:
                         # Not looked up yet, so not the token's fault yet: it may be
                         # signed with a key just rotated in. A 503 does not log the
                         # user out, as a 401 would, and the next slot fetches it.
-                        raise SigningKeysUnavailable("Signing key not yet fetched.")
+                        raise SigningKeysUnavailable("Key set not refetched yet.")
                     self._last_refetch = now
-            for key in client.get_signing_keys(refresh=refetch):
+            try:
+                keys = client.get_signing_keys(refresh=refetch)
+            except PyJWKClientConnectionError:
+                raise
+            except jwt.PyJWTError:
+                if refetch:
+                    raise
+                continue  # the cached set is unusable: fetch a fresh one
+            for key in keys:
                 if key.key_id == kid:
                     return key
         raise InvalidAccessToken("No matching signing key.")

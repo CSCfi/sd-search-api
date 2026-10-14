@@ -27,9 +27,9 @@ The cookies are host-only.
 |---|---|
 | `access_token` cookie | The LS AAI access token. `HttpOnly`, `SameSite=Strict`, `Path=/`, `Max-Age` 1 hour. Set by `/callback` and `/refresh`. |
 | `refresh_token` cookie | The LS AAI refresh token. `HttpOnly`, `SameSite=Strict`, `Path=/refresh`, so the browser sends it only to `/refresh`. |
-| `POST /refresh` | Needs no request body; it reads the refresh cookie. **`204`**: both cookies replaced. **`401`**: this refresh token is no good: there is no refresh cookie, or LS AAI rejected it. The cookies are left alone, because another tab may just have refreshed and been given new ones (see change 3). **`503`**: LS AAI unreachable; cookies unchanged, so this is not a logout. |
-| Any protected API path | **`401`** when the access token is missing, invalid or expired. **`503`** when the API cannot fetch LS AAI's signing keys. |
-| `/login`, `/callback`, `/logout` | Unchanged. `/logout` now clears both cookies. |
+| `POST /refresh` | Needs no request body; it reads the refresh cookie. **`204`**: both cookies replaced. **`401`**: this refresh token is no good: there is no refresh cookie, or LS AAI rejected it. The cookies are left alone, because another tab may just have refreshed and been given new ones (see change 3). **`503`**: LS AAI unreachable, or refusing the API itself (a configuration fault on the server); cookies unchanged, so this is not a logout. |
+| Any protected API path | **`401`** when the access token is missing, invalid or expired. **`503`** when the API cannot fetch or use LS AAI's signing keys, or has not yet fetched a key LS AAI has just rotated in. A `503` is not a logout: show an error; a later retry can succeed. |
+| `/login`, `/callback`, `/logout` | Unchanged for the UI. `/logout` now clears both cookies. `/callback` answers `503` when LS AAI is unreachable or issues a token the API rejects; the browser navigates to it, so there is nothing for the UI to handle. |
 
 Each refresh replaces the refresh token, and the old one stops working. The cookies are shared
 by every tab, so a refresh in one tab can race a refresh in another. The tab that loses presents
@@ -152,8 +152,7 @@ guard redirects to `/`.
   the Docker image to test DoD, and note this in the README.
 - **`.claude/rules/auth.md`:** describe the refresh flow, the rule that only one refresh runs at a
   time across tabs (Web Locks), the retry before logging out, and that DoD auth is added by nginx
-  from the cookie. Remove "token refresh" from "What Is
-  Not Implemented Yet".
+  from the cookie. Remove "token refresh" from "What Is Not Implemented Yet".
 
 ## Out of scope
 

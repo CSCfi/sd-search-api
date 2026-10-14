@@ -355,6 +355,7 @@ async def test_dead_refresh_token_raises_refresh_rejected(
         (httpx.Response(400, text="not json"), "None"),
         (httpx.Response(400, json={"detail": "no error code"}), "None"),
         (httpx.Response(500), "None"),
+        (httpx.Response(400, json={"error": {"code": "nested"}}), "None"),
     ],
     ids=[
         "invalid_client",
@@ -365,6 +366,7 @@ async def test_dead_refresh_token_raises_refresh_rejected(
         "not-json",
         "no-error-code",
         "server-error",
+        "error-not-a-string",
     ],
 )
 async def test_refresh_refused_for_the_client_raises_logged_system_exception(

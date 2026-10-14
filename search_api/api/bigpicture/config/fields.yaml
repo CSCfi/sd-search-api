@@ -47,7 +47,7 @@ filtering_terms:
     type: ontology
     nested_group: specimen
     scopes: [ non_clinical ]
-    label: "Biological species"
+    label: "Species"
     description: "Species of the biological being"
     ontology:
       id: SCTID

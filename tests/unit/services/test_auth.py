@@ -168,15 +168,27 @@ async def test_callback_for_a_state_unknown_to_rphandler_still_answers_401():
 
 
 @pytest.mark.asyncio
-async def test_callback_without_access_token_raises_401():
+async def test_callback_without_access_token_raises_system_exception():
+    # The provider's fault, as at refresh: a 503, not a 401.
     handler, mock_rph = _handler_with_mock_rph({"expires_in": 3599})
     mock_rph.get_session_information.return_value = {"iss": "http://localhost:9999"}
     mock_rph.finalize.return_value = {"userinfo": {"sub": "user-123"}}
 
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(SystemException):
         await handler.callback("known-state", "some-code")
 
-    assert exc_info.value.status_code == 401
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("expires_in", ["not-a-number", None, [3600]])
+async def test_unreadable_expires_in_is_taken_as_unknown(token_endpoint, expires_in):
+    token_endpoint["responses"] = [
+        httpx.Response(200, json={"access_token": "at", "expires_in": expires_in})
+    ]
+    handler, _ = _handler_with_mock_rph()
+
+    tokens = await handler.refresh("rt")
+
+    assert tokens.expires_in is None
 
 
 @pytest.mark.asyncio

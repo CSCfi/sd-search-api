@@ -132,18 +132,7 @@ class AuthServiceHandler:
             finally:
                 self._forget_login(state)
 
-        access_token = token_response.get("access_token")
-        if not access_token:
-            raise HTTPException(
-                status_code=401, detail="OIDC provider issued no access token."
-            )
-        await self._check_access_token(access_token)
-        expires_in = token_response.get("expires_in")
-        return TokenSet(
-            access_token=access_token,
-            expires_in=int(expires_in) if expires_in is not None else None,
-            refresh_token=token_response.get("refresh_token"),
-        )
+        return await self._token_set(token_response)
 
     async def _exchange_code(self, state: str, code: str) -> dict[str, Any]:
         """Finalize the login `state` with `code`; return the token response."""
@@ -242,21 +231,33 @@ class AuthServiceHandler:
 
         try:
             body = response.json()
-        except ValueError as exc:
-            raise SystemException(
-                "OIDC token refresh returned no access token."
-            ) from exc
-        access_token = body.get("access_token") if isinstance(body, dict) else None
-        if not access_token:
-            raise SystemException("OIDC token refresh returned no access token.")
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            raise SystemException("OIDC token refresh returned no token response.")
+        # The refresh token is kept when the provider does not rotate it.
+        return await self._token_set(body, refresh_token)
 
+    async def _token_set(
+        self, response: dict[str, Any], refresh_token: str | None = None
+    ) -> TokenSet:
+        """The session in a token response, checked as the middleware will check it.
+
+        `refresh_token` stands in for one the response does not bring. A response
+        without an access token is the provider's fault, so a 503 like any other.
+        """
+        access_token = response.get("access_token")
+        if not access_token:
+            raise SystemException("OIDC provider issued no access token.")
         await self._check_access_token(access_token)
-        expires_in = body.get("expires_in")
+        try:
+            expires_in: int | None = int(response["expires_in"])
+        except KeyError, TypeError, ValueError:
+            expires_in = None  # unknown: the cookie lasts the browser session
         return TokenSet(
             access_token=access_token,
-            expires_in=int(expires_in) if expires_in is not None else None,
-            # Kept when the provider does not rotate it.
-            refresh_token=body.get("refresh_token") or refresh_token,
+            expires_in=expires_in,
+            refresh_token=response.get("refresh_token") or refresh_token,
         )
 
     def _forget_login(self, state: str) -> None:

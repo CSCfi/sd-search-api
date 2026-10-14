@@ -1,7 +1,7 @@
 """Integration tests for the session: LS AAI-shaped tokens from the mock provider.
 
 Each test logs in on its own client, since refreshing replaces the session cookies
-and a rejected refresh clears them.
+and spends the refresh token.
 """
 
 import os

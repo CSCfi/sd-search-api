@@ -239,8 +239,22 @@ async def test_tampered_signature_is_rejected(jwks):
         ),
         _token(algorithm="none", key=None),
         "mock-access-token-opaque",
+        # No signing key lacks a `kid`, so this can never match one.
+        jwt.encode(
+            {"sub": SUB, "exp": int(time.time()) + 600},
+            KEY,
+            algorithm="RS256",
+            headers={"typ": "at+jwt"},
+        ),
     ],
-    ids=["typ-JWT", "no-typ", "hs256", "alg-none", "not-a-jwt"],
+    ids=[
+        "typ-JWT",
+        "no-typ",
+        "hs256",
+        "alg-none",
+        "not-a-jwt",
+        "no-kid",
+    ],
 )
 async def test_rejected_before_any_key_lookup(jwks, token):
     with pytest.raises(InvalidAccessToken):
@@ -306,6 +320,39 @@ async def test_made_up_key_cannot_get_a_rotated_key_rejected(jwks, monkeypatch):
 
     clock["now"] += 31
     assert await validator.validate(rotated) == SUB
+
+
+@pytest.mark.asyncio
+async def test_unusable_cached_key_set_is_refetched(jwks):
+    # PyJWKClient caches whatever JSON it was served: one bad answer must not last
+    # the cache's whole lifespan.
+    jwks["responses"] = [{"keys": []}, {"keys": [_jwk(KEY, "rsa1")]}]
+
+    assert await _validator().validate(_token()) == SUB
+    assert jwks["fetches"] == 2
+
+
+@pytest.mark.asyncio
+async def test_unusable_key_set_is_retried_once_the_minute_has_passed(
+    jwks, monkeypatch
+):
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(access_token_module.time, "monotonic", lambda: clock["now"])
+    jwks["responses"] = [{"keys": []}, {"keys": []}, {"keys": [_jwk(KEY, "rsa1")]}]
+    validator = _validator()
+
+    with pytest.raises(SigningKeysUnavailable):
+        await validator.validate(_token())
+    assert jwks["fetches"] == 2
+
+    clock["now"] += 30
+    with pytest.raises(SigningKeysUnavailable):
+        await validator.validate(_token())
+    assert jwks["fetches"] == 2
+
+    clock["now"] += 31
+    assert await validator.validate(_token()) == SUB
+    assert jwks["fetches"] == 3
 
 
 @pytest.mark.asyncio

@@ -214,6 +214,8 @@ class AuthServiceHandler:
                 error = response.json().get("error")
             except ValueError, AttributeError:
                 error = None
+            if not isinstance(error, str):
+                error = None
             if response.status_code in (400, 401) and error in REFRESH_TOKEN_REJECTED:
                 raise RefreshRejected(error)
             # A refusal of the client itself would otherwise end every session at its

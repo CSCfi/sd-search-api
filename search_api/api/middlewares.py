@@ -1,9 +1,9 @@
 """Request authentication middleware."""
 
 import logging
-from http.cookies import SimpleCookie
 
 from starlette.datastructures import Headers
+from starlette.requests import cookie_parser
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -42,10 +42,9 @@ def _extract_token(headers: Headers) -> str | None:
     """
     cookie_header = headers.get("cookie")
     if cookie_header:
-        cookies = SimpleCookie()
-        cookies.load(cookie_header)
-        if AUTH_COOKIE in cookies:
-            return cookies[AUTH_COOKIE].value
+        token = cookie_parser(cookie_header).get(AUTH_COOKIE)
+        if token:
+            return token
 
     auth_header = headers.get("authorization")
     if auth_header:

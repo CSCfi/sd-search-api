@@ -32,11 +32,13 @@ def _cookie(client: httpx.Client, name: str) -> tuple[str, str]:
     return cookie.value, cookie.path
 
 
-def _bearer_status(token: str) -> int:
+def _status_with(headers: dict[str, str]) -> int:
     with httpx.Client(base_url=API_URL, timeout=30.0) as anonymous:
-        return anonymous.get(
-            PROTECTED_PATH, headers={"Authorization": f"Bearer {token}"}
-        ).status_code
+        return anonymous.get(PROTECTED_PATH, headers=headers).status_code
+
+
+def _bearer_status(token: str) -> int:
+    return _status_with({"Authorization": f"Bearer {token}"})
 
 
 def _tokens_from_mock(issuer_host: str, client_id: str | None = None) -> dict:
@@ -86,9 +88,12 @@ def test_login_sets_the_providers_access_and_refresh_tokens(client):
     assert refresh_path == "/refresh"
     assert jwt.get_unverified_header(refresh_token)["typ"] == "JWT"
 
-    # The same token authenticates by cookie and as a bearer token.
+    # The same token authenticates by cookie and as a bearer token, and a cookie of
+    # someone else's that a strict parser rejects does not hide it.
     assert client.get(PROTECTED_PATH).status_code == 200
     assert _bearer_status(access_token) == 200
+    cookies = f'cc_cookie={{"categories":["necessary"]}}; access_token={access_token}'
+    assert _status_with({"Cookie": cookies}) == 200
 
 
 def test_refresh_replaces_both_cookies(client):
@@ -127,17 +132,12 @@ def test_tab_losing_a_refresh_race_does_not_end_the_winners_session(client):
     assert client.post("/refresh").status_code == 204
 
 
-def test_refresh_token_is_not_accepted_as_access_token(client):
-    login(client)
-    refresh_token, _ = _cookie(client, "refresh_token")
-
-    assert _bearer_status(refresh_token) == 401
-
-
-def test_id_token_is_not_accepted_as_access_token(client):
+def test_only_access_tokens_are_accepted(client):
+    # The ID and refresh tokens share the access token's key, `iss` and `aud`.
     tokens = _tokens_from_mock(login(client))
 
     assert _bearer_status(tokens["id_token"]) == 401
+    assert _bearer_status(tokens["refresh_token"]) == 401
     # The access token from the same response is one: the check is `typ`, not origin.
     assert _bearer_status(tokens["access_token"]) == 200
 

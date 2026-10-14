@@ -131,6 +131,21 @@ async def test_valid_token_authenticates_as_its_subject(headers):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    "others",
+    ["a b=c; ", "=; ", 'cc_cookie={"categories":["necessary"]}; ', 'x="unterminated; '],
+    ids=["space-in-name", "empty-name", "json-value", "unterminated-quote"],
+)
+async def test_access_token_is_found_beside_a_malformed_cookie(others):
+    # Other cookies on the UI's host are not ours to vet: one the strict parser
+    # dislikes must not hide the session, or every request is a 401.
+    status, _, scope, _ = await _run(PROTECTED_PATH, _cookie(VALID_TOKEN, others))
+
+    assert status == 200
+    assert scope["state"]["user_id"] == "user-1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     "value", [f"Basic {VALID_TOKEN}", "Bearer", f"Bearer {VALID_TOKEN} extra", ""]
 )
 async def test_malformed_authorization_header_is_not_a_token(value):

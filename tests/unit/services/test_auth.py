@@ -121,7 +121,9 @@ async def test_get_oidc_auth_url_raises_system_exception_on_failure():
 
 
 def _no_session(rph: MagicMock) -> None:
+    # RPHandler raises KeyError for a state it does not have, on clearing it too.
     rph.get_session_information.side_effect = KeyError("unknown-state")
+    rph.clear_session.side_effect = KeyError("unknown-state")
 
 
 def _issuer_mismatch(rph: MagicMock) -> None:
@@ -155,19 +157,6 @@ async def test_callback_protocol_failure_raises_401(setup):
 
 
 @pytest.mark.asyncio
-async def test_callback_for_a_state_unknown_to_rphandler_still_answers_401():
-    handler, mock_rph = _handler_with_mock_rph()
-    mock_rph.get_session_information.side_effect = KeyError("unknown-state")
-    # RPHandler raises KeyError for a state it does not have; that is not an error.
-    mock_rph.clear_session.side_effect = KeyError("unknown-state")
-
-    with pytest.raises(HTTPException) as exc_info:
-        await handler.callback("unknown-state", "some-code")
-
-    assert exc_info.value.status_code == 401
-
-
-@pytest.mark.asyncio
 async def test_callback_without_access_token_raises_system_exception():
     # The provider's fault, as at refresh: a 503, not a 401.
     handler, mock_rph = _handler_with_mock_rph({"expires_in": 3599})
@@ -176,19 +165,6 @@ async def test_callback_without_access_token_raises_system_exception():
 
     with pytest.raises(SystemException):
         await handler.callback("known-state", "some-code")
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("expires_in", ["not-a-number", None, [3600]])
-async def test_unreadable_expires_in_is_taken_as_unknown(token_endpoint, expires_in):
-    token_endpoint["responses"] = [
-        httpx.Response(200, json={"access_token": "at", "expires_in": expires_in})
-    ]
-    handler, _ = _handler_with_mock_rph()
-
-    tokens = await handler.refresh("rt")
-
-    assert tokens.expires_in is None
 
 
 @pytest.mark.asyncio
@@ -324,6 +300,19 @@ async def test_refresh_keeps_refresh_token_when_none_returned(token_endpoint):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("expires_in", ["not-a-number", None, [3600]])
+async def test_unreadable_expires_in_is_taken_as_unknown(token_endpoint, expires_in):
+    token_endpoint["responses"] = [
+        httpx.Response(200, json={"access_token": "at", "expires_in": expires_in})
+    ]
+    handler, _ = _handler_with_mock_rph()
+
+    tokens = await handler.refresh("rt")
+
+    assert tokens.expires_in is None
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("status", [400, 401])
 @pytest.mark.parametrize("error", ["invalid_grant", "invalid_token"])
 async def test_dead_refresh_token_raises_refresh_rejected(
@@ -388,43 +377,31 @@ async def test_refresh_refused_for_the_client_raises_logged_system_exception(
 
 
 @pytest.mark.asyncio
-async def test_refused_refresh_log_leaves_out_the_description(token_endpoint, caplog):
+@pytest.mark.parametrize(
+    ("status", "error", "raised"),
+    [(400, "invalid_token", RefreshRejected), (401, "invalid_client", SystemException)],
+    ids=["dead-token", "refused-client"],
+)
+async def test_error_description_never_reaches_logs_or_exceptions(
+    token_endpoint, caplog, status, error, raised
+):
+    # LS AAI echoes the refresh token itself in error_description.
     token_endpoint["responses"] = [
         httpx.Response(
-            401,
+            status,
             json={
-                "error": "invalid_client",
-                "error_description": "Bad client for token secret-rt",
-            },
-        )
-    ]
-    handler, _ = _handler_with_mock_rph()
-
-    with pytest.raises(SystemException) as exc_info:
-        await handler.refresh("secret-rt")
-
-    assert "secret-rt" not in caplog.text
-    assert "secret-rt" not in str(exc_info.value)
-
-
-@pytest.mark.asyncio
-async def test_refresh_rejection_does_not_carry_the_token(token_endpoint):
-    # LS AAI echoes the rejected refresh token in error_description.
-    token_endpoint["responses"] = [
-        httpx.Response(
-            400,
-            json={
-                "error": "invalid_token",
+                "error": error,
                 "error_description": "Invalid refresh token: secret-rt",
             },
         )
     ]
     handler, _ = _handler_with_mock_rph()
 
-    with pytest.raises(RefreshRejected) as exc_info:
+    with pytest.raises(raised) as exc_info:
         await handler.refresh("secret-rt")
 
-    assert str(exc_info.value) == "invalid_token"
+    assert "secret-rt" not in str(exc_info.value)
+    assert "secret-rt" not in caplog.text
 
 
 @pytest.mark.asyncio

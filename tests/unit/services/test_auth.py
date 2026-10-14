@@ -402,6 +402,7 @@ async def test_refresh_rejection_does_not_carry_the_token(token_endpoint):
     "response",
     [
         httpx.Response(200, json={"token_type": "Bearer"}),
+        httpx.Response(200, json=["not", "an", "object"]),
         httpx.Response(200, text="not json"),
         httpx.ConnectError("unreachable"),
     ],

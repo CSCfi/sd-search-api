@@ -85,7 +85,7 @@ def jwks(monkeypatch):
     """Stub the JWKS endpoint, below PyJWKClient's own caching.
 
     Each fetch answers with the next entry of `responses`, the last one repeating; an
-    exception entry is raised, as `urlopen` would.
+    exception entry is raised, as `urlopen` would, and a bytes entry is the raw body.
     """
     state: dict[str, Any] = {"responses": [{"keys": [_jwk(KEY, "rsa1")]}], "fetches": 0}
 
@@ -95,6 +95,8 @@ def jwks(monkeypatch):
         response = responses[0] if len(responses) == 1 else responses.pop(0)
         if isinstance(response, Exception):
             raise response
+        if isinstance(response, bytes):
+            return io.BytesIO(response)
         return io.BytesIO(json.dumps(response).encode())
 
     monkeypatch.setattr(jwks_client.urllib.request, "urlopen", urlopen)
@@ -240,6 +242,25 @@ async def test_issuer_outage_spares_tokens_signed_with_cached_keys(jwks):
 @pytest.mark.asyncio
 async def test_unreachable_keys_raise_signing_keys_unavailable(jwks):
     jwks["responses"] = [URLError("connection refused")]
+    with pytest.raises(SigningKeysUnavailable):
+        await _validator().validate(_token())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "key_set",
+    [
+        b"<html>Service Unavailable</html>",
+        ["not", "a", "key", "set"],
+        {"keys": []},
+        {"keys": [{"kty": "unknown", "kid": "rsa1"}]},
+        {"keys": [{**_jwk(KEY, "rsa1"), "use": "enc"}]},
+    ],
+    ids=["html-page", "json-list", "no-keys", "unusable-key", "encryption-keys-only"],
+)
+async def test_unusable_key_set_raises_signing_keys_unavailable(jwks, key_set):
+    # The provider's fault: a 503, never a 401 that would make every token look bad.
+    jwks["responses"] = [key_set]
     with pytest.raises(SigningKeysUnavailable):
         await _validator().validate(_token())
 

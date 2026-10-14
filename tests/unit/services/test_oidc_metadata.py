@@ -88,6 +88,14 @@ async def test_error_status_raises_system_exception(issuer):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("document", [["issuer", "jwks_uri"], "issuer", 42])
+async def test_document_that_is_not_an_object_is_refused(issuer, document):
+    issuer["responses"] = [httpx.Response(200, json=document)]
+    with pytest.raises(SystemException):
+        await ProviderMetadata().get()
+
+
+@pytest.mark.asyncio
 async def test_document_missing_endpoints_is_refused(issuer):
     issuer["responses"] = [httpx.Response(200, json={"issuer": DOCUMENT["issuer"]})]
     with pytest.raises(SystemException):

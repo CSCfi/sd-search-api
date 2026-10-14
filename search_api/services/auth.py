@@ -236,11 +236,13 @@ class AuthServiceHandler:
 
         try:
             body = response.json()
-            access_token = body["access_token"]
-        except (ValueError, KeyError) as exc:
+        except ValueError as exc:
             raise SystemException(
                 "OIDC token refresh returned no access token."
             ) from exc
+        access_token = body.get("access_token") if isinstance(body, dict) else None
+        if not access_token:
+            raise SystemException("OIDC token refresh returned no access token.")
 
         await self._check_access_token(access_token)
         expires_in = body.get("expires_in")

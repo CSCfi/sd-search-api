@@ -5,7 +5,7 @@ import math
 import time
 
 import jwt
-from jwt import PyJWK, PyJWKClient, PyJWKClientConnectionError
+from jwt import PyJWK, PyJWKClient
 
 from search_api.conf import oidc_config
 from search_api.exceptions import SystemException
@@ -87,10 +87,12 @@ class AccessTokenValidator:
             signing_key = await asyncio.to_thread(
                 self._find_signing_key, self._jwks_client, header.get("kid")
             )
-        except PyJWKClientConnectionError as exc:
-            raise SigningKeysUnavailable("OIDC signing keys unreachable.") from exc
-        except jwt.PyJWTError as exc:
-            raise InvalidAccessToken("No usable signing keys.") from exc
+        except InvalidAccessToken:
+            raise  # the token names a key the valid key set does not have
+        except (jwt.PyJWTError, ValueError) as exc:
+            # Unreachable, or not a usable key set (an HTML error page, JSON that is no
+            # key set, no signing keys): the provider's fault, never the token's.
+            raise SigningKeysUnavailable("OIDC signing keys unusable.") from exc
 
         try:
             claims = jwt.decode(

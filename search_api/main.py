@@ -40,8 +40,9 @@ app = FastAPI(
     lifespan=make_lifespan(_domain),
 )
 
-# One discovery document and one validator for the login flow and the middleware: the
-# token a login has just checked is then already in the validator's key cache.
+# One validator, and its discovery document, for the login flow and the middleware: the
+# token a login has just checked is then already in the validator's key cache. The
+# login itself (idpyoidc's RPHandler) fetches the discovery document separately.
 _provider_metadata = ProviderMetadata()
 _validator = AccessTokenValidator(_provider_metadata)
 app.state.auth_service = AuthServiceHandler(_provider_metadata, _validator)

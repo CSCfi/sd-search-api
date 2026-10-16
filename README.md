@@ -339,6 +339,15 @@ Options:
 - `--sync` — sync to OpenSearch after loading.
 - `--c4gh-key-file FILE`, `--c4gh-passphrase PASSPHRASE` — decrypt `.c4gh` XML files while reading them.
 
+#### Fetch from the SD Submit API
+
+```bash
+uv run python scripts/admin.py Bigpicture fetch --sync
+```
+
+Loads published submissions from metadata-submitter instead of a directory, with the same options as `load`.
+It requires sd-search-api to be registered as a sync client: see [docs/sync.md](docs/sync.md).
+
 #### Sync documents to OpenSearch
 
 Send the documents pending sync to OpenSearch.

@@ -3,10 +3,10 @@
 from urllib.parse import parse_qs, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 
 from search_api.conf import oidc_config
-from search_api.services.auth import AuthServiceHandler
+from search_api.services.auth import REFRESH_COOKIE, AuthServiceHandler, RefreshRejected
 
 # Binds the login attempt to the browser that started it: /login sets this to the
 # OIDC `state` value and /callback requires it to match the `state` query param.
@@ -61,8 +61,8 @@ async def callback(
             status_code=401, detail="Login session state mismatch or expired."
         )
 
-    jwt_token = await auth_service.callback(state, code)
-    response = auth_service.initiate_web_session(jwt_token)
+    tokens = await auth_service.callback(state, code)
+    response = auth_service.initiate_web_session(tokens)
     response.delete_cookie(
         OIDC_STATE_COOKIE,
         path="/callback",
@@ -70,6 +70,33 @@ async def callback(
         httponly=True,
         samesite="lax",
     )
+    return response
+
+
+@router.post("/refresh", status_code=204, response_class=Response)
+async def refresh(
+    request: Request,
+    auth_service: AuthServiceHandler = Depends(get_auth_service),
+) -> Response:
+    """Renew the session from the refresh cookie, replacing both session cookies.
+
+    `401` means this refresh token is no good. The cookies are left alone, because
+    LS AAI replaces the refresh token on each use: when two tabs refresh at once, the
+    one that loses presents a spent token, and clearing the cookies would delete the
+    ones the winning tab has just been given. `503` means the identity provider could
+    not be reached; the cookies are left as they were, so a later retry can work.
+    """
+    refresh_token = request.cookies.get(REFRESH_COOKIE)
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="No refresh token.")
+
+    try:
+        tokens = await auth_service.refresh(refresh_token)
+    except RefreshRejected as exc:
+        raise HTTPException(status_code=401, detail="Refresh token rejected.") from exc
+
+    response = Response(status_code=204)
+    auth_service.set_session_cookies(response, tokens)
     return response
 
 

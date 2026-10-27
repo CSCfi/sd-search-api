@@ -12,7 +12,7 @@ services:
       dockerfile: ./dockerfiles/Dockerfile
       context: .
     image: cscfi/sd-search-api
-    command: [ "uv", "run", "sd_search_api" ]
+    command: [ "uv", "run", "--no-dev", "sd_search_api" ]
     environment:
       - DEPLOYMENT_TYPE=Bigpicture
       - DEPLOYMENT_ENV=${DEPLOYMENT_ENV}

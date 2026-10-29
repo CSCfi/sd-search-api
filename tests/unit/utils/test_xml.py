@@ -50,7 +50,7 @@ def test_validate_xml(tmp_path: Path):
       <xs:element name="root">
         <xs:complexType>
           <xs:sequence>
-            <xs:element name="test" type="xs:string"/>
+            <xs:element name="test" type="xs:integer"/>
           </xs:sequence>
         </xs:complexType>
       </xs:element>
@@ -60,17 +60,47 @@ def test_validate_xml(tmp_path: Path):
     schema_path.write_bytes(schema)
 
     # Valid XML.
-    xml = b"""<root><test>Hello</test></root>"""
+    xml = b"""<root><test>1</test></root>"""
     validate_xml(parse_xml(xml), tmp_path, schema_file)
 
-    # Invalid XML.
+    # Invalid XML element and value.
 
-    xml = b"""<root><invalid>Hello</invalid></root>"""
+    xml = b"""<root><test>Hello</test><invalid/></root>"""
     with pytest.raises(ValueError) as exc:
-        validate_xml(parse_xml(xml), tmp_path, schema_file)
+        validate_xml(parse_xml(xml), tmp_path, schema_file, xml_path="test.xml")
 
-    assert "XML Schema validation error" in str(exc.value)
-    assert "Element 'invalid': This element is not expected." in str(exc.value)
+    assert str(exc.value) == (
+        "XML Schema validation error in test.xml:\n"
+        "Line 1: /root/test: SCHEMAV_CVC_DATATYPE_VALID_1_2_1\n"
+        "Line 1: /root/invalid: SCHEMAV_ELEMENT_CONTENT"
+    )
+
+
+@pytest.mark.parametrize(
+    "xml",
+    [
+        # An internal entity.
+        '<!DOCTYPE root [<!ENTITY x "Jane">]><root>&x;</root>',
+        # An external entity.
+        '<!DOCTYPE root [<!ENTITY x SYSTEM "file://{dtd}">]><root>&x;</root>',
+        # An external parameter entity, which lxml's defaults once loaded.
+        '<!DOCTYPE root [<!ENTITY % x SYSTEM "file://{dtd}"> %x;]><root/>',
+        # An external DTD.
+        '<!DOCTYPE root SYSTEM "file://{dtd}"><root/>',
+    ],
+)
+def test_parse_xml_rejects_doctype(tmp_path: Path, xml: str):
+    # The parser fails on this invalid DTD if it reads the file,
+    dtd = tmp_path / "test.dtd"
+    dtd.write_text("<!ENTITY y 'z'> not a DTD")
+
+    with pytest.raises(ValueError, match="DOCTYPE"):
+        parse_xml(xml.format(dtd=dtd))
+
+
+def test_parse_xml_predefined_entities():
+    tree = parse_xml(b"<root>a &amp; b &#233; &lt;</root>")
+    assert tree.getroot().text == "a & b é <"
 
 
 def test_get_xml_value():

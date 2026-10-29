@@ -49,7 +49,10 @@ def extract_version(dataset_xml: ElementTree) -> BigpictureVersion:
     match = _METADATA_STANDARD_PATTERN.fullmatch(value.strip())
     if match is None or match.group(1) not in BigpictureVersion:
         supported = ", ".join(f"{version}.x" for version in BigpictureVersion)
+        # The XML is not yet validated, and the metadata version is reported
+        # only if shaped like a version.
+        version = f" {match.group(0)!r}" if match else ""
         raise UserException(
-            f"Unsupported metadata standard version {value!r}. Supported: {supported}."
+            f"Unsupported metadata standard version{version}. Supported: {supported}."
         )
     return BigpictureVersion(match.group(1))

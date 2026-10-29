@@ -15,7 +15,9 @@ def register_exception_handlers(app: FastAPI) -> None:
 
 async def _user_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, UserException)
-    logger.exception("User error.", exc_info=exc)
+    # A user error means the client sent a bad request, not that the service failed.
+    # It is logged as info without a traceback, so it does not hide real errors.
+    logger.info("User error: %s", exc)
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 

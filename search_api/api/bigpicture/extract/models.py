@@ -20,12 +20,18 @@ class BigpictureCodeAttributeValue(BaseModel):
     scheme_version: str | None = None
 
 
+Scope = Literal["clinical", "non_clinical"]
+Sex = Literal["Male", "Female", "Not-known", "Other"]
+ControlTerminology = Literal["CONTROL", "TREATED"]
+ObservationType = Literal["confirmed", "candidate"]
+
+
 class BigpictureSampleBiologicalBeingFields(BaseModel):
     """Bigpicture biological being search fields."""
 
     animal_species: BigpictureCodeAttributeValue | None = None
-    sex: Literal["Male", "Female", "Not-known", "Other"] | None = None
-    control_terminology: Literal["CONTROL", "TREATED"] | None = None
+    sex: Sex | None = None
+    control_terminology: ControlTerminology | None = None
 
 
 class BigpictureSampleSpecimenFields(BaseModel):
@@ -91,7 +97,7 @@ class BigpictureObservationFields(BaseModel):
     finding_chronicity: BigpictureCodeAttributeValue | None = None
     finding_distribution: BigpictureCodeAttributeValue | None = None
     finding_result_category: BigpictureCodeAttributeValue | None = None
-    observation_type: Literal["confirmed", "candidate"]
+    observation_type: ObservationType
 
 
 class BigpictureFields(BaseModel):
@@ -100,7 +106,7 @@ class BigpictureFields(BaseModel):
     image_id: str
     dataset_id: str
     dataset_image_cnt: int
-    scope: Literal["clinical", "non_clinical"]
+    scope: Scope
     dataset_short_name: str | None = None
     dataset_title: str | None = None
     dataset_description: str | None = None

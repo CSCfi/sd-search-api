@@ -64,7 +64,8 @@ class OntologyValueWithBinding(BaseModel):
     def _concept_id_and_meaning(self) -> tuple[str | None, str | None]:
         if not isinstance(self.value.value, tuple):
             raise SystemException(
-                f"Invalid {self.value.value!r} for an ontology field '{self.field_id}'."
+                f"Invalid {type(self.value.value).__name__} value for an ontology "
+                f"field '{self.field_id}'."
             )
         return cast(tuple[str | None, str | None], self.value.value)
 
@@ -265,13 +266,19 @@ async def _resolve_concept_id(
         provided_concept_id if await _is_valid_concept_id(ontology_value) else None
     )
     if provided_concept_id is not None and concept_id is None:
+        # The id is quoted only if shaped like one. Anything else may be free text.
+        quoted_id = (
+            f" '{provided_concept_id}'"
+            if binding.ontology.is_well_formed(provided_concept_id)
+            else ""
+        )
         await write_document_log(
             cur,
             StoredDocumentLog(
                 document_id=document_id,
                 field_id=ontology_value.field_id,
                 severity="WARNING",
-                message=f"The provided concept id '{provided_concept_id}' is invalid for "
+                message=f"The provided concept id{quoted_id} is invalid for "
                 f"field '{ontology_value.field_id}' of "
                 f"ontology '{binding.ontology_id}'.",
             ),

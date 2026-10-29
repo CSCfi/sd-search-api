@@ -1,6 +1,6 @@
 import re
 from collections.abc import Iterable
-from typing import Any, Literal, cast
+from typing import Any, cast, get_args
 
 import isodate  # type: ignore[import-untyped]
 from lxml.etree import _Element as Element
@@ -15,12 +15,17 @@ from search_api.api.bigpicture.extract.models import (
     BigpictureSampleBlockFields,
     BigpictureSampleSpecimenFields,
     BigpictureStainingFields,
+    ControlTerminology,
+    ObservationType,
+    Scope,
+    Sex,
 )
 from search_api.api.bigpicture.extract.refs import object_ids
 from search_api.api.extract_logs import (
     ExtractLog,
     invalid_duration_log,
     invalid_scheme_log,
+    not_allowed_value_log,
     repeated_value_log,
 )
 from search_api.exceptions import UserException
@@ -99,11 +104,7 @@ def _filter_value_by_scheme(
         or _matches_scheme(value.scheme, ontology_id)
     ):
         return value
-    logs.append(
-        invalid_scheme_log(
-            field_id, value.code, value.meaning, value.scheme, ontology_id
-        )
-    )
+    logs.append(invalid_scheme_log(field_id, value.scheme, ontology_id))
     return None
 
 
@@ -156,13 +157,9 @@ def _extract_code_attribute_value(
     if not values or _is_nil(values[0]):
         return None
 
-    repeated = [_code_attribute_value(v) for v in values[1:] if not _is_nil(v)]
+    repeated = [v for v in values[1:] if not _is_nil(v)]
     if repeated:
-        logs.append(
-            repeated_value_log(
-                field_id, [(value.code, value.meaning) for value in repeated]
-            )
-        )
+        logs.append(repeated_value_log(field_id, len(repeated)))
 
     return _filter_value_by_scheme(
         _code_attribute_value(values[0]), ontology_id, field_id, logs
@@ -210,9 +207,28 @@ def _extract_string_attribute_value(
 
     # Repeated value errors are reported only when field_id and logs are provided.
     if len(values) > 1 and logs is not None:
-        logs.append(repeated_value_log(_field_id(tag), values[1:]))
+        logs.append(repeated_value_log(_field_id(tag), len(values) - 1))
 
     return values[0]
+
+
+def _extract_allowed_value(
+    elem: Element, tag: str, allowed: tuple[str, ...], logs: list[ExtractLog]
+) -> str | None:
+    """Extract a STRING_ATTRIBUTE value that must be one of the allowed values.
+
+    The value is matched without regard to case, and the allowed spelling is
+    returned, so filters match it. The schema accepts any string, so a value
+    outside them is ignored and logged.
+    """
+    value = _extract_string_attribute_value(elem, tag, logs=logs)
+    if value is None:
+        return None
+    for allowed_value in allowed:
+        if allowed_value.casefold() == value.casefold():
+            return allowed_value
+    logs.append(not_allowed_value_log(_field_id(tag), allowed))
+    return None
 
 
 # Extract code or string attribute value.
@@ -317,7 +333,7 @@ def _extract_age_at_extraction(
     try:
         end = _extract_iso8601_duration(start, length_value[0])
     except isodate.ISO8601Error:
-        logs.append(invalid_duration_log("age_at_extraction", (start, length_value[0])))
+        logs.append(invalid_duration_log("age_at_extraction"))
         return None
 
     return start, end
@@ -357,16 +373,16 @@ def extract_sample_biological_being_fields(
                 )
             ),
             sex=cast(
-                Literal["Male", "Female", "Not-known", "Other"] | None,
-                _extract_string_attribute_value(xml, "sex", logs=logs),
+                Sex | None,
+                _extract_allowed_value(xml, "sex", get_args(Sex), logs),
             ),
             control_terminology=(
                 None
                 if is_clinical
                 else cast(
-                    Literal["CONTROL", "TREATED"] | None,
-                    _extract_string_attribute_value(
-                        xml, "control_terminology", logs=logs
+                    ControlTerminology | None,
+                    _extract_allowed_value(
+                        xml, "control_terminology", get_args(ControlTerminology), logs
                     ),
                 )
             ),
@@ -474,7 +490,7 @@ def extract_staining_fields(
 
 def extract_diagnoses(
     statement: Element,
-    observation_type: Literal["confirmed", "candidate"],
+    observation_type: ObservationType,
 ) -> tuple[set[BigpictureObservationFields], list[ExtractLog]]:
     """Return a ``Diagnosis`` statement's observations, and what was dropped from it."""
     logs: list[ExtractLog] = []
@@ -492,7 +508,7 @@ def extract_diagnoses(
 
 def extract_finding(
     statement: Element,
-    observation_type: Literal["confirmed", "candidate"],
+    observation_type: ObservationType,
 ) -> tuple[BigpictureObservationFields | None, list[ExtractLog]]:
     """Return one finding from a ``Finding`` statement, and what was dropped from it.
 
@@ -525,31 +541,44 @@ _TYPE_OF_DATASET_TAG = "type_of_dataset"
 
 
 # Scope by lower-cased part of 'type_of_dataset' string attribute before the "/".
-_SCOPE_BY_DATASET_TYPE: dict[str, Literal["clinical", "non_clinical"]] = {
+_SCOPE_BY_DATASET_TYPE: dict[str, Scope] = {
     "clinical": "clinical",
     "non-clinical": "non_clinical",
 }
 
 
-def extract_scope(
-    policy_xml: ElementTree, policy_file_path: str
-) -> Literal["clinical", "non_clinical"]:
+def extract_scope(policy_xml: ElementTree, policy_file_path: str) -> Scope:
     """Extract dataset scope from policy ``type_of_dataset`` attribute.
 
-    The scope before the ``"/"`` is read case-insensitively.
+    The scope before the ``"/"`` is read case-insensitively. Every policy that has
+    the attribute must give the same scope.
 
-    :raises UserException: if the attribute is missing or its scope is unknown.
+    :raises UserException: if the attribute is missing, its scope is unknown, or
+        policies give different scopes.
     """
+    scopes: set[Scope] = set()
     for policy in policy_xml.xpath("/POLICY | /POLICY_SET/POLICY"):
         value = _extract_string_attribute_value(policy, _TYPE_OF_DATASET_TAG)
         if value is None:
             continue
         scope = _SCOPE_BY_DATASET_TYPE.get(value.partition("/")[0].strip().lower())
         if scope is None:
-            raise UserException(
-                f"Unsupported '{_TYPE_OF_DATASET_TAG}' value {value!r} in {policy_file_path}."
+            supported = ", ".join(
+                f"'{dataset_type}'" for dataset_type in _SCOPE_BY_DATASET_TYPE
             )
-        return scope
-    raise UserException(
-        f"Missing '{_TYPE_OF_DATASET_TAG}' attribute in {policy_file_path}."
-    )
+            raise UserException(
+                f"Unsupported '{_TYPE_OF_DATASET_TAG}' value in {policy_file_path}: "
+                f"its part before '/' must be one of {supported}."
+            )
+        scopes.add(scope)
+    if not scopes:
+        raise UserException(
+            f"Missing '{_TYPE_OF_DATASET_TAG}' attribute in {policy_file_path}."
+        )
+    if len(scopes) > 1:
+        raise UserException(
+            f"Policies in {policy_file_path} give different '{_TYPE_OF_DATASET_TAG}' "
+            f"scopes: {', '.join(sorted(scopes))}."
+        )
+    (scope,) = scopes
+    return scope

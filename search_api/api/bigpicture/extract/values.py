@@ -104,7 +104,7 @@ def _filter_value_by_scheme(
         or _matches_scheme(value.scheme, ontology_id)
     ):
         return value
-    logs.append(invalid_scheme_log(field_id, value.scheme, ontology_id))
+    logs.append(invalid_scheme_log(field_id, ontology_id))
     return None
 
 
@@ -550,35 +550,37 @@ _SCOPE_BY_DATASET_TYPE: dict[str, Scope] = {
 def extract_scope(policy_xml: ElementTree, policy_file_path: str) -> Scope:
     """Extract dataset scope from policy ``type_of_dataset`` attribute.
 
-    The scope before the ``"/"`` is read case-insensitively. Every policy that has
-    the attribute must give the same scope.
+    The scope before the ``"/"`` is read case-insensitively. Every value, in every
+    policy, must give the same scope, so a non-clinical value cannot hide a clinical
+    one.
 
     :raises UserException: if the attribute is missing, its scope is unknown, or
-        policies give different scopes.
+        values give different scopes.
     """
     scopes: set[Scope] = set()
     for policy in policy_xml.xpath("/POLICY | /POLICY_SET/POLICY"):
-        value = _extract_string_attribute_value(policy, _TYPE_OF_DATASET_TAG)
-        if value is None:
-            continue
-        scope = _SCOPE_BY_DATASET_TYPE.get(value.partition("/")[0].strip().lower())
-        if scope is None:
-            supported = ", ".join(
-                f"'{dataset_type}'" for dataset_type in _SCOPE_BY_DATASET_TYPE
-            )
-            raise UserException(
-                f"Unsupported '{_TYPE_OF_DATASET_TAG}' value in {policy_file_path}: "
-                f"its part before '/' must be one of {supported}."
-            )
-        scopes.add(scope)
+        for value in policy.xpath(
+            f"ATTRIBUTES/STRING_ATTRIBUTE[TAG='{_TYPE_OF_DATASET_TAG}']/VALUE/text()"
+        ):
+            scope = _SCOPE_BY_DATASET_TYPE.get(value.partition("/")[0].strip().lower())
+            if scope is None:
+                supported = ", ".join(
+                    f"'{dataset_type}'" for dataset_type in _SCOPE_BY_DATASET_TYPE
+                )
+                raise UserException(
+                    f"Unsupported '{_TYPE_OF_DATASET_TAG}' value in "
+                    f"{policy_file_path}: its part before '/' must be one of "
+                    f"{supported}."
+                )
+            scopes.add(scope)
     if not scopes:
         raise UserException(
             f"Missing '{_TYPE_OF_DATASET_TAG}' attribute in {policy_file_path}."
         )
     if len(scopes) > 1:
         raise UserException(
-            f"Policies in {policy_file_path} give different '{_TYPE_OF_DATASET_TAG}' "
-            f"scopes: {', '.join(sorted(scopes))}."
+            f"The '{_TYPE_OF_DATASET_TAG}' values in {policy_file_path} give "
+            f"different scopes: {', '.join(sorted(scopes))}."
         )
     (scope,) = scopes
     return scope

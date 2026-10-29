@@ -16,17 +16,18 @@ def parse_xml(xml: str | bytes | Path | IO[bytes]) -> ElementTree:
     Parse XML string into an element tree with normalized whitespace.
 
     The XML is untrusted. A DOCTYPE can declare entities that read files, reach the
-    network or expand into gigabytes. The parser loads no DTD and resolves no entity,
-    and as a second safeguard XML with a DOCTYPE is rejected. Bigpicture XML has none.
+    network or expand into gigabytes. The parser loads no DTD and resolves no declared
+    entity, and as a second safeguard XML with a DOCTYPE is rejected. Bigpicture XML
+    has none. Predefined entities such as &amp; and character references still work.
 
     :param xml: XML contents or file to parse.
     :raises ValueError: if the XML has a DOCTYPE.
     :return: XML element tree.
     """
 
-    # resolve_entities is turned off, so no entity is expanded. The three after it
-    # are lxml's defaults. They are set here so a change of defaults cannot open the
-    # parser to external entities or huge documents.
+    # resolve_entities is turned off, so no declared entity is expanded. The three
+    # after it are lxml's defaults. They are set here so a change of defaults cannot
+    # open the parser to external entities or huge documents.
     parser = etree.XMLParser(
         remove_blank_text=True,
         remove_comments=True,

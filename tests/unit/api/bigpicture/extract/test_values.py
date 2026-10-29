@@ -92,7 +92,7 @@ def test_filter_value_by_scheme_error():
         _filter_value_by_scheme(value, SNOMED_ONTOLOGY_ID, "animal_species", logs)
         is None
     )
-    assert logs == [invalid_scheme_log("animal_species", "ICDO", SNOMED_ONTOLOGY_ID)]
+    assert logs == [invalid_scheme_log("animal_species", SNOMED_ONTOLOGY_ID)]
 
 
 def test_filter_values_by_scheme():
@@ -107,7 +107,7 @@ def test_filter_values_by_scheme():
     assert result == frozenset([matching])
     (log,) = logs
     assert log.message == (
-        f"Value is ignored: scheme 'ICDO' does not match expected ontology "
+        f"Value is ignored: its scheme does not match expected ontology "
         f"'{SNOMED_ONTOLOGY_ID}'."
     )
 
@@ -189,7 +189,7 @@ def test_extract_code_attribute_value_missing_ontology():
     )
 
     assert value is None
-    assert logs == [invalid_scheme_log("specimen_type", None, SNOMED_ONTOLOGY_ID)]
+    assert logs == [invalid_scheme_log("specimen_type", SNOMED_ONTOLOGY_ID)]
 
 
 def test_extract_string_attribute_value():
@@ -779,7 +779,7 @@ def test_extract_finding_invalid_ontology():
     finding, logs = extract_finding(statement, _OBSERVATION_TYPE)
 
     assert finding is None
-    assert logs == [invalid_scheme_log("finding", "SNOMED CT", SEND_ONTOLOGY_ID)]
+    assert logs == [invalid_scheme_log("finding", SEND_ONTOLOGY_ID)]
 
 
 def test_extract_diagnoses():
@@ -797,7 +797,7 @@ def test_extract_diagnoses():
         "38341003",
     }
     assert all(item.observation_type == _OBSERVATION_TYPE for item in diagnoses)
-    assert logs == [invalid_scheme_log("diagnosis", "ICDO", SNOMED_ONTOLOGY_ID)]
+    assert logs == [invalid_scheme_log("diagnosis", SNOMED_ONTOLOGY_ID)]
 
 
 def _policy(type_of_dataset: str | None) -> ElementTree:
@@ -1051,8 +1051,28 @@ def test_extract_scope_of_policies_with_one_scope():
 def test_extract_scope_of_policies_with_different_scopes():
     # A non-clinical policy listed first must not hide a clinical one.
     policies = _policies("Non-clinical/Anonymized", "Clinical/Anonymized")
-    with pytest.raises(UserException, match="give different 'type_of_dataset'"):
+    with pytest.raises(UserException, match="give different scopes"):
         extract_scope(policies, "policy.xml")
+
+
+def test_extract_scope_of_a_policy_with_different_scopes():
+    # Nor must a non-clinical value listed first in one policy.
+    policy = etree.ElementTree(
+        etree.fromstring("""
+        <POLICY><ATTRIBUTES>
+            <STRING_ATTRIBUTE>
+                <TAG>type_of_dataset</TAG>
+                <VALUE>Non-clinical/Anonymized</VALUE>
+            </STRING_ATTRIBUTE>
+            <STRING_ATTRIBUTE>
+                <TAG>type_of_dataset</TAG>
+                <VALUE>Clinical/Anonymized</VALUE>
+            </STRING_ATTRIBUTE>
+        </ATTRIBUTES></POLICY>
+        """)
+    )
+    with pytest.raises(UserException, match="give different scopes"):
+        extract_scope(policy, "policy.xml")
 
 
 def test_extract_scope_without_the_attribute():

@@ -21,21 +21,17 @@ class ExtractLog(BaseModel):
     field_id: str | None = None
 
 
-def invalid_scheme_log(
-    field_id: str,
-    scheme: str | None,
-    ontology_id: str,
-) -> ExtractLog:
+def invalid_scheme_log(field_id: str, ontology_id: str) -> ExtractLog:
     """Log a code attribute whose scheme is not the field's ontology.
 
-    The code and meaning are not quoted. They were not found in any ontology, so
-    they may be free text.
+    The code, meaning and scheme are not quoted. They are submitter text that is
+    dropped before being looked up in any ontology, so they may be free text.
     """
     return ExtractLog(
         severity="ERROR",
         field_id=field_id,
-        message=f"Value is ignored: scheme '{scheme}' "
-        f"does not match expected ontology '{ontology_id}'.",
+        message=f"Value is ignored: its scheme does not match expected ontology "
+        f"'{ontology_id}'.",
     )
 
 

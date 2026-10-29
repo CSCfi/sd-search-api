@@ -90,7 +90,8 @@ def test_validate_xml(tmp_path: Path):
     ],
 )
 def test_parse_xml_rejects_doctype(tmp_path: Path, xml: str):
-    # The parser fails on this invalid DTD if it reads the file,
+    # The parser fails on this invalid DTD if it reads the file, so a ValueError also
+    # shows the file was never read.
     dtd = tmp_path / "test.dtd"
     dtd.write_text("<!ENTITY y 'z'> not a DTD")
 

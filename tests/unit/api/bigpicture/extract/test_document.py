@@ -448,12 +448,12 @@ def test_extract_does_not_quote_values(
     with pytest.raises(ValueError) as exc:
         list(extract_dataset_documents("root"))
     assert str(exc.value) == expected
-    # Check that the value is not in the logged traceback.xww
+    # Check that the value is not in the logged traceback.
     assert "Jane" not in "".join(traceback.format_exception(exc.value))
 
 
 def test_extract_invalid_scheme_error():
-    dropped = invalid_scheme_log("diagnosis", "ICDO", SNOMED_ONTOLOGY_ID)
+    dropped = invalid_scheme_log("diagnosis", SNOMED_ONTOLOGY_ID)
 
     clinical = {
         doc.id: doc.logs

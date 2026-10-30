@@ -768,7 +768,7 @@ def test_extract_staining_fields_staining_target():
     ]
 
 
-_OBSERVATION_TYPE = "confirmed"
+_OBSERVATION_TYPE = "distinct"
 
 
 def _statement(children: str) -> Element:

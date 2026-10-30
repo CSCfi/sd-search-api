@@ -61,7 +61,7 @@ def build_document(document: ExtractedDocument) -> dict[str, Any]:
 
         {"scope": "clinical",
          "image_id": "img-1",
-         "observation": [{"diagnosis": "73211009", "observation_type": "confirmed"}]}
+         "observation": [{"diagnosis": "73211009", "observation_type": "distinct"}]}
     """
     result: dict[str, Any] = {}
 

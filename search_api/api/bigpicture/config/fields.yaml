@@ -21,7 +21,7 @@
 #       - staining: a slide carries several stains, each with correlated fields.
 #       - observation: an image can have several clinical diagnoses and several
 #         non-clinical findings, each with several correlated fields plus its own
-#         observation_type (confirmed/candidate). Diagnosis and finding never
+#         observation_type (distinct/summary). Diagnosis and finding never
 #         coexist in one document, since a document has exactly one scope.
 #     The slide and case have no searchable fields and do not need to be
 #     represented as nested groups.
@@ -243,10 +243,14 @@ filtering_terms:
     scopes: [ clinical, non_clinical ]
     label: "Observation type"
     description: >-
-      How an observation is linked to the image. A confirmed observation is
-      known to apply to an image. By default, observations apply to at least
-      one image in a set of images, but not necessarily to all of them.
-    controlledValues: [ confirmed, candidate ]
+      Indicates the extent to which an observation is represented in the
+      image(s) within an image set.
+      Distinct: The observation is associated with an image
+      set and known to apply to every single image within the image set.
+      Summary: The observation is associated with an image
+      set and known to apply to at least one image from the set but may not
+      apply to every image within the image set.
+    controlledValues: [ distinct, summary ]
 
 # Fields that are indexed in OpenSearch but are not filterable.
 # All are top-level (no nested group).

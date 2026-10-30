@@ -134,7 +134,7 @@ def test_extract_fields_non_clinical_2_0():
             "finding_chronicity": "C14141",
             "finding_distribution": "C25253",
             "finding_result_category": "C53529",
-            "observation_type": "confirmed",
+            "observation_type": "distinct",
         }
     ]
     specimen = payload["specimen"][0]
@@ -166,7 +166,7 @@ def test_extract_fields_non_clinical_2_0():
             "finding": "C41428",
             "finding_severity": "C147501",
             "finding_result_category": "C53529",
-            "observation_type": "confirmed",
+            "observation_type": "distinct",
         }
     ]
     # This statement declares no MICHRON or MIDISTR, so neither is indexed.
@@ -192,24 +192,24 @@ def test_extract_diagnoses():
         build_document(docs[CLINICAL_2_0_IMAGE_2_ID])
     )
 
-    # A diagnosis stated for the image itself, or stated as Distinct, is confirmed
-    # for that image; one reaching several images via another ref is a candidate.
+    # A diagnosis stated for the image itself, or stated as Distinct, is distinct
+    # for that image; one reaching several images via another ref is a summary.
     # Image 1: CASE_REF and SPECIMEN_REF (Distinct, both images), IMAGE_REF
     # (image 1), BIOLOGICAL_BEING_REF and BLOCK_REF (Summary, both images).
     assert image1 == {
-        "109355002": "confirmed",
-        "254837009": "confirmed",
-        "73211009": "confirmed",
-        "363346000": "candidate",
-        "38341003": "candidate",
+        "109355002": "distinct",
+        "254837009": "distinct",
+        "73211009": "distinct",
+        "363346000": "summary",
+        "38341003": "summary",
     }
     # Image 2 differs only in SLIDE_REF (Distinct, image 2) replacing IMAGE_REF.
     assert image2 == {
-        "195967001": "confirmed",
-        "254837009": "confirmed",
-        "73211009": "confirmed",
-        "363346000": "candidate",
-        "38341003": "candidate",
+        "195967001": "distinct",
+        "254837009": "distinct",
+        "73211009": "distinct",
+        "363346000": "summary",
+        "38341003": "summary",
     }
 
     # The equality assertions above already exclude the non-SNOMED code 8500/3 and

@@ -23,7 +23,7 @@ class BigpictureCodeAttributeValue(BaseModel):
 Scope = Literal["clinical", "non_clinical"]
 Sex = Literal["Male", "Female", "Not-known", "Other"]
 ControlTerminology = Literal["CONTROL", "TREATED"]
-ObservationType = Literal["confirmed", "candidate"]
+ObservationType = Literal["distinct", "summary"]
 
 
 class BigpictureSampleBiologicalBeingFields(BaseModel):
@@ -131,19 +131,19 @@ def _nested_groups() -> tuple[str, ...]:
 NESTED_GROUPS = _nested_groups()
 
 
-OBSERVATION_CONFIRMED: Literal["confirmed"] = "confirmed"
-OBSERVATION_CANDIDATE: Literal["candidate"] = "candidate"
+OBSERVATION_DISTINCT: Literal["distinct"] = "distinct"
+OBSERVATION_SUMMARY: Literal["summary"] = "summary"
 
 
 def validate_observation_types(term: OpenSearchBeaconFilteringTerm) -> None:
     """Validate fields.yaml observation_type term against observation type constants."""
     if set(term.controlledValues or []) != {
-        OBSERVATION_CONFIRMED,
-        OBSERVATION_CANDIDATE,
+        OBSERVATION_DISTINCT,
+        OBSERVATION_SUMMARY,
     }:
         raise SystemException(
             f"{term.id}'s controlledValues in fields.yaml must be "
-            f"{{{OBSERVATION_CONFIRMED!r}, {OBSERVATION_CANDIDATE!r}}}, got "
+            f"{{{OBSERVATION_DISTINCT!r}, {OBSERVATION_SUMMARY!r}}}, got "
             f"{term.controlledValues}."
         )
     if term.nested_group != "observation":

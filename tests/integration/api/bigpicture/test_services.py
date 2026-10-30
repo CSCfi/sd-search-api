@@ -33,8 +33,8 @@ from search_api.api.opensearch.models import OpenSearchBeaconFilteringTerm
 from search_api.api.opensearch.search import iter_paged_buckets, iter_paged_documents
 from tests.integration.conftest import bp_search
 
-_CONFIRMED = "confirmed"
-_CANDIDATE = "candidate"
+_DISTINCT = "distinct"
+_SUMMARY = "summary"
 
 
 def _document(image_id: str, scope: str, **groups: Any) -> dict[str, Any]:
@@ -57,16 +57,16 @@ _DOCS = [
         "clinical",
         specimen=[{"sex": "Female"}, {"sex": "Female"}],
         observation=[
-            {"diagnosis": "73211009", "observation_type": _CONFIRMED},
-            {"diagnosis": "73211009", "observation_type": _CANDIDATE},
-            {"diagnosis": "38341003", "observation_type": _CANDIDATE},
+            {"diagnosis": "73211009", "observation_type": _DISTINCT},
+            {"diagnosis": "73211009", "observation_type": _SUMMARY},
+            {"diagnosis": "38341003", "observation_type": _SUMMARY},
         ],
     ),
     _document(
         "image_2",
         "clinical",
         specimen=[{"sex": "Male"}],
-        observation=[{"diagnosis": "73211009", "observation_type": _CONFIRMED}],
+        observation=[{"diagnosis": "73211009", "observation_type": _DISTINCT}],
     ),
     _document("image_3", "non_clinical", specimen=[{"sex": "Female"}]),
 ]
@@ -131,11 +131,11 @@ async def _assert_value_counts(
         "38341003": 1,
     }
 
-    # image_1 holds both a confirmed and a candidate item, so it counts once for
-    # each; image_2 only ever confirmed. image_3 has no observation item at all.
+    # image_1 holds both a distinct and a summary item, so it counts once for
+    # each; image_2 only ever distinct. image_3 has no observation item at all.
     assert await _value_counts(beacon_service, "observation_type") == {
-        "confirmed": 2,
-        "candidate": 1,
+        "distinct": 2,
+        "summary": 1,
     }
 
     # Scope restricts which documents are counted.
@@ -317,29 +317,29 @@ async def test_dataset_query_scope_specific_filter(
 async def test_dataset_query_diagnosis_and_observation_type(
     bp_opensearch_index, dataset_service
 ):
-    """image_1 states 73211009 both ways; image_2 only confirmed."""
-    confirmed = await _dataset_image_ids(
+    """image_1 states 73211009 both ways; image_2 only distinct."""
+    distinct = await _dataset_image_ids(
         dataset_service,
-        [("diagnosis", "73211009"), ("observation_type", "confirmed")],
+        [("diagnosis", "73211009"), ("observation_type", "distinct")],
         scope="clinical",
     )
-    candidate = await _dataset_image_ids(
+    summary = await _dataset_image_ids(
         dataset_service,
-        [("diagnosis", "73211009"), ("observation_type", "candidate")],
+        [("diagnosis", "73211009"), ("observation_type", "summary")],
         scope="clinical",
     )
-    assert confirmed == ["image_1", "image_2"]
-    assert candidate == ["image_1"]
+    assert distinct == ["image_1", "image_2"]
+    assert summary == ["image_1"]
 
     # observation_type applies to the item that matched, not merely to some item
-    # in the group: image_1 holds a confirmed diagnosis (73211009) and holds
-    # 38341003 — but only as a candidate. A query for 38341003 confirmed must
+    # in the group: image_1 holds a distinct diagnosis (73211009) and holds
+    # 38341003 — but only as a summary. A query for 38341003 distinct must
     # therefore match nothing, which it only does if both filters sit inside the
     # same nested query.
     assert (
         await _dataset_image_ids(
             dataset_service,
-            [("diagnosis", "38341003"), ("observation_type", "confirmed")],
+            [("diagnosis", "38341003"), ("observation_type", "distinct")],
             scope="clinical",
         )
         == []
@@ -409,28 +409,28 @@ async def test_image_query_scope_specific_filter(bp_opensearch_index, image_serv
 async def test_image_query_diagnosis_and_observation_type(
     bp_opensearch_index, image_service
 ):
-    confirmed = await _image_ids(
+    distinct = await _image_ids(
         image_service,
-        [("diagnosis", "73211009"), ("observation_type", "confirmed")],
+        [("diagnosis", "73211009"), ("observation_type", "distinct")],
         scope="clinical",
     )
-    candidate = await _image_ids(
+    summary = await _image_ids(
         image_service,
-        [("diagnosis", "73211009"), ("observation_type", "candidate")],
+        [("diagnosis", "73211009"), ("observation_type", "summary")],
         scope="clinical",
     )
-    assert confirmed == ["image_1", "image_2"]
-    assert candidate == ["image_1"]
+    assert distinct == ["image_1", "image_2"]
+    assert summary == ["image_1"]
 
     # observation_type applies to the item that matched, not merely to some item
-    # in the group: image_1 holds a confirmed diagnosis (73211009) and holds
-    # 38341003 — but only as a candidate. A query for 38341003 confirmed must
+    # in the group: image_1 holds a distinct diagnosis (73211009) and holds
+    # 38341003 — but only as a summary. A query for 38341003 distinct must
     # therefore match nothing, which it only does if both filters sit inside the
     # same nested query.
     assert (
         await _image_ids(
             image_service,
-            [("diagnosis", "38341003"), ("observation_type", "confirmed")],
+            [("diagnosis", "38341003"), ("observation_type", "distinct")],
             scope="clinical",
         )
         == []

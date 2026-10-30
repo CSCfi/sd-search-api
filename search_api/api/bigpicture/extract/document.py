@@ -13,8 +13,8 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from search_api.api.bigpicture.extract.models import (
     NESTED_GROUPS,
-    OBSERVATION_CANDIDATE,
-    OBSERVATION_CONFIRMED,
+    OBSERVATION_DISTINCT,
+    OBSERVATION_SUMMARY,
     BigpictureCodeAttributeValue,
     BigpictureExtractedObject,
     BigpictureFields,
@@ -506,11 +506,11 @@ def _extract_dataset_documents(
                 ref = observation.find(tag)
                 if ref is None:
                     continue
-                # A statement is always considered confirmed if it is linked directly
+                # A statement is always considered distinct if it is linked directly
                 # to an image.
-                confirmed = tag == OBSERVATION_IMAGE_REF or status == "Distinct"
+                distinct = tag == OBSERVATION_IMAGE_REF or status == "Distinct"
                 observation_type = (
-                    OBSERVATION_CONFIRMED if confirmed else OBSERVATION_CANDIDATE
+                    OBSERVATION_DISTINCT if distinct else OBSERVATION_SUMMARY
                 )
                 ref_image_ids = image_ids_for_ref(references, object_keys(ref))
                 if statement_type == "Diagnosis":

@@ -1,14 +1,21 @@
 import shutil
+import traceback
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import BaseModel, field_validator
 
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
+from search_api.api.bigpicture.extract import document
 from search_api.api.bigpicture.extract.document import (
     extract_dataset_documents,
     get_last_modification_time,
+)
+from search_api.api.bigpicture.extract.models import (
+    BigpictureSampleBiologicalBeingFields,
 )
 from search_api.api.extract_logs import invalid_scheme_log
 from search_api.api.opensearch.document import build_document
@@ -395,14 +402,58 @@ def test_extract_scope_requires_policy_file(tmp_path):
         list(extract_dataset_documents(str(root)))
 
 
-def test_extract_invalid_scheme_error():
-    dropped = invalid_scheme_log(
-        "diagnosis",
-        "8500/3",
-        "Infiltrating duct carcinoma, NOS",
-        "ICDO",
-        SNOMED_ONTOLOGY_ID,
+# A model whose validator puts the input value in its error message.
+#
+# Pydantic copies a validator's error message into the error's 'msg', so the value
+# leaks into 'msg' even with include_input=False. This model lets the test check
+# that the error message from extract_dataset_documents does not include the
+# model value.
+class _ValueInMessageModel(BaseModel):
+    value: str
+
+    @field_validator("value")
+    @classmethod
+    def _reject(cls, value: str) -> str:
+        raise ValueError(f"{value!r} is not allowed")
+
+
+@pytest.mark.parametrize(
+    ("raise_validation_error", "expected"),
+    [
+        # Pydantic's own message does not quote the value.
+        (
+            lambda: BigpictureSampleBiologicalBeingFields(sex="Jane Doe"),  # type: ignore[arg-type]
+            "Invalid BigpictureSampleBiologicalBeingFields: sex: literal_error",
+        ),
+        # A validator's message may quote the value.
+        (
+            lambda: _ValueInMessageModel(value="Jane Doe"),
+            "Invalid _ValueInMessageModel: value: value_error",
+        ),
+    ],
+)
+def test_extract_does_not_quote_values(
+    monkeypatch: pytest.MonkeyPatch,
+    raise_validation_error: Callable[[], BaseModel],
+    expected: str,
+):
+    def _mock_extract_dataset_documents(*_args):
+        raise_validation_error()
+        yield
+
+    monkeypatch.setattr(
+        document, "_extract_dataset_documents", _mock_extract_dataset_documents
     )
+
+    with pytest.raises(ValueError) as exc:
+        list(extract_dataset_documents("root"))
+    assert str(exc.value) == expected
+    # Check that the value is not in the logged traceback.
+    assert "Jane" not in "".join(traceback.format_exception(exc.value))
+
+
+def test_extract_invalid_scheme_error():
+    dropped = invalid_scheme_log("diagnosis", SNOMED_ONTOLOGY_ID)
 
     clinical = {
         doc.id: doc.logs

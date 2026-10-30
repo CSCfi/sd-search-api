@@ -284,14 +284,16 @@ async def test_load_valid_concept_id(single_concept_ontology_id, document_id):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "provided_concept_id",
+    ("provided_concept_id", "quoted_id"),
     [
-        "invalid",  # Not well-formed
-        _UNKNOWN_CONCEPT_ID,
+        # Not well-formed, so not quoted in the message as it may be free text.
+        ("invalid", ""),
+        # Well-formed, so quoted in the message.
+        (_UNKNOWN_CONCEPT_ID, f" '{_UNKNOWN_CONCEPT_ID}'"),
     ],
 )
 async def test_load_invalid_concept_id(
-    single_concept_ontology_id, document_id, provided_concept_id
+    single_concept_ontology_id, document_id, provided_concept_id, quoted_id
 ):
     """Storing a document with invalid concepts does not cache the preferred term.
 
@@ -309,7 +311,7 @@ async def test_load_invalid_concept_id(
         (
             "WARNING",
             (
-                f"The provided concept id '{provided_concept_id}' is invalid for "
+                f"The provided concept id{quoted_id} is invalid for "
                 f"field '{_FIELD_ID}' of ontology '{single_concept_ontology_id}'."
             ),
         ),

@@ -8,7 +8,7 @@ from typing import Any
 
 import fsspec  # type: ignore
 from lxml.etree import _Element as Element  # noqa
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from search_api.api.bigpicture.extract.models import (
     NESTED_GROUPS,
@@ -208,7 +208,27 @@ def extract_dataset_documents(
     :param fs: Optional fsspec filesystem. If None, a local filesystem is used.
     :param keys: Crypt4GH keys for decrypting ``.c4gh`` files, as returned by
         ``load_c4gh_keys``. If None, only plain files are accepted.
+    :raises ValueError: if a value read from the XML fails a model's validation.
     """
+    try:
+        yield from _extract_dataset_documents(root, fs, keys)
+    except ValidationError as ex:
+        # A safety net for any Pydantic model built from source documents. Pydantic quotes
+        # the input that failed and we keep this out by constructing the error message
+        # ourselves and using `from None`.
+        errors = "; ".join(
+            f"{'.'.join(str(loc) for loc in error['loc'])}: {error['type']}"
+            for error in ex.errors(include_input=False, include_url=False)
+        )
+        raise ValueError(f"Invalid {ex.title}: {errors}") from None
+
+
+def _extract_dataset_documents(
+    root: str,
+    fs: fsspec.AbstractFileSystem | None,
+    keys: list | None,
+) -> Iterator[ExtractedDocument]:
+    """Extract search fields from a single Bigpicture XML dataset directory."""
     if fs is None:
         # Use local filesystem.
         fs = fsspec.filesystem("file")
@@ -241,7 +261,9 @@ def extract_dataset_documents(
     # The dataset XML declares the metadata standard version.
     version = extract_version(dataset_xml)
     schema_dir = xml_schema_dir(version)
-    validate_xml(dataset_xml, schema_dir, DATASET_XML_SCHEMA_FILE)
+    validate_xml(
+        dataset_xml, schema_dir, DATASET_XML_SCHEMA_FILE, xml_path=files.dataset
+    )
     # The dataset is identified by its accession.
     dataset_id = get_xml_value(
         "/DATASET/@accession | /DATASET_SET/DATASET/@accession",
@@ -267,7 +289,7 @@ def extract_dataset_documents(
     #
 
     image_xml = parse_xml(read_file(fs, files.image, keys))
-    validate_xml(image_xml, schema_dir, IMAGE_XML_SCHEMA_FILE)
+    validate_xml(image_xml, schema_dir, IMAGE_XML_SCHEMA_FILE, xml_path=files.image)
 
     for xml in image_xml.xpath("/IMAGE | /IMAGE_SET/IMAGE"):
         image_ids = object_ids(xml)
@@ -287,7 +309,7 @@ def extract_dataset_documents(
     #
 
     policy_xml = parse_xml(read_file(fs, files.policy, keys))
-    validate_xml(policy_xml, schema_dir, POLICY_XML_SCHEMA_FILE)
+    validate_xml(policy_xml, schema_dir, POLICY_XML_SCHEMA_FILE, xml_path=files.policy)
     scope = extract_scope(policy_xml, files.policy)
     is_clinical = scope == "clinical"
 
@@ -295,7 +317,7 @@ def extract_dataset_documents(
     #
 
     sample_xml = parse_xml(read_file(fs, files.sample, keys))
-    validate_xml(sample_xml, schema_dir, SAMPLE_XML_SCHEMA_FILE)
+    validate_xml(sample_xml, schema_dir, SAMPLE_XML_SCHEMA_FILE, xml_path=files.sample)
 
     for xml in sample_xml.xpath("/SLIDE | /SAMPLE_SET/SLIDE"):
         slide_ids = object_ids(xml)
@@ -339,7 +361,9 @@ def extract_dataset_documents(
     #
 
     staining_xml = parse_xml(read_file(fs, files.staining, keys))
-    validate_xml(staining_xml, schema_dir, STAINING_XML_SCHEMA_FILE)
+    validate_xml(
+        staining_xml, schema_dir, STAINING_XML_SCHEMA_FILE, xml_path=files.staining
+    )
 
     for xml in staining_xml.xpath("/STAINING | /STAINING_SET/STAINING"):
         # Extract fields from XML.
@@ -398,7 +422,12 @@ def extract_dataset_documents(
     # non-clinical one findings; the statement type decides which.
     if files.observation is not None:
         observation_xml = parse_xml(read_file(fs, files.observation, keys))
-        validate_xml(observation_xml, schema_dir, OBSERVATION_XML_SCHEMA_FILE)
+        validate_xml(
+            observation_xml,
+            schema_dir,
+            OBSERVATION_XML_SCHEMA_FILE,
+            xml_path=files.observation,
+        )
 
         for observation in observation_xml.xpath(
             "/OBSERVATION | /OBSERVATION_SET/OBSERVATION"

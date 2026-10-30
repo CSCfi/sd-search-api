@@ -43,19 +43,23 @@ def test_extract_version(metadata_standard: str, expected: BigpictureVersion):
 
 
 @pytest.mark.parametrize(
-    "metadata_standard",
+    ("metadata_standard", "version"),
     [
-        "1.0.0",  # Before the first supported version.
-        "4.0.0",  # After the last supported version.
-        "2.1.0",  # A supported major version, but an unknown minor one.
-        "3.0",  # Not a <major>.<minor>.<patch> version.
-        "3.0.0-beta",
-        "three",
+        ("1.0.0", " '1.0.0'"),  # Before the first supported version.
+        ("4.0.0", " '4.0.0'"),  # After the last supported version.
+        ("2.1.0", " '2.1.0'"),  # A supported major version, but an unknown minor one.
+        # Not a <major>.<minor>.<patch> version.
+        ("3.0", ""),
+        ("3.0.0-beta", ""),
+        ("Jane Doe", ""),
     ],
 )
-def test_extract_version_unsupported(metadata_standard: str):
-    with pytest.raises(UserException, match="Unsupported metadata standard version"):
+def test_extract_version_unsupported(metadata_standard: str, version: str):
+    with pytest.raises(UserException) as exc:
         _extract_version(metadata_standard)
+    assert str(exc.value) == (
+        f"Unsupported metadata standard version{version}. Supported: 2.0.x, 3.0.x."
+    )
 
 
 @pytest.mark.parametrize("metadata_standard", [None, ""])

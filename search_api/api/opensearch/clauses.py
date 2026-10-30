@@ -5,9 +5,15 @@ from typing import Any
 
 import isodate  # type: ignore[import-untyped]
 
+from search_api.exceptions import UserException
+
 # How much of a text query has to match. Up to two terms all of them
 # must match, beyond that three quarters must.
 _MATCH_MINIMUM_SHOULD_MATCH = "2<75%"
+
+# Durations are indexed as an integer_range of days. Its bounds are 32-bit signed
+# integers, and OpenSearch rejects a query with a larger bound.
+_MAX_DAYS = 2**31 - 1
 
 
 def build_match_clause(field_id: str, value: str) -> dict[str, Any]:
@@ -61,16 +67,46 @@ def iso8601_duration_to_days(duration: str) -> int:
     return int(d.years) * 365 + int(d.months) * 30 + d.tdelta.days
 
 
+def iso8601_range_to_days(start: str, end: str) -> tuple[int, int]:
+    """Convert a range of two ISO-8601 durations to days.
+
+    :param start: The duration the range starts at.
+    :param end: The duration the range ends at.
+    :raises ValueError: if either is not a duration, the range ends before it starts,
+        or it ends after the most days the index holds. The message does not quote
+        the value.
+    :return: The first and the last day of the range.
+    """
+    try:
+        gte = iso8601_duration_to_days(start)
+        lte = iso8601_duration_to_days(end)
+    # isodate raises ValueError for an invalid duration. OverflowError means the
+    # duration is too long.
+    except ValueError, OverflowError:
+        raise ValueError("Not an ISO-8601 duration.") from None
+    if gte > lte or lte > _MAX_DAYS:
+        raise ValueError("Not a valid ISO-8601 duration range.")
+    return gte, lte
+
+
 def build_iso8601_range_clause(field_id: str, value: str) -> dict[str, Any]:
     """Build an OpenSearch range clause from an ISO-8601 duration range.
 
     :param field_id: The field's indexed path.
     :param value: One ISO-8601 duration, or two separated by ``-`` for a range.
+    :raises UserException: if the value is not a duration or a range, the range ends
+        before it starts, or it is too long for the index.
     :return: The range clause.
     """
+    # A single duration is a range that starts and ends at it.
     parts = value.split("-", 1)
-    gte = iso8601_duration_to_days(parts[0])
-    lte = iso8601_duration_to_days(parts[1]) if len(parts) > 1 else gte
+    try:
+        gte, lte = iso8601_range_to_days(parts[0], parts[-1])
+    except ValueError:
+        raise UserException(
+            f"{field_id} value is not an ISO-8601 duration or range, such as P40Y or "
+            "P40Y-P60Y."
+        ) from None
     return {"range": {field_id: {"gte": gte, "lte": lte}}}
 
 

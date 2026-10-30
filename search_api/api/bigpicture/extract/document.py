@@ -1,13 +1,14 @@
 """Bigpicture document XML extraction."""
 
 import logging
+import re
 from collections.abc import Iterable, Iterator
 from collections.abc import Set as AbstractSet
 from datetime import UTC, datetime
 from typing import Any
 
 import fsspec  # type: ignore
-from lxml.etree import _Element as Element  # noqa
+from lxml.etree import _ElementTree as ElementTree
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from search_api.api.bigpicture.extract.models import (
@@ -23,6 +24,7 @@ from search_api.api.bigpicture.extract.models import (
     BigpictureSpecimenFields,
     BigpictureStainingFields,
     ObjectIds,
+    ObjectKey,
 )
 from search_api.api.bigpicture.extract.refs import (
     OBSERVATION_IMAGE_REF,
@@ -53,7 +55,7 @@ from search_api.api.opensearch.models import (
     OpenSearchFieldValue,
     OpenSearchGroup,
 )
-from search_api.exceptions import SystemException
+from search_api.exceptions import SystemException, UserException
 from search_api.utils.crypt import read_file, resolve_path
 from search_api.utils.xml import get_xml_value, parse_xml, validate_xml
 
@@ -134,6 +136,50 @@ POLICY_XML_SCHEMA_FILE = "BP.policy.xsd"
 SAMPLE_XML_SCHEMA_FILE = "BP.sample.xsd"
 STAINING_XML_SCHEMA_FILE = "BP.staining.xsd"
 OBSERVATION_XML_SCHEMA_FILE = "BP.observation.xsd"
+
+# The objects in the sample XML.
+SAMPLE_XML_OBJECT_TAGS = ("BIOLOGICAL_BEING", "CASE", "SPECIMEN", "BLOCK", "SLIDE")
+
+# The characters of the random part of a Bigpicture accession: lowercase letters and
+# digits other than i, l, o, 0 and 1.
+_ACCESSION_CHARS = "abcdefghjkmnpqrstuvwxyz23456789"
+
+
+def _accession_pattern(accession_type: str) -> re.Pattern[str]:
+    """
+    Return the format of the accessions the SD Submit API assigns.
+
+    The format is CENTER-TYPE-xxxxxx-xxxxxx. CENTER is set for each deployment
+    of the SD Submit API, and any letters and digits are accepted.
+
+    :param accession_type: The TYPE part of the accession.
+    """
+    random_part = f"[{_ACCESSION_CHARS}]{{6}}"
+    return re.compile(rf"[A-Za-z0-9]+-{accession_type}-{random_part}-{random_part}")
+
+
+_DATASET_ACCESSION = _accession_pattern("dataset")
+_IMAGE_ACCESSION = _accession_pattern("image")
+
+
+def _require_unique_identifiers(xml: ElementTree, tag: str, xml_path: str) -> None:
+    """
+    Require objects of one type to have unique aliases and accessions.
+
+    A reference finds its object by alias or accession, so they must be unique.
+
+    :param xml: The XML holding the objects.
+    :param tag: The objects' element name. The element is either the root, or a child of
+        a root element.
+    :param xml_path: The file path the XML was read from, named in the error.
+    :raises UserException: if two objects share an alias or an accession.
+    """
+    seen: set[ObjectKey] = set()
+    for elem in xml.xpath(f"/{tag} | /*/{tag}"):
+        for key in object_keys(elem):
+            if key in seen:
+                raise UserException(f"Duplicate {tag} {key.kind} in {xml_path}.")
+            seen.add(key)
 
 
 def get_last_modification_time(
@@ -272,12 +318,16 @@ def _extract_dataset_documents(
     )
     if dataset_id is None:
         raise ValueError(f"Failed to extract dataset accession from {files.dataset!s}")
+    if not _DATASET_ACCESSION.fullmatch(dataset_id):
+        raise SystemException(
+            f"Dataset accession in {files.dataset} is not a Bigpicture accession."
+        )
     dataset_short_name = get_xml_value(
-        "/DATASET/DESCRIPTION | /DATASET_SET/DATASET/SHORT_NAME",
+        "/DATASET/SHORT_NAME | /DATASET_SET/DATASET/SHORT_NAME",
         dataset_xml,
     )
     dataset_title = get_xml_value(
-        "/DATASET/DESCRIPTION | /DATASET_SET/DATASET/TITLE",
+        "/DATASET/TITLE | /DATASET_SET/DATASET/TITLE",
         dataset_xml,
     )
     dataset_description = get_xml_value(
@@ -291,8 +341,17 @@ def _extract_dataset_documents(
     image_xml = parse_xml(read_file(fs, files.image, keys))
     validate_xml(image_xml, schema_dir, IMAGE_XML_SCHEMA_FILE, xml_path=files.image)
 
+    _require_unique_identifiers(image_xml, "IMAGE", files.image)
+
     for xml in image_xml.xpath("/IMAGE | /IMAGE_SET/IMAGE"):
         image_ids = object_ids(xml)
+        # An image loaded from a directory may have no accession.
+        if image_ids.accession is not None and not _IMAGE_ACCESSION.fullmatch(
+            image_ids.accession
+        ):
+            raise SystemException(
+                f"Image accession in {files.image} is not a Bigpicture accession."
+            )
         images.append(image_ids)
         # The document id is image accession if present, otherwise image
         # alias prefixed with dataset accession to make it unique.
@@ -318,6 +377,8 @@ def _extract_dataset_documents(
 
     sample_xml = parse_xml(read_file(fs, files.sample, keys))
     validate_xml(sample_xml, schema_dir, SAMPLE_XML_SCHEMA_FILE, xml_path=files.sample)
+    for tag in SAMPLE_XML_OBJECT_TAGS:
+        _require_unique_identifiers(sample_xml, tag, files.sample)
 
     for xml in sample_xml.xpath("/SLIDE | /SAMPLE_SET/SLIDE"):
         slide_ids = object_ids(xml)
@@ -364,6 +425,8 @@ def _extract_dataset_documents(
     validate_xml(
         staining_xml, schema_dir, STAINING_XML_SCHEMA_FILE, xml_path=files.staining
     )
+
+    _require_unique_identifiers(staining_xml, "STAINING", files.staining)
 
     for xml in staining_xml.xpath("/STAINING | /STAINING_SET/STAINING"):
         # Extract fields from XML.

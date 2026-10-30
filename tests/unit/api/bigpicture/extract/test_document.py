@@ -19,7 +19,7 @@ from search_api.api.bigpicture.extract.models import (
 )
 from search_api.api.extract_logs import invalid_scheme_log
 from search_api.api.opensearch.document import build_document
-from search_api.exceptions import UserException
+from search_api.exceptions import SystemException, UserException
 from tests.utils.bigpicture import (
     CLINICAL_2_0_DATASET_DIR,
     CLINICAL_2_0_DATASET_ID,
@@ -270,6 +270,119 @@ def test_extract_image_id_with_accession_and_alias(tmp_path):
     opensearch_doc = build_document(docs[f"{CLINICAL_2_0_DATASET_ID}-2"])
     assert opensearch_doc["image_id"] == "2"
     assert opensearch_doc["dataset_id"] == CLINICAL_2_0_DATASET_ID
+
+
+def test_extract_dataset_fields_from_dataset_root(tmp_path):
+    # A DATASET root rather than a DATASET_SET.
+    root = _copy_xml_dir(CLINICAL_2_0_DATASET_DIR, tmp_path)
+    _replace_in_xml(root / "METADATA" / "dataset.xml", "<DATASET_SET>", "")
+    _replace_in_xml(root / "METADATA" / "dataset.xml", "</DATASET_SET>", "")
+
+    docs = list(extract_dataset_documents(str(root)))
+
+    payload = build_document(docs[0])
+    assert payload["dataset_short_name"] == "test_short_name"
+    assert payload["dataset_title"] == "test_title"
+    assert payload["dataset_description"] == "test_description"
+
+
+@pytest.mark.parametrize(
+    ("file", "old", "new", "expected"),
+    [
+        (
+            "image.xml",
+            f'<IMAGE alias="2" accession="{CLINICAL_2_0_IMAGE_2_ID}">',
+            '<IMAGE alias="1">',
+            "Duplicate IMAGE alias in {path}.",
+        ),
+        (
+            "image.xml",
+            f'<IMAGE alias="2" accession="{CLINICAL_2_0_IMAGE_2_ID}">',
+            f'<IMAGE alias="2" accession="{CLINICAL_2_0_IMAGE_1_ID}">',
+            "Duplicate IMAGE accession in {path}.",
+        ),
+        (
+            "sample.xml",
+            '<SLIDE alias="2">',
+            '<SLIDE alias="1">',
+            "Duplicate SLIDE alias in {path}.",
+        ),
+        (
+            "staining.xml",
+            '<STAINING alias="2">',
+            '<STAINING alias="1">',
+            "Duplicate STAINING alias in {path}.",
+        ),
+    ],
+)
+def test_extract_rejects_duplicate_identifiers(tmp_path, file, old, new, expected):
+    root = _copy_xml_dir(CLINICAL_2_0_DATASET_DIR, tmp_path)
+    path = root / "METADATA" / file
+    _replace_in_xml(path, old, new)
+
+    with pytest.raises(UserException) as exc:
+        list(extract_dataset_documents(str(root)))
+    assert str(exc.value) == expected.format(path=path)
+
+
+@pytest.mark.parametrize(
+    "accession",
+    [
+        # Excluded from the random part: i, l, o, 0 and 1.
+        "bb-dataset-hy4m2v-9tq7cl",
+        # Not a dataset accession.
+        "bb-image-hy4m2v-9tq7cx",
+        # Upper case random part.
+        "bb-dataset-HY4M2V-9TQ7CX",
+        # Too long random part.
+        "bb-dataset-hy4m2v-9tq7cxx",
+        # No center.
+        "-dataset-hy4m2v-9tq7cx",
+    ],
+)
+def test_extract_rejects_invalid_dataset_accession(tmp_path, accession):
+    root = _copy_xml_dir(CLINICAL_2_0_DATASET_DIR, tmp_path)
+    path = root / "METADATA" / "dataset.xml"
+    _replace_in_xml(path, CLINICAL_2_0_DATASET_ID, accession)
+
+    with pytest.raises(SystemException) as exc:
+        list(extract_dataset_documents(str(root)))
+    assert str(exc.value) == (
+        f"Dataset accession in {path} is not a Bigpicture accession."
+    )
+
+
+@pytest.mark.parametrize(
+    "accession",
+    [
+        # Excluded from the random part: i, l, o, 0 and 1.
+        "bb-image-q7v5tb-m4hs8o",
+        # Not an image accession.
+        "bb-dataset-q7v5tb-m4hs8n",
+    ],
+)
+def test_extract_rejects_invalid_image_accession(tmp_path, accession):
+    root = _copy_xml_dir(CLINICAL_2_0_DATASET_DIR, tmp_path)
+    path = root / "METADATA" / "image.xml"
+    _replace_in_xml(path, CLINICAL_2_0_IMAGE_2_ID, accession)
+
+    with pytest.raises(SystemException) as exc:
+        list(extract_dataset_documents(str(root)))
+    assert str(exc.value) == f"Image accession in {path} is not a Bigpicture accession."
+
+
+def test_extract_accepts_any_accession_center(tmp_path):
+    # The center is set for each deployment of the SD Submit API.
+    root = _copy_xml_dir(CLINICAL_2_0_DATASET_DIR, tmp_path)
+    for file in ("dataset.xml", "image.xml", "policy.xml", "observation.xml"):
+        _replace_in_xml(root / "METADATA" / file, '"bb-', '"TEST1-')
+
+    docs = list(extract_dataset_documents(str(root)))
+
+    assert {doc.id for doc in docs} == {
+        CLINICAL_2_0_IMAGE_1_ID.replace("bb-", "TEST1-"),
+        CLINICAL_2_0_IMAGE_2_ID.replace("bb-", "TEST1-"),
+    }
 
 
 @pytest.fixture

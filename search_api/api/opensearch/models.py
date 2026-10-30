@@ -151,6 +151,12 @@ class OpenSearchGroup(BaseModel):
         return self
 
 
+# OpenSearch rejects a longer document id, in UTF-8 bytes.
+MAX_DOCUMENT_ID_BYTES = 512
+# OpenSearch rejects a longer keyword value, in UTF-8 bytes.
+MAX_KEYWORD_BYTES = 32766
+
+
 class ExtractedDocument(BaseModel):
     """One extracted OpenSearch document.
 

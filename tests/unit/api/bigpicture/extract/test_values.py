@@ -315,6 +315,51 @@ def test_extract_age_at_extraction_error(caplog):
     assert logs[0].message == "Value is ignored: not a valid ISO-8601 duration."
 
 
+@pytest.mark.parametrize(
+    ("start", "length"),
+    [
+        # Too many days for a timedelta.
+        ("P9999999999D", "P1Y"),
+        # Too many days for an integer_range.
+        ("P40Y", "P99999999999Y"),
+    ],
+)
+def test_extract_age_at_extraction_too_long(start: str, length: str):
+    xml = f"""
+    <SPECIMEN>
+        <ATTRIBUTES>
+            <SET_ATTRIBUTE>
+                <TAG>age_at_extraction</TAG>
+                <VALUE>
+                    <STRING_ATTRIBUTE>
+                        <TAG>interval_start</TAG>
+                        <VALUE>{start}</VALUE>
+                    </STRING_ATTRIBUTE>
+                    <STRING_ATTRIBUTE>
+                        <TAG>interval_length</TAG>
+                        <VALUE>{length}</VALUE>
+                    </STRING_ATTRIBUTE>
+                </VALUE>
+            </SET_ATTRIBUTE>
+        </ATTRIBUTES>
+    </SPECIMEN>
+    """
+    elem = etree.fromstring(xml)
+
+    logs: list[ExtractLog] = []
+
+    result = _extract_age_at_extraction(elem, logs)
+
+    assert result is None
+    assert logs == [
+        ExtractLog(
+            severity="ERROR",
+            field_id="age_at_extraction",
+            message="Value is ignored: not a valid ISO-8601 duration.",
+        )
+    ]
+
+
 def test_extract_iso8601_duration():
     assert _extract_iso8601_duration("P40Y", "P1Y") == "P41Y"
     assert _extract_iso8601_duration("P40Y", "PT0S") == "P40Y"

@@ -33,7 +33,7 @@ NON_CLINICAL_2_0_IMAGE_IDS = [
 
 CLINICAL_3_0_DATASET_ID = "bb-dataset-p5x8qm-2rv6tw"
 CLINICAL_3_0_IMAGE_1_ID = "bb-image-t4m9ks-5xn3hd"
-CLINICAL_3_0_IMAGE_2_ID = "bb-image-g7w2cp-9jb4lz"
+CLINICAL_3_0_IMAGE_2_ID = "bb-image-g7w2cp-9jb4kz"
 CLINICAL_3_0_IMAGE_IDS = [CLINICAL_3_0_IMAGE_1_ID, CLINICAL_3_0_IMAGE_2_ID]
 
 

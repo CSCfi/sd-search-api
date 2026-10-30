@@ -234,6 +234,34 @@ def test_build_filtering_term_clause_iso8601range_multi():
     }
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        "abc",
+        "P10Y-",
+        # The alternative format with an impossible date or time.
+        "P00010230T000000",
+        "P00000000T250000",
+        # The range ends before it starts.
+        "P20Y-P10Y",
+        # Too many days for a timedelta.
+        "P9999999999D",
+        # Too many days for an integer_range.
+        "P99999999999Y",
+    ],
+)
+def test_build_filtering_term_clause_iso8601range_invalid(value: str):
+    """Test an invalid iso8601 range."""
+    term = get_term("age_at_extraction")
+    with pytest.raises(UserException) as exc:
+        build_filtering_term_clause(term, value)
+    assert str(exc.value) == (
+        "specimen.age_at_extraction value is not an ISO-8601 duration or range, "
+        "such as P40Y or P40Y-P60Y."
+    )
+    assert exc.value.__cause__ is None
+
+
 def test_build_filtering_term_clause_unsupported_type():
     term = get_term("sex")
     term_bad = term.model_copy(update={"type": "unknown"})  # type: ignore[arg-type]

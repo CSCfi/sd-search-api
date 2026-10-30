@@ -392,6 +392,24 @@ def test_validate_filters_rejects_value_not_controlled():
     assert "Male | Female" in error
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        # The range ends before it starts.
+        "P60Y-P40Y",
+        # Too many days for an integer_range.
+        "P9999999Y",
+    ],
+)
+def test_validate_filters_rejects_duration_range_the_query_rejects(value: str):
+    assert validate_filters([BeaconQueryFilter(id="age", value=value)], TERMS) == [
+        (
+            f"Field 'Age' value '{value}' is not an ISO-8601 duration or range, "
+            "such as P40Y or P40Y-P60Y."
+        )
+    ]
+
+
 def test_validate_filters_rejects_malformed_duration():
     assert len(validate_filters([BeaconQueryFilter(id="age", value="40")], TERMS)) == 1
     assert (

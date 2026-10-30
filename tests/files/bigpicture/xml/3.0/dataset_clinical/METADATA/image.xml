@@ -17,7 +17,7 @@
             </STRING_ATTRIBUTE>
         </ATTRIBUTES>
     </IMAGE>
-    <IMAGE alias="2" accession="bb-image-g7w2cp-9jb4lz">
+    <IMAGE alias="2" accession="bb-image-g7w2cp-9jb4kz">
         <IMAGE_OF alias="2"/>
         <IMAGE_TYPE>
             <WSI_IMAGE>test2</WSI_IMAGE>

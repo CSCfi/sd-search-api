@@ -164,7 +164,7 @@
 
     <!-- Non-diagnosis statement: ignored for clinical datasets -->
     <OBSERVATION alias="7">
-        <IMAGE_REF alias="2" accession="bb-image-g7w2cp-9jb4lz"/>
+        <IMAGE_REF alias="2" accession="bb-image-g7w2cp-9jb4kz"/>
         <STATEMENT>
             <STATEMENT_TYPE>Finding</STATEMENT_TYPE>
             <STATEMENT_STATUS>Distinct</STATEMENT_STATUS>

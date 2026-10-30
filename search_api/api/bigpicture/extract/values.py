@@ -28,6 +28,7 @@ from search_api.api.extract_logs import (
     not_allowed_value_log,
     repeated_value_log,
 )
+from search_api.api.opensearch.clauses import iso8601_range_to_days
 from search_api.exceptions import UserException
 from search_api.services.ontology.send import SEND_ONTOLOGY_ID
 
@@ -332,7 +333,12 @@ def _extract_age_at_extraction(
     start = start_value[0]
     try:
         end = _extract_iso8601_duration(start, length_value[0])
-    except isodate.ISO8601Error:
+        # Validate the iso8601 range.
+        iso8601_range_to_days(start, end)
+    # _extract_iso8601_duration raises ValueError for an
+    # invalid duration and OverflowError for one too long. iso8601_range_to_days
+    # raises only ValueError.
+    except ValueError, OverflowError:
         logs.append(invalid_duration_log("age_at_extraction"))
         return None
 

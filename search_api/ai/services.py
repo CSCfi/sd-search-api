@@ -32,7 +32,7 @@ from search_api.ai.models import (
 from search_api.api.beacon.models import BeaconFilteringTerm, BeaconQueryFilter
 from search_api.api.beacon.services import BeaconService
 from search_api.api.models import FieldValue
-from search_api.api.opensearch.clauses import iso8601_duration_to_days
+from search_api.api.opensearch.clauses import iso8601_range_to_days
 from search_api.conf import ai_config as _ai_config
 from search_api.exceptions import SystemException, UserException
 from search_api.services.field_values import get_field_suggestions, get_field_values
@@ -160,10 +160,10 @@ def validate_filters(
                     f"Use one of: {' | '.join(term.controlledValues)}."
                 )
             if term.type == "iso8601Range":
+                parts = value.split("-", 1)
                 try:
-                    for duration in value.split("-", 1):
-                        iso8601_duration_to_days(duration)
-                except Exception:  # noqa: BLE001
+                    iso8601_range_to_days(parts[0], parts[-1])
+                except ValueError:
                     errors.append(
                         f"Field '{term.label}' value '{value}' is not an ISO-8601 "
                         "duration or range, such as P40Y or P40Y-P60Y."

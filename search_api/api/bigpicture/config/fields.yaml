@@ -243,9 +243,13 @@ filtering_terms:
     scopes: [ clinical, non_clinical ]
     label: "Observation type"
     description: >-
-      How an observation is linked to the image. A distinct observation is
-      known to apply to an image. By default, observations apply to at least
-      one image in a set of images, but not necessarily to all of them.
+      Indicates the extent to which an observation is represented in the
+      image(s) within an image set.
+      Distinct: The observation is associated with an image
+      set and known to apply to every single image within the image set.
+      Summary: The observation is associated with an image
+      set and known to apply to at least one image from the set but may not
+      apply to every image within the image set.
     controlledValues: [ distinct, summary ]
 
 # Fields that are indexed in OpenSearch but are not filterable.

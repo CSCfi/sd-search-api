@@ -7,13 +7,18 @@ from psycopg import AsyncCursor
 
 from search_api.api.beacon.models import BeaconFilteringScope, BeaconFilteringTerm
 from search_api.api.opensearch.document import build_document
-from search_api.api.opensearch.models import ExtractedDocument
+from search_api.api.opensearch.models import (
+    MAX_DOCUMENT_ID_BYTES,
+    MAX_KEYWORD_BYTES,
+    ExtractedDocument,
+    OpenSearchFieldValue,
+)
 from search_api.api.scopes import validate_document_scope
 from search_api.database.document import get_modified_at, upsert_document
 from search_api.database.document_log import delete_document_logs, write_document_log
 from search_api.database.models import StoredDocumentLog
 from search_api.database.repository import get_cursor
-from search_api.exceptions import UserException
+from search_api.exceptions import SystemException, UserException
 from search_api.services.ontology.term_cache import OntologyTermCache
 from search_api.services.ontology.values import (
     cache_concept_terms,
@@ -22,6 +27,9 @@ from search_api.services.ontology.values import (
 )
 
 logger = logging.getLogger(__name__)
+
+# The field types indexed as keywords whose value is a string.
+_KEYWORD_TYPES = ("keyword", "controlledValue")
 
 
 def extraction_logs(doc: ExtractedDocument) -> Iterator[StoredDocumentLog]:
@@ -33,6 +41,48 @@ def extraction_logs(doc: ExtractedDocument) -> Iterator[StoredDocumentLog]:
             severity=log.severity,
             message=log.message,
         )
+
+
+def _is_too_long_keyword(value: OpenSearchFieldValue) -> bool:
+    """Return true if OpenSearch would reject the value as too long a keyword."""
+    return (
+        value.field.type in _KEYWORD_TYPES
+        and isinstance(value.value, str)
+        and len(value.value.encode()) > MAX_KEYWORD_BYTES
+    )
+
+
+def drop_too_long_keywords(doc: ExtractedDocument) -> list[StoredDocumentLog]:
+    """
+    Drop the keyword values OpenSearch would reject as too long.
+
+    :param doc: The document, changed in place.
+    :return: An error log entry for each dropped value.
+    """
+    dropped: list[OpenSearchFieldValue] = []
+
+    def kept(values: list[OpenSearchFieldValue]) -> list[OpenSearchFieldValue]:
+        """Return the values to keep. The others are added to dropped."""
+        result = []
+        for value in values:
+            if _is_too_long_keyword(value):
+                dropped.append(value)
+            else:
+                result.append(value)
+        return result
+
+    doc.values = kept(doc.values)
+    for group in doc.groups:
+        group.values = kept(group.values)
+    return [
+        StoredDocumentLog(
+            document_id=doc.id,
+            field_id=value.field.id,
+            severity="ERROR",
+            message=f"Value is ignored: longer than {MAX_KEYWORD_BYTES} bytes.",
+        )
+        for value in dropped
+    ]
 
 
 class LoadService:
@@ -52,12 +102,17 @@ class LoadService:
         self._initialised = False
 
     def validate_document(self, doc: ExtractedDocument) -> None:
-        """Check an extracted document's scope against the deployment.
+        """Check an extracted document's id and scope against the deployment.
 
         This is where a deployment's extraction meets the generic service.
 
+        :raises SystemException: if the id is too long for OpenSearch.
         :raises UserException: if the scope is not declared.
         """
+        if len(doc.id.encode()) > MAX_DOCUMENT_ID_BYTES:
+            raise SystemException(
+                f"Document id is longer than {MAX_DOCUMENT_ID_BYTES} bytes."
+            )
         try:
             validate_document_scope(doc.scope, self._filtering_scopes)
         except UserException as e:
@@ -120,8 +175,12 @@ class LoadService:
                 # A document loaded again replaces its log rows.
                 await delete_document_logs(cur, doc.id)
 
-                # Write messages from document extraction.
+                # Write log messages from document extraction.
                 for log in extraction_logs(doc):
+                    await write_document_log(cur, log)
+
+                # Drop keyword values OpenSearch would reject because they are too long.
+                for log in drop_too_long_keywords(doc):
                     await write_document_log(cur, log)
 
                 # The document's ontology values are resolved to concept

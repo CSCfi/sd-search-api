@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from search_api.api.beacon.models import BeaconQueryGranularity
+from search_api.api.beacon.models import BeaconQueryFilter
 
 
 class FieldValue(BaseModel):
@@ -54,11 +54,17 @@ class ValueCountsKey(BaseModel):
     scope: str | None = None
 
     @classmethod
-    def of(cls, field_id: str, scope: str | None = None) -> "ValueCountsKey":
+    def of(cls, field_id: str, scope: str | None = None) -> ValueCountsKey:
         return cls(field_id=field_id, scope=scope)
 
 
 class AIQueryRequest(BaseModel):
     query: str
-    requestedGranularity: BeaconQueryGranularity = "record"
     requestedScope: str | None = None
+    filters: list[BeaconQueryFilter] = Field(
+        default_factory=list,
+        description=(
+            "The current filters. The query may add, change or remove filters. "
+            "The response returns every filter after these changes."
+        ),
+    )

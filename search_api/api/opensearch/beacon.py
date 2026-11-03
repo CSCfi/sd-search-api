@@ -7,19 +7,6 @@ from typing import Any, TypeVar, override
 
 from opensearchpy import AsyncOpenSearch
 
-from search_api.api.opensearch.search import count_documents
-from search_api.api.opensearch.keywords import fetch_indexed_keywords
-from search_api.api.opensearch.clauses import (
-    build_match_clause,
-    build_term_clause,
-    build_terms_clause,
-    build_iso8601_range_clause,
-    build_or_clause,
-)
-from search_api.api.scopes import SCOPE_FIELD
-from search_api.exceptions import SystemException, UserException
-from search_api.services.ontology.service import get_ontology_service
-
 from search_api.api.beacon.models import (
     BeaconFilteringScope,
     BeaconQueryFilter,
@@ -33,10 +20,22 @@ from search_api.api.beacon.services import (
     BeaconService,
 )
 from search_api.api.models import ValueCounts, ValueCountsKey
-from search_api.api.opensearch.models import (
-    OpenSearchOntologyOrValue,
-    OpenSearchBeaconFilteringTerm,
+from search_api.api.opensearch.clauses import (
+    build_iso8601_range_clause,
+    build_match_clause,
+    build_or_clause,
+    build_term_clause,
+    build_terms_clause,
 )
+from search_api.api.opensearch.keywords import fetch_indexed_keywords
+from search_api.api.opensearch.models import (
+    OpenSearchBeaconFilteringTerm,
+    OpenSearchOntologyOrValue,
+)
+from search_api.api.opensearch.search import count_documents
+from search_api.api.scopes import SCOPE_FIELD
+from search_api.exceptions import SystemException, UserException
+from search_api.services.ontology.service import get_ontology_service
 
 S = TypeVar("S", bound=BeaconResultSetResult)
 
@@ -107,7 +106,7 @@ class OpenSearchBeaconService(BeaconService[OpenSearchBeaconFilteringTerm]):
         try:
             resp = await self.client.cluster.health()
             return resp.get("status") in {"green", "yellow"}
-        except Exception:
+        except Exception:  # noqa: BLE001
             return False
 
     def clear_value_counts(self) -> None:
@@ -311,12 +310,10 @@ class OpenSearchQueryBeaconService(OpenSearchBeaconService, BeaconQueryService[S
     @abstractmethod
     async def _get_count(self, query_clause: dict[str, Any]) -> int:
         """Return how many records match the given query clause."""
-        pass
 
     @abstractmethod
     async def _get_records(self, query_clause: dict[str, Any]) -> BeaconResultSets[S]:
         """Return every record matching the given query clause."""
-        pass
 
     @staticmethod
     def _get_boolean_result(resp: dict[str, Any]) -> BeaconQueryResult[Any]:

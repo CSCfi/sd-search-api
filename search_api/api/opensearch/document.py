@@ -1,11 +1,11 @@
 from typing import Any
 
+from search_api.api.opensearch.clauses import iso8601_duration_to_days
 from search_api.api.opensearch.models import (
     ExtractedDocument,
     OpenSearchFieldValue,
     OpenSearchGroup,
 )
-from search_api.api.opensearch.clauses import iso8601_duration_to_days
 from search_api.api.scopes import SCOPE_FIELD
 
 
@@ -61,7 +61,7 @@ def build_document(document: ExtractedDocument) -> dict[str, Any]:
 
         {"scope": "clinical",
          "image_id": "img-1",
-         "observation": [{"diagnosis": "73211009", "observation_type": "confirmed"}]}
+         "observation": [{"diagnosis": "73211009", "observation_type": "distinct"}]}
     """
     result: dict[str, Any] = {}
 

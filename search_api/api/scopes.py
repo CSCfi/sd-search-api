@@ -11,7 +11,6 @@ from search_api.api.fields import _format_validation_error
 from search_api.api.opensearch.models import OpenSearchField
 from search_api.exceptions import ConfigurationException, UserException
 
-
 SCOPE_FIELD = "scope"
 
 

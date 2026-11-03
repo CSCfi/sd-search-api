@@ -20,12 +20,18 @@ class BigpictureCodeAttributeValue(BaseModel):
     scheme_version: str | None = None
 
 
+Scope = Literal["clinical", "non_clinical"]
+Sex = Literal["Male", "Female", "Not-known", "Other"]
+ControlTerminology = Literal["CONTROL", "TREATED"]
+ObservationType = Literal["distinct", "summary"]
+
+
 class BigpictureSampleBiologicalBeingFields(BaseModel):
     """Bigpicture biological being search fields."""
 
     animal_species: BigpictureCodeAttributeValue | None = None
-    sex: Literal["Male", "Female", "Not-known", "Other"] | None = None
-    control_terminology: Literal["CONTROL", "TREATED"] | None = None
+    sex: Sex | None = None
+    control_terminology: ControlTerminology | None = None
 
 
 class BigpictureSampleSpecimenFields(BaseModel):
@@ -91,7 +97,7 @@ class BigpictureObservationFields(BaseModel):
     finding_chronicity: BigpictureCodeAttributeValue | None = None
     finding_distribution: BigpictureCodeAttributeValue | None = None
     finding_result_category: BigpictureCodeAttributeValue | None = None
-    observation_type: Literal["confirmed", "candidate"]
+    observation_type: ObservationType
 
 
 class BigpictureFields(BaseModel):
@@ -100,7 +106,7 @@ class BigpictureFields(BaseModel):
     image_id: str
     dataset_id: str
     dataset_image_cnt: int
-    scope: Literal["clinical", "non_clinical"]
+    scope: Scope
     dataset_short_name: str | None = None
     dataset_title: str | None = None
     dataset_description: str | None = None
@@ -125,19 +131,19 @@ def _nested_groups() -> tuple[str, ...]:
 NESTED_GROUPS = _nested_groups()
 
 
-OBSERVATION_CONFIRMED: Literal["confirmed"] = "confirmed"
-OBSERVATION_CANDIDATE: Literal["candidate"] = "candidate"
+OBSERVATION_DISTINCT: Literal["distinct"] = "distinct"
+OBSERVATION_SUMMARY: Literal["summary"] = "summary"
 
 
 def validate_observation_types(term: OpenSearchBeaconFilteringTerm) -> None:
     """Validate fields.yaml observation_type term against observation type constants."""
     if set(term.controlledValues or []) != {
-        OBSERVATION_CONFIRMED,
-        OBSERVATION_CANDIDATE,
+        OBSERVATION_DISTINCT,
+        OBSERVATION_SUMMARY,
     }:
         raise SystemException(
             f"{term.id}'s controlledValues in fields.yaml must be "
-            f"{{{OBSERVATION_CONFIRMED!r}, {OBSERVATION_CANDIDATE!r}}}, got "
+            f"{{{OBSERVATION_DISTINCT!r}, {OBSERVATION_SUMMARY!r}}}, got "
             f"{term.controlledValues}."
         )
     if term.nested_group != "observation":

@@ -10,7 +10,6 @@ from nacl.public import PrivateKey
 
 from search_api.utils.crypt import load_c4gh_keys, read_file, resolve_path
 
-
 # resolve_path
 #
 
@@ -42,6 +41,19 @@ def test_resolve_path_neither_exists():
 
     with pytest.raises(ValueError, match="Missing file"):
         resolve_path(fs, "/d/METADATA/dataset.xml")
+
+
+def test_resolve_path_both_exist():
+    """Plain and .c4gh both found — ValueError raised, neither is picked."""
+    fs = MagicMock()
+    fs.exists.return_value = True
+
+    with pytest.raises(ValueError) as exc:
+        resolve_path(fs, "/d/METADATA/dataset.xml")
+    assert (
+        str(exc.value)
+        == "Both /d/METADATA/dataset.xml and /d/METADATA/dataset.xml.c4gh exist."
+    )
 
 
 # read_file

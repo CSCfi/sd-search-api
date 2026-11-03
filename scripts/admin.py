@@ -11,35 +11,37 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 import search_api
+from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
 from search_api.api.deployments import DOMAINS
 from search_api.api.domain import Domain
-from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorService
 from search_api.api.opensearch.client import create_search
 from search_api.api.opensearch.index import create_index
-from search_api.exceptions import SystemException
-from search_api.services.load import LoadService, extraction_logs
-from search_api.services.fetch import DocumentSource
-from search_api.services.sync import SyncService
+from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorService
 from search_api.database.document import count_documents, reset_synced_at
 from search_api.database.document_log import (
     delete_all_document_logs,
     log_document_log,
 )
-from search_api.database.repository import get_cursor
 from search_api.database.load import (
     delete_load_marker,
     insert_load_history,
     read_load_marker,
     write_load_marker,
 )
+from search_api.database.repository import get_cursor
 from search_api.database.terms_cache import delete_all_terms
-from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
+from search_api.exceptions import SystemException
+from search_api.services.fetch import DocumentSource
+from search_api.services.load import LoadService, extraction_logs
 from search_api.services.ontology.cache.source import OntologySource
 from search_api.services.ontology.cache.store import OntologyCacheStore
-from search_api.services.ontology.service import get_ontology_service
 from search_api.services.ontology.send import SEND_ONTOLOGY_ID, SendOntologySource
-from search_api.services.ontology.term_cache import create_term_caches
+from search_api.services.ontology.service import get_ontology_service
 from search_api.services.ontology.snomed import import_snomed_release
+from search_api.services.ontology.term_cache import create_term_caches
+from search_api.services.sync import SyncService
+
+logger = logging.getLogger(__name__)
 
 
 def _schema_path(name: str) -> Path:
@@ -125,17 +127,17 @@ async def _read_documents(
 
         if load_service is None:
             for doc in itr.documents:
-                logging.info("Would load document %s.", doc.id)
+                logger.info("Would load document %s.", doc.id)
                 for log in extraction_logs(doc):
                     log_document_log(log)
             continue
 
-        logging.info("Loading %d document(s).", len(itr.documents))
+        logger.info("Loading %d document(s).", len(itr.documents))
         await load_service.store_documents(iter(itr.documents))
         # Update incremental load marker.
         read_marker = itr.marker
 
-    logging.info(
+    logger.info(
         "%d document(s) %s.",
         count,
         "read without loading them" if load_service is None else "loaded",
@@ -162,15 +164,15 @@ async def _load_marker(args: argparse.Namespace) -> str | None:
             # The marker is deleted before loading, so that an interrupted load
             # does not leave the old marker.
             await delete_load_marker()
-            logging.info("Full load requested, removing incremental load marker.")
+            logger.info("Full load requested, removing incremental load marker.")
         return None
 
     marker = await read_load_marker()
     if marker is None:
-        logging.info("No incremental load marker. Loading all documents.")
+        logger.info("No incremental load marker. Loading all documents.")
         return None
 
-    logging.info("Loading documents after the incremental marker %s.", marker)
+    logger.info("Loading documents after the incremental marker %s.", marker)
     return marker
 
 
@@ -178,7 +180,7 @@ async def _reset(domain: Domain) -> None:
     """Remove the incremental load marker, so the next load reads everything again."""
 
     await delete_load_marker()
-    logging.info(
+    logger.info(
         "Removed the incremental load marker of the %s deployment. "
         "The next load will be a full one.",
         domain.name,
@@ -210,21 +212,21 @@ async def _clear(domain: Domain, args: argparse.Namespace) -> None:
             f"associated data.",
             args.group,
         ):
-            logging.info("Aborted, nothing was deleted.")
+            logger.info("Aborted, nothing was deleted.")
             return
 
         async with get_cursor() as cur:
             await sync_service.delete_all_documents(cur)
             log_count = await delete_all_document_logs(cur)
-            logging.info("Deleted %d document log row(s).", log_count)
+            logger.info("Deleted %d document log row(s).", log_count)
 
         # The terms are cleared after the documents.
         term_count = await delete_all_terms()
-        logging.info("Deleted %d cached preferred term(s).", term_count)
+        logger.info("Deleted %d cached preferred term(s).", term_count)
 
         # The incremental load marker is cleared.
         await delete_load_marker()
-        logging.info("Deleted the incremental load marker.")
+        logger.info("Deleted the incremental load marker.")
     finally:
         await sync_service.search.close()
 
@@ -239,13 +241,13 @@ async def _recreate(domain: Domain, args: argparse.Namespace) -> None:
         f"cached ontology terms will be lost.",
         args.group,
     ):
-        logging.info("Aborted, nothing was dropped.")
+        logger.info("Aborted, nothing was dropped.")
         return
 
     async with get_cursor() as cur:
         for _name in ("drop", "create"):
             await cur.execute(_schema_path(_name).read_text())  # type: ignore[arg-type]
-    logging.info("Recreated the database schema.")
+    logger.info("Recreated the database schema.")
 
     await _replace_index(domain)
 
@@ -257,9 +259,9 @@ async def _replace_index(domain: Domain) -> None:
     try:
         if await search.indices.exists(index=domain.opensearch_index):
             await search.indices.delete(index=domain.opensearch_index)
-            logging.info("Deleted OpenSearch index %s.", domain.opensearch_index)
+            logger.info("Deleted OpenSearch index %s.", domain.opensearch_index)
         await create_index(search, domain.opensearch_index, body)
-        logging.info("Created OpenSearch index %s.", domain.opensearch_index)
+        logger.info("Created OpenSearch index %s.", domain.opensearch_index)
     finally:
         await search.close()
 
@@ -274,14 +276,14 @@ async def _recreate_index(domain: Domain, args: argparse.Namespace) -> None:
         f"but without synced_at, so 'sync' restores the index.",
         args.group,
     ):
-        logging.info("Aborted, nothing was dropped.")
+        logger.info("Aborted, nothing was dropped.")
         return
 
     await _replace_index(domain)
 
     async with get_cursor() as cur:
         count = await reset_synced_at(cur)
-    logging.info("Marked %d document(s) as pending sync.", count)
+    logger.info("Marked %d document(s) as pending sync.", count)
 
 
 async def _import_snomed_release(release_file: Path) -> None:
@@ -296,7 +298,7 @@ async def _update_cached_ontology(ontology_id: str, source: OntologySource) -> N
     fetched = await source.fetch()
 
     if stored is not None and not source.is_newer(fetched.version, stored.version):
-        logging.info(
+        logger.info(
             "%s ontology is already up to date (stored version '%s', fetched '%s').",
             ontology_id,
             stored.version,
@@ -306,7 +308,7 @@ async def _update_cached_ontology(ontology_id: str, source: OntologySource) -> N
 
     changed = stored is None or fetched.sha256 != stored.sha256
     await store.write(fetched)
-    logging.info(
+    logger.info(
         "Updated %s ontology to version '%s' with '%d' concepts%s",
         ontology_id,
         fetched.version,
@@ -336,7 +338,7 @@ async def _refresh_ontology(ontology_id: str) -> None:
     ontology = get_ontology_service(ontology_id)
     await ontology.init()
 
-    logging.info("Refreshing %s preferred terms.", ontology_id)
+    logger.info("Refreshing %s preferred terms.", ontology_id)
     await create_term_caches([ontology_id])[ontology_id].refresh(ontology)
 
 
@@ -344,7 +346,7 @@ def _generate_index(domain: Domain) -> None:
     body = OpenSearchIndexGeneratorService(domain.opensearch_fields).generate()
     path = domain.index_file
     path.write_text(json.dumps(body, indent=2) + "\n")
-    logging.info("Wrote OpenSearch index to %s.", path)
+    logger.info("Wrote OpenSearch index to %s.", path)
 
 
 async def _create_index(domain: Domain) -> None:
@@ -352,7 +354,7 @@ async def _create_index(domain: Domain) -> None:
     search = create_search()
     try:
         await create_index(search, domain.opensearch_index, body)
-        logging.info("Created OpenSearch index %s.", domain.opensearch_index)
+        logger.info("Created OpenSearch index %s.", domain.opensearch_index)
     finally:
         await search.close()
 

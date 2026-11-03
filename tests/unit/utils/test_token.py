@@ -6,9 +6,9 @@ import jwt
 import pytest
 
 from search_api.utils.token import (
-    public_key_jwk,
     SERVICE_TOKEN_ALGORITHM,
     SERVICE_TOKEN_LIFETIME,
+    public_key_jwk,
     sign_service_token,
 )
 from tests.utils.keys import pem_key_pair

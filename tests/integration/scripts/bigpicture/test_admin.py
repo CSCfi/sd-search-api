@@ -19,16 +19,14 @@ from scripts.admin import (
     _sync,
 )
 from search_api.api.bigpicture.domain import BP_DOMAIN
-from search_api.services.load import LoadService
+from search_api.api.opensearch.client import create_search
 from search_api.database.document import DOCUMENT_TABLE, get_document
 from search_api.database.document_log import (
     DOCUMENT_LOG_TABLE,
-    write_document_log,
     read_document_logs,
+    write_document_log,
 )
-from search_api.database.models import StoredDocumentLog
-from search_api.api.opensearch.client import create_search
-from search_api.database.models import StoredTerm
+from search_api.database.models import StoredDocumentLog, StoredTerm
 from search_api.database.repository import get_connection
 from search_api.database.terms_cache import (
     TERMS_CACHE_TABLE,
@@ -36,16 +34,23 @@ from search_api.database.terms_cache import (
     read_terms,
 )
 from search_api.exceptions import SystemException
+from search_api.services.load import LoadService
+from tests.integration.bigpicture import (
+    assert_dataset_images_stored,
+    delete_dataset_images,
+)
+from tests.utils.bigpicture import (
+    CLINICAL_2_0_DATASET_DIR,
+    CLINICAL_2_0_DATASET_ID,
+    CLINICAL_2_0_IMAGE_IDS,
+    DATASET_IMAGES,
+    VERSION_DIRS,
+    XML_DIR_2_0,
+)
 
 os.environ.setdefault("POSTGRES_DB", os.environ["BP_POSTGRES_DB"])
 os.environ.setdefault("POSTGRES_PORT", os.environ["BP_POSTGRES_PORT"])
 
-_XML_DIR = (
-    Path(__file__).resolve().parent.parent.parent.parent
-    / "files"
-    / "bigpicture"
-    / "xml"
-)
 _XML_METADATA_FILES = [
     "METADATA/dataset.xml",
     "METADATA/image.xml",
@@ -53,22 +58,6 @@ _XML_METADATA_FILES = [
     "METADATA/sample.xml",
     "METADATA/staining.xml",
 ]
-_CLINICAL_DATASET_DIR = "dataset_clinical"
-_CLINICAL_DATASET_ID = "bb-dataset-hy4m2v-9tq7cx"
-_CLINICAL_IMAGE_IDS = ["bb-image-k3n8pw-6dz2rj", "bb-image-q7v5tb-m4hs8n"]
-_NON_CLINICAL_DATASET_ID = "bb-dataset-w2j6fd-3npx7k"
-_NON_CLINICAL_IMAGE_IDS = ["bb-image-z9c4gs-7bqm2t", "bb-image-v6h3rn-8kwd5p"]
-
-# Loading the whole xml/ directory yields both datasets: image id -> (dataset id, scope).
-_EXPECTED_DOCUMENTS = {
-    **{
-        image_id: (_CLINICAL_DATASET_ID, "clinical") for image_id in _CLINICAL_IMAGE_IDS
-    },
-    **{
-        image_id: (_NON_CLINICAL_DATASET_ID, "non_clinical")
-        for image_id in _NON_CLINICAL_IMAGE_IDS
-    },
-}
 
 
 # Rows the tests below insert to check what a command leaves behind.
@@ -77,12 +66,12 @@ _SENTINEL_ONTOLOGY_ID = "TEST-clear"
 
 
 def _args(**kwargs) -> argparse.Namespace:
-    defaults = dict(
-        directory=str(_XML_DIR),
-        full=False,
-        dry_run=False,
-        sync=False,
-    )
+    defaults = {
+        "directory": str(XML_DIR_2_0),
+        "full": False,
+        "dry_run": False,
+        "sync": False,
+    }
     return argparse.Namespace(**{**defaults, **kwargs})
 
 
@@ -95,20 +84,20 @@ async def delete_test_rows():
     """
 
     async def _delete() -> None:
-        async with get_connection() as conn:
-            async with conn.cursor() as cur:
-                for image_id in (*_EXPECTED_DOCUMENTS, _SENTINEL_DOCUMENT_ID):
-                    await cur.execute(
-                        f"DELETE FROM {DOCUMENT_TABLE} WHERE id = %s", (image_id,)
-                    )
-                await cur.execute(
-                    f"DELETE FROM {TERMS_CACHE_TABLE} WHERE ontology_id = %s",
-                    (_SENTINEL_ONTOLOGY_ID,),
-                )
-                await cur.execute(
-                    f"DELETE FROM {DOCUMENT_LOG_TABLE} WHERE document_id = %s",
-                    (_SENTINEL_DOCUMENT_ID,),
-                )
+        async with get_connection() as conn, conn.cursor() as cur:
+            await delete_dataset_images(cur)
+            await cur.execute(
+                f"DELETE FROM {DOCUMENT_TABLE} WHERE id = %s",
+                (_SENTINEL_DOCUMENT_ID,),
+            )
+            await cur.execute(
+                f"DELETE FROM {TERMS_CACHE_TABLE} WHERE ontology_id = %s",
+                (_SENTINEL_ONTOLOGY_ID,),
+            )
+            await cur.execute(
+                f"DELETE FROM {DOCUMENT_LOG_TABLE} WHERE document_id = %s",
+                (_SENTINEL_DOCUMENT_ID,),
+            )
 
     await _delete()
     yield
@@ -120,32 +109,27 @@ async def test_load_extract_only():
     with patch.object(
         LoadService, "store_document", new_callable=AsyncMock
     ) as load_spy:
-        await _load(BP_DOMAIN, _args(dry_run=True))
+        for version_dir in VERSION_DIRS:
+            await _load(BP_DOMAIN, _args(directory=str(version_dir), dry_run=True))
         load_spy.assert_not_called()
 
-    async with get_connection() as conn:
-        async with conn.cursor() as cur:
-            for image_id in _EXPECTED_DOCUMENTS:
-                payload = await get_document(cur, image_id)
-                assert payload is None, (
-                    f"{image_id!r} was unexpectedly written during dry-run"
-                )
+    async with get_connection() as conn, conn.cursor() as cur:
+        for image_id in DATASET_IMAGES:
+            payload = await get_document(cur, image_id)
+            assert payload is None, (
+                f"{image_id!r} was unexpectedly written during dry-run"
+            )
 
 
 @pytest.mark.requires_snowstorm
 @pytest.mark.asyncio
 async def test_load_plain_files():
-    """The load command inserts clinical and non-clinical datasets."""
-    await _load(BP_DOMAIN, _args())
+    """The load command inserts clinical and non-clinical datasets of every version."""
+    for version_dir in VERSION_DIRS:
+        await _load(BP_DOMAIN, _args(directory=str(version_dir)))
 
-    async with get_connection() as conn:
-        async with conn.cursor() as cur:
-            for image_id, (dataset_id, scope) in _EXPECTED_DOCUMENTS.items():
-                payload = await get_document(cur, image_id)
-                assert payload is not None, f"{image_id!r} was not loaded"
-                assert payload["image_id"] == image_id
-                assert payload["dataset_id"] == dataset_id
-                assert payload["scope"] == scope
+    async with get_connection() as conn, conn.cursor() as cur:
+        await assert_dataset_images_stored(cur)
 
 
 @pytest.mark.requires_snowstorm
@@ -160,10 +144,10 @@ async def test_load_c4gh_files(tmp_path, monkeypatch):
     sender_sk = bytes(PrivateKey.generate())
 
     # Only the clinical dataset directory is tested.
-    metadata_dir = tmp_path / _CLINICAL_DATASET_DIR / "METADATA"
+    metadata_dir = tmp_path / CLINICAL_2_0_DATASET_DIR.name / "METADATA"
     metadata_dir.mkdir(parents=True)
     for xml_file in _XML_METADATA_FILES:
-        src = _XML_DIR / _CLINICAL_DATASET_DIR / xml_file
+        src = CLINICAL_2_0_DATASET_DIR / xml_file
         dst = metadata_dir / (Path(xml_file).name + ".c4gh")
         with dst.open("wb") as outfile:
             c4gh_encrypt(
@@ -176,13 +160,12 @@ async def test_load_c4gh_files(tmp_path, monkeypatch):
 
     await _load(BP_DOMAIN, _args(directory=str(tmp_path)))
 
-    async with get_connection() as conn:
-        async with conn.cursor() as cur:
-            for image_id in _CLINICAL_IMAGE_IDS:
-                payload = await get_document(cur, image_id)
-                assert payload is not None, f"{image_id!r} was not loaded"
-                assert payload["image_id"] == image_id
-                assert payload["dataset_id"] == _CLINICAL_DATASET_ID
+    async with get_connection() as conn, conn.cursor() as cur:
+        for image_id in CLINICAL_2_0_IMAGE_IDS:
+            payload = await get_document(cur, image_id)
+            assert payload is not None, f"{image_id!r} was not loaded"
+            assert payload["image_id"] == image_id
+            assert payload["dataset_id"] == CLINICAL_2_0_DATASET_ID
 
 
 # Test recreate.
@@ -211,9 +194,8 @@ async def test_recreate_aborts_unless_confirmed(monkeypatch):
 
     await _recreate(BP_DOMAIN, _recreate_args())
 
-    async with get_connection() as conn:
-        async with conn.cursor() as cur:
-            assert await get_document(cur, _SENTINEL_DOCUMENT_ID) is not None
+    async with get_connection() as conn, conn.cursor() as cur:
+        assert await get_document(cur, _SENTINEL_DOCUMENT_ID) is not None
 
 
 @pytest.mark.asyncio
@@ -234,14 +216,13 @@ async def test_recreate_rebuilds_the_schema_and_the_index(monkeypatch):
         await _recreate(BP_DOMAIN, _recreate_args())
 
         # The schema is back and empty.
-        async with get_connection() as conn:
-            async with conn.cursor() as cur:
-                assert await get_document(cur, _SENTINEL_DOCUMENT_ID) is None
-                await cur.execute(
-                    "SELECT table_name FROM information_schema.tables"
-                    " WHERE table_schema = 'public'"
-                )
-                tables = {row[0] for row in await cur.fetchall()}
+        async with get_connection() as conn, conn.cursor() as cur:
+            assert await get_document(cur, _SENTINEL_DOCUMENT_ID) is None
+            await cur.execute(
+                "SELECT table_name FROM information_schema.tables"
+                " WHERE table_schema = 'public'"
+            )
+            tables = {row[0] for row in await cur.fetchall()}
         assert {"document", "terms_cache", "ontology_cache"} <= tables
 
         # The index carries the generated mapping, not the stale one.
@@ -265,13 +246,12 @@ def _index_args() -> argparse.Namespace:
 
 async def _sentinel_is_synced() -> bool:
     """Return True if the sentinel document is stamped as synced."""
-    async with get_connection() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                f"SELECT synced_at FROM {DOCUMENT_TABLE} WHERE id = %s",
-                (_SENTINEL_DOCUMENT_ID,),
-            )
-            row = await cur.fetchone()
+    async with get_connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            f"SELECT synced_at FROM {DOCUMENT_TABLE} WHERE id = %s",
+            (_SENTINEL_DOCUMENT_ID,),
+        )
+        row = await cur.fetchone()
     return row is not None and row[0] is not None
 
 
@@ -352,19 +332,17 @@ def _clear_args() -> argparse.Namespace:
 
 async def _store_sentinel_document() -> None:
     """Store a sentinel document to check later if it exists."""
-    async with get_connection() as conn:
-        async with conn.cursor() as cur:
-            await cur.execute(
-                f"INSERT INTO {DOCUMENT_TABLE} (id, payload) VALUES (%s, '{{}}')",
-                (_SENTINEL_DOCUMENT_ID,),
-            )
+    async with get_connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            f"INSERT INTO {DOCUMENT_TABLE} (id, payload) VALUES (%s, '{{}}')",
+            (_SENTINEL_DOCUMENT_ID,),
+        )
 
 
 async def _sentinel_document_exists() -> bool:
     """Return True if the sentinel document exists."""
-    async with get_connection() as conn:
-        async with conn.cursor() as cur:
-            return await get_document(cur, _SENTINEL_DOCUMENT_ID) is not None
+    async with get_connection() as conn, conn.cursor() as cur:
+        return await get_document(cur, _SENTINEL_DOCUMENT_ID) is not None
 
 
 async def _store_sentinel_term() -> None:
@@ -377,23 +355,21 @@ async def _store_sentinel_term() -> None:
 
 async def _store_sentinel_log() -> None:
     """Log a row for the sentinel document, to check later if it exists."""
-    async with get_connection() as conn:
-        async with conn.cursor() as cur:
-            await write_document_log(
-                cur,
-                StoredDocumentLog(
-                    document_id=_SENTINEL_DOCUMENT_ID,
-                    severity="ERROR",
-                    message="Something was not found.",
-                ),
-            )
+    async with get_connection() as conn, conn.cursor() as cur:
+        await write_document_log(
+            cur,
+            StoredDocumentLog(
+                document_id=_SENTINEL_DOCUMENT_ID,
+                severity="ERROR",
+                message="Something was not found.",
+            ),
+        )
 
 
 async def _sentinel_log_exists() -> bool:
     """Return True if the row logged for the sentinel document exists."""
-    async with get_connection() as conn:
-        async with conn.cursor() as cur:
-            return bool(await read_document_logs(cur, _SENTINEL_DOCUMENT_ID))
+    async with get_connection() as conn, conn.cursor() as cur:
+        return bool(await read_document_logs(cur, _SENTINEL_DOCUMENT_ID))
 
 
 async def _sentinel_term_exists() -> bool:

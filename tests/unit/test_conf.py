@@ -11,23 +11,11 @@ from cryptography.hazmat.primitives.serialization import (
 )
 
 from search_api.conf import (
-    JWTConfiguration,
+    AIConfiguration,
     OIDCConfiguration,
     SdSubmitSyncConfiguration,
 )
 from tests.utils.keys import base64_pem_private_key, pem_key_pair
-
-
-def test_jwt_key_below_minimum_length_rejected():
-    short_key = base64.b64encode(b"too-short").decode("ascii")
-    with pytest.raises(ValueError, match="at least 32 bytes"):
-        JWTConfiguration(JWT_KEY=short_key)
-
-
-def test_jwt_key_at_minimum_length_accepted():
-    key = base64.b64encode(b"x" * 32).decode("ascii")
-    config = JWTConfiguration(JWT_KEY=key)
-    assert config.JWT_KEY == "x" * 32
 
 
 def _oidc_config(**overrides: str) -> OIDCConfiguration:
@@ -51,6 +39,11 @@ def test_post_logout_redirect_url_falls_back_to_base_url_origin():
     config = _oidc_config()
     assert config.redirect_url == "http://localhost:8000/docs"
     assert config.post_logout_redirect_url == "http://localhost:8000/"
+
+
+def test_default_scope_asks_for_a_refresh_token(monkeypatch):
+    monkeypatch.delenv("OIDC_SCOPE", raising=False)
+    assert "offline_access" in _oidc_config().OIDC_SCOPE.split()
 
 
 _SD_SUBMIT_AUDIENCE = "https://submitter.example/api/sync"
@@ -101,3 +94,27 @@ def test_sd_submit_sync_private_key_not_base64() -> None:
 def test_sd_submit_sync_private_key_not_pem(decoded_key: bytes) -> None:
     with pytest.raises(ValueError, match="PEM private key"):
         _sd_submit_sync_config(base64.b64encode(decoded_key).decode("ascii"))
+
+
+def test_ai_openai_provider_requires_base_url_and_api_key(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("LLM_MODEL", "qwen2.5:7b")
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="LLM_BASE_URL and LLM_API_KEY are required"):
+        AIConfiguration()
+
+
+def test_ai_other_provider_needs_no_base_url_or_api_key(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("LLM_MODEL", "claude-sonnet-5-5")
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    assert AIConfiguration().LLM_PROVIDER == "anthropic"
+
+
+def test_ai_model_has_no_default(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    with pytest.raises(ValueError, match="LLM_MODEL"):
+        AIConfiguration()

@@ -2,7 +2,7 @@ import json
 from typing import Any
 
 import fsspec  # type: ignore[import-untyped]
-from jsonschema import validators, ValidationError
+from jsonschema import ValidationError, validators
 from referencing import Registry, Resource
 
 

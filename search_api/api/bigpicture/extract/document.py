@@ -1,30 +1,22 @@
 """Bigpicture document XML extraction."""
 
 import logging
-from collections.abc import Iterable, Iterator, Set
-from datetime import datetime, timezone
-from pathlib import Path
+import re
+from collections.abc import Iterable, Iterator
+from collections.abc import Set as AbstractSet
+from datetime import UTC, datetime
 from typing import Any
 
 import fsspec  # type: ignore
-from lxml.etree import _Element as Element, _ElementTree as ElementTree  # noqa
-from pydantic import BaseModel, ConfigDict
+from lxml.etree import _ElementTree as ElementTree
+from pydantic import BaseModel, ConfigDict, ValidationError
 
-from search_api.api.bigpicture.models import BP_DOCUMENT_FIELDS
-from search_api.api.bigpicture.extract.values import (
-    extract_diagnoses,
-    extract_finding,
-    extract_sample_biological_being_fields,
-    extract_sample_block_fields,
-    extract_sample_specimen_fields,
-    extract_scope,
-    extract_staining_fields,
-)
 from search_api.api.bigpicture.extract.models import (
-    BigpictureExtractedObject,
-    OBSERVATION_CANDIDATE,
-    OBSERVATION_CONFIRMED,
+    NESTED_GROUPS,
+    OBSERVATION_DISTINCT,
+    OBSERVATION_SUMMARY,
     BigpictureCodeAttributeValue,
+    BigpictureExtractedObject,
     BigpictureFields,
     BigpictureSampleBiologicalBeingFields,
     BigpictureSampleBlockFields,
@@ -32,7 +24,7 @@ from search_api.api.bigpicture.extract.models import (
     BigpictureSpecimenFields,
     BigpictureStainingFields,
     ObjectIds,
-    NESTED_GROUPS,
+    ObjectKey,
 )
 from search_api.api.bigpicture.extract.refs import (
     OBSERVATION_IMAGE_REF,
@@ -43,22 +35,38 @@ from search_api.api.bigpicture.extract.refs import (
     object_keys,
     related_ids,
 )
+from search_api.api.bigpicture.extract.values import (
+    extract_diagnoses,
+    extract_finding,
+    extract_sample_biological_being_fields,
+    extract_sample_block_fields,
+    extract_sample_specimen_fields,
+    extract_scope,
+    extract_staining_fields,
+)
+from search_api.api.bigpicture.extract.version import (
+    extract_version,
+    xml_schema_dir,
+)
+from search_api.api.bigpicture.models import BP_DOCUMENT_FIELDS
 from search_api.api.extract_logs import ExtractLog
 from search_api.api.opensearch.models import (
     ExtractedDocument,
     OpenSearchFieldValue,
     OpenSearchGroup,
 )
-from search_api.exceptions import SystemException
+from search_api.exceptions import SystemException, UserException
 from search_api.utils.crypt import read_file, resolve_path
 from search_api.utils.xml import get_xml_value, parse_xml, validate_xml
+
+logger = logging.getLogger(__name__)
 
 
 def _has_value(value: Any) -> bool:
     """Whether a parsed field carries an indexable value."""
     if value is None:
         return False
-    if isinstance(value, Set):
+    if isinstance(value, AbstractSet):
         return len(value) > 0
     return True
 
@@ -80,7 +88,7 @@ def to_opensearch_values(
             return [
                 OpenSearchFieldValue(field=field, value=(value.code, value.meaning))
             ]
-        if isinstance(value, Set) and all(
+        if isinstance(value, AbstractSet) and all(
             isinstance(code, BigpictureCodeAttributeValue) for code in value
         ):
             # A multivalued field of code attributes.
@@ -122,14 +130,56 @@ SAMPLE_XML_FILE = "METADATA/sample.xml"
 STAINING_XML_FILE = "METADATA/staining.xml"
 OBSERVATION_XML_FILE = "METADATA/observation.xml"
 
-XML_SCHEMA_DIR = Path(__file__).resolve().parent.parent / "schemas"
-
 DATASET_XML_SCHEMA_FILE = "BP.dataset.xsd"
 IMAGE_XML_SCHEMA_FILE = "BP.image.xsd"
 POLICY_XML_SCHEMA_FILE = "BP.policy.xsd"
 SAMPLE_XML_SCHEMA_FILE = "BP.sample.xsd"
 STAINING_XML_SCHEMA_FILE = "BP.staining.xsd"
 OBSERVATION_XML_SCHEMA_FILE = "BP.observation.xsd"
+
+# The objects in the sample XML.
+SAMPLE_XML_OBJECT_TAGS = ("BIOLOGICAL_BEING", "CASE", "SPECIMEN", "BLOCK", "SLIDE")
+
+# The characters of the random part of a Bigpicture accession: lowercase letters and
+# digits other than i, l, o, 0 and 1.
+_ACCESSION_CHARS = "abcdefghjkmnpqrstuvwxyz23456789"
+
+
+def _accession_pattern(accession_type: str) -> re.Pattern[str]:
+    """
+    Return the format of the accessions the SD Submit API assigns.
+
+    The format is CENTER-TYPE-xxxxxx-xxxxxx. CENTER is set for each deployment
+    of the SD Submit API, and any letters and digits are accepted.
+
+    :param accession_type: The TYPE part of the accession.
+    """
+    random_part = f"[{_ACCESSION_CHARS}]{{6}}"
+    return re.compile(rf"[A-Za-z0-9]+-{accession_type}-{random_part}-{random_part}")
+
+
+_DATASET_ACCESSION = _accession_pattern("dataset")
+_IMAGE_ACCESSION = _accession_pattern("image")
+
+
+def _require_unique_identifiers(xml: ElementTree, tag: str, xml_path: str) -> None:
+    """
+    Require objects of one type to have unique aliases and accessions.
+
+    A reference finds its object by alias or accession, so they must be unique.
+
+    :param xml: The XML holding the objects.
+    :param tag: The objects' element name. The element is either the root, or a child of
+        a root element.
+    :param xml_path: The file path the XML was read from, named in the error.
+    :raises UserException: if two objects share an alias or an accession.
+    """
+    seen: set[ObjectKey] = set()
+    for elem in xml.xpath(f"/{tag} | /*/{tag}"):
+        for key in object_keys(elem):
+            if key in seen:
+                raise UserException(f"Duplicate {tag} {key.kind} in {xml_path}.")
+            seen.add(key)
 
 
 def get_last_modification_time(
@@ -150,13 +200,11 @@ def get_last_modification_time(
             if mtime is None:
                 continue
             if isinstance(mtime, (int, float)):
-                mtimes.append(datetime.fromtimestamp(mtime, tz=timezone.utc))
+                mtimes.append(datetime.fromtimestamp(mtime, tz=UTC))
             elif isinstance(mtime, datetime):
-                mtimes.append(
-                    mtime if mtime.tzinfo else mtime.replace(tzinfo=timezone.utc)
-                )
-        except Exception:
-            logging.warning("Could not extract last modification time for %s.", path)
+                mtimes.append(mtime if mtime.tzinfo else mtime.replace(tzinfo=UTC))
+        except Exception:  # noqa: BLE001
+            logger.warning("Could not extract last modification time for %s.", path)
     return max(mtimes) if mtimes else None
 
 
@@ -206,7 +254,27 @@ def extract_dataset_documents(
     :param fs: Optional fsspec filesystem. If None, a local filesystem is used.
     :param keys: Crypt4GH keys for decrypting ``.c4gh`` files, as returned by
         ``load_c4gh_keys``. If None, only plain files are accepted.
+    :raises ValueError: if a value read from the XML fails a model's validation.
     """
+    try:
+        yield from _extract_dataset_documents(root, fs, keys)
+    except ValidationError as ex:
+        # A safety net for any Pydantic model built from source documents. Pydantic quotes
+        # the input that failed and we keep this out by constructing the error message
+        # ourselves and using `from None`.
+        errors = "; ".join(
+            f"{'.'.join(str(loc) for loc in error['loc'])}: {error['type']}"
+            for error in ex.errors(include_input=False, include_url=False)
+        )
+        raise ValueError(f"Invalid {ex.title}: {errors}") from None
+
+
+def _extract_dataset_documents(
+    root: str,
+    fs: fsspec.AbstractFileSystem | None,
+    keys: list | None,
+) -> Iterator[ExtractedDocument]:
+    """Extract search fields from a single Bigpicture XML dataset directory."""
     if fs is None:
         # Use local filesystem.
         fs = fsspec.filesystem("file")
@@ -236,7 +304,12 @@ def extract_dataset_documents(
     #
 
     dataset_xml = parse_xml(read_file(fs, files.dataset, keys))
-    validate_xml(dataset_xml, XML_SCHEMA_DIR, DATASET_XML_SCHEMA_FILE)
+    # The dataset XML declares the metadata standard version.
+    version = extract_version(dataset_xml)
+    schema_dir = xml_schema_dir(version)
+    validate_xml(
+        dataset_xml, schema_dir, DATASET_XML_SCHEMA_FILE, xml_path=files.dataset
+    )
     # The dataset is identified by its accession.
     dataset_id = get_xml_value(
         "/DATASET/@accession | /DATASET_SET/DATASET/@accession",
@@ -244,15 +317,17 @@ def extract_dataset_documents(
         optional=True,
     )
     if dataset_id is None:
-        raise ValueError(
-            f"Failed to extract dataset accession from {str(files.dataset)}"
+        raise ValueError(f"Failed to extract dataset accession from {files.dataset!s}")
+    if not _DATASET_ACCESSION.fullmatch(dataset_id):
+        raise SystemException(
+            f"Dataset accession in {files.dataset} is not a Bigpicture accession."
         )
     dataset_short_name = get_xml_value(
-        "/DATASET/DESCRIPTION | /DATASET_SET/DATASET/SHORT_NAME",
+        "/DATASET/SHORT_NAME | /DATASET_SET/DATASET/SHORT_NAME",
         dataset_xml,
     )
     dataset_title = get_xml_value(
-        "/DATASET/DESCRIPTION | /DATASET_SET/DATASET/TITLE",
+        "/DATASET/TITLE | /DATASET_SET/DATASET/TITLE",
         dataset_xml,
     )
     dataset_description = get_xml_value(
@@ -264,10 +339,19 @@ def extract_dataset_documents(
     #
 
     image_xml = parse_xml(read_file(fs, files.image, keys))
-    validate_xml(image_xml, XML_SCHEMA_DIR, IMAGE_XML_SCHEMA_FILE)
+    validate_xml(image_xml, schema_dir, IMAGE_XML_SCHEMA_FILE, xml_path=files.image)
+
+    _require_unique_identifiers(image_xml, "IMAGE", files.image)
 
     for xml in image_xml.xpath("/IMAGE | /IMAGE_SET/IMAGE"):
         image_ids = object_ids(xml)
+        # An image loaded from a directory may have no accession.
+        if image_ids.accession is not None and not _IMAGE_ACCESSION.fullmatch(
+            image_ids.accession
+        ):
+            raise SystemException(
+                f"Image accession in {files.image} is not a Bigpicture accession."
+            )
         images.append(image_ids)
         # The document id is image accession if present, otherwise image
         # alias prefixed with dataset accession to make it unique.
@@ -284,7 +368,7 @@ def extract_dataset_documents(
     #
 
     policy_xml = parse_xml(read_file(fs, files.policy, keys))
-    validate_xml(policy_xml, XML_SCHEMA_DIR, POLICY_XML_SCHEMA_FILE)
+    validate_xml(policy_xml, schema_dir, POLICY_XML_SCHEMA_FILE, xml_path=files.policy)
     scope = extract_scope(policy_xml, files.policy)
     is_clinical = scope == "clinical"
 
@@ -292,7 +376,9 @@ def extract_dataset_documents(
     #
 
     sample_xml = parse_xml(read_file(fs, files.sample, keys))
-    validate_xml(sample_xml, XML_SCHEMA_DIR, SAMPLE_XML_SCHEMA_FILE)
+    validate_xml(sample_xml, schema_dir, SAMPLE_XML_SCHEMA_FILE, xml_path=files.sample)
+    for tag in SAMPLE_XML_OBJECT_TAGS:
+        _require_unique_identifiers(sample_xml, tag, files.sample)
 
     for xml in sample_xml.xpath("/SLIDE | /SAMPLE_SET/SLIDE"):
         slide_ids = object_ids(xml)
@@ -336,7 +422,11 @@ def extract_dataset_documents(
     #
 
     staining_xml = parse_xml(read_file(fs, files.staining, keys))
-    validate_xml(staining_xml, XML_SCHEMA_DIR, STAINING_XML_SCHEMA_FILE)
+    validate_xml(
+        staining_xml, schema_dir, STAINING_XML_SCHEMA_FILE, xml_path=files.staining
+    )
+
+    _require_unique_identifiers(staining_xml, "STAINING", files.staining)
 
     for xml in staining_xml.xpath("/STAINING | /STAINING_SET/STAINING"):
         # Extract fields from XML.
@@ -395,7 +485,12 @@ def extract_dataset_documents(
     # non-clinical one findings; the statement type decides which.
     if files.observation is not None:
         observation_xml = parse_xml(read_file(fs, files.observation, keys))
-        validate_xml(observation_xml, XML_SCHEMA_DIR, OBSERVATION_XML_SCHEMA_FILE)
+        validate_xml(
+            observation_xml,
+            schema_dir,
+            OBSERVATION_XML_SCHEMA_FILE,
+            xml_path=files.observation,
+        )
 
         for observation in observation_xml.xpath(
             "/OBSERVATION | /OBSERVATION_SET/OBSERVATION"
@@ -411,11 +506,11 @@ def extract_dataset_documents(
                 ref = observation.find(tag)
                 if ref is None:
                     continue
-                # A statement is always considered confirmed if it is linked directly
+                # A statement is always considered distinct if it is linked directly
                 # to an image.
-                confirmed = tag == OBSERVATION_IMAGE_REF or status == "Distinct"
+                distinct = tag == OBSERVATION_IMAGE_REF or status == "Distinct"
                 observation_type = (
-                    OBSERVATION_CONFIRMED if confirmed else OBSERVATION_CANDIDATE
+                    OBSERVATION_DISTINCT if distinct else OBSERVATION_SUMMARY
                 )
                 ref_image_ids = image_ids_for_ref(references, object_keys(ref))
                 if statement_type == "Diagnosis":

@@ -1,12 +1,8 @@
 """OpenSearch client construction."""
 
-import logging
-
 from opensearchpy import AsyncOpenSearch
 
 from search_api.conf import opensearch_config as _opensearch_config
-
-logging.basicConfig(level=logging.INFO)
 
 
 def create_search() -> AsyncOpenSearch:

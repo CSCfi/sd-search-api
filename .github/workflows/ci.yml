@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        tox-env: [ruff, mypy, pytest]
+        tox-env: [ruff-check, mypy, pytest]
     steps:
       - uses: actions/checkout@v7
 

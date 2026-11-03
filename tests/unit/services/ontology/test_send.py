@@ -13,30 +13,39 @@ _TAB_FILE_HEADER = (
 )
 
 
+def _tab_file(lines: list[str]) -> bytes:
+    """A SEND tab file of the header and the given lines."""
+    return ("\n".join([_TAB_FILE_HEADER, *lines]) + "\n").encode()
+
+
 def test_parse_send_ontology():
-    content = (
-        "\n".join(
-            [
-                _TAB_FILE_HEADER,
-                # Code list 1.
+    content = _tab_file(
+        [
+            # Code list 1.
+            (
                 "C158118\t\tYes\tAge Estimation Method Response\tAGESMETH\t"
                 "Age Estimation Method Response\tTerminology about age estimation.\t"
-                "CDISC SEND Age Estimation Method Response Terminology",
-                # Code 1.
+                "CDISC SEND Age Estimation Method Response Terminology"
+            ),
+            # Code 1.
+            (
                 "C158324\tC158118\t\tAge Estimation Method Response\tANIMAL RECORDS\t\t"
-                "From animal records.\tAnimal Record Information",
-                # Code 2.
+                "From animal records.\tAnimal Record Information"
+            ),
+            # Code 2.
+            (
                 "C158325\tC158118\t\tAge Estimation Method Response\tESTIMATED\tApproximated\t"
-                "Estimated.\tEstimated",
-                # Code list 2.
+                "Estimated.\tEstimated"
+            ),
+            # Code list 2.
+            (
                 "C200000\t\tYes\tOther Category\tOTHERCAT\tOther Category\t"
-                "Some other category.\tCDISC SEND Other Category Terminology",
-                # Code 2.
-                "C158325\tC200000\t\tOther Category\tESTIMATED-ALT\tRoughly\tEstimated.\tEstimated",
-            ]
-        )
-        + "\n"
-    ).encode()
+                "Some other category.\tCDISC SEND Other Category Terminology"
+            ),
+            # Code 2.
+            "C158325\tC200000\t\tOther Category\tESTIMATED-ALT\tRoughly\tEstimated.\tEstimated",
+        ]
+    )
 
     concepts = parse_send_ontology(content)
     by_id = {c.concept_id: c for c in concepts}
@@ -70,31 +79,27 @@ def test_parse_send_ontology():
 
 
 def test_parse_send_ontology_missing_code_raises():
-    content = (
-        "\n".join(
-            [
-                _TAB_FILE_HEADER,
+    content = _tab_file(
+        [
+            (
                 "\tC158118\t\tAge Estimation Method Response\tNO CODE\t\t"
-                "Missing Code.\tMissing Code",
-            ]
-        )
-        + "\n"
-    ).encode()
+                "Missing Code.\tMissing Code"
+            ),
+        ]
+    )
     with pytest.raises(SystemException):
         parse_send_ontology(content)
 
 
 def test_parse_send_ontology_missing_preferred_term_raises():
-    content = (
-        "\n".join(
-            [
-                _TAB_FILE_HEADER,
+    content = _tab_file(
+        [
+            (
                 "C999999\tC158118\t\tAge Estimation Method Response\t"
-                "NO PREFERRED TERM\t\tMissing preferred term.\t",
-            ]
-        )
-        + "\n"
-    ).encode()
+                "NO PREFERRED TERM\t\tMissing preferred term.\t"
+            ),
+        ]
+    )
     with pytest.raises(SystemException):
         parse_send_ontology(content)
 

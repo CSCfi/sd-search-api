@@ -6,33 +6,32 @@ from typing import Any
 
 from fastapi import FastAPI
 
+# Imported for its side effects: populates the ontology service and term cache
+# registries that this module looks up below.
+import search_api.services.ontology.registrations  # noqa: F401
 from search_api.api.beacon.models import (
     BeaconFilteringScope,
     BeaconResultSetsResponse,
 )
 from search_api.api.beacon.services import BeaconQueryService, BeaconService
-from search_api.services.fetch import DocumentSource
+from search_api.api.opensearch.client import create_search
 from search_api.api.opensearch.models import (
     OpenSearchBeaconFilteringTerm,
     OpenSearchField,
 )
-from search_api.api.opensearch.client import create_search
+from search_api.api.scopes import scope_field
 from search_api.conf import cache_config
 from search_api.database.repository import close_pool, open_pool
-from search_api.api.scopes import scope_field
+from search_api.services.fetch import DocumentSource
 from search_api.services.ontology.service import (
     get_ontology_id_by_field,
     get_ontology_service,
 )
-from search_api.services.value_counts import ValueCountsUpdater
 from search_api.services.ontology.term_cache import (
     OntologyTermCache,
     create_term_caches,
 )
-
-# Imported for its side effects: populates the ontology service and term cache
-# registries that this module looks up below.
-import search_api.services.ontology.registrations  # noqa: F401
+from search_api.services.value_counts import ValueCountsUpdater
 
 
 @dataclass(frozen=True)
@@ -42,7 +41,6 @@ class BeaconQueryEndpoint:
     path: str
     beacon_service_factory: Callable[[Any], BeaconQueryService[Any]]
     result_sets_response_model: type[BeaconResultSetsResponse[Any]]
-    ai_assistant_description: str
 
 
 @dataclass(frozen=True)
@@ -60,6 +58,8 @@ class Domain:
     beacon_id: str
     beacon_name: str
     schemas: Sequence[str]  # Beacon entity types (returnedSchemas).
+    # The AI persona that recommends filters at /ai/filters.
+    ai_assistant_description: str
     # Whether to replace retired concepts with an active one.
     replace_concepts: bool = True
     local_source: DocumentSource | None = None

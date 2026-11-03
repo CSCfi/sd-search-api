@@ -1,7 +1,7 @@
 import pytest
 from jsonschema import ValidationError
 
-from search_api.services.validate import validate_json, load_json
+from search_api.services.validate import load_json, validate_json
 
 
 def test_validate_json_valid():

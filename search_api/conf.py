@@ -3,7 +3,7 @@ from typing import Literal
 from urllib.parse import urljoin, urlparse
 
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
-from pydantic import Field, computed_field, field_validator
+from pydantic import Field, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -18,6 +18,17 @@ class DeploymentConfiguration(BaseSettings):
         default="dev",
         description="Deployment environment.",
     )
+    LOG_LEVEL: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(
+        default="INFO",
+        description="Log level of the server. DEBUG level logs sensitive information "
+        "including conversations with the AI model and must not be used "
+        "in production.",
+    )
+
+    @field_validator("LOG_LEVEL", mode="before")
+    @classmethod
+    def upper_case_log_level(cls, value: object) -> object:
+        return value.upper() if isinstance(value, str) else value
 
 
 class DatabaseConfiguration(BaseSettings):
@@ -111,8 +122,41 @@ class FeatureConfiguration(BaseSettings):
 class AIConfiguration(BaseSettings):
     """AI/LLM configuration."""
 
-    LLM_BASE_URL: str = Field(description="LLM API base URL.")
-    LLM_API_KEY: str = Field(description="LLM API key.")
+    LLM_PROVIDER: str = Field(
+        default="openai",
+        description="LLM provider, as pydantic-ai names it. 'openai' is any "
+        "OpenAI-compatible server, such as Ollama. Other providers, such as "
+        "'anthropic' or 'google-gla', read their credentials from their own "
+        "environment variables.",
+    )
+    LLM_MODEL: str = Field(description="LLM model name, as the provider names it.")
+    LLM_BASE_URL: str | None = Field(
+        default=None, description="LLM API base URL, for the 'openai' provider."
+    )
+    LLM_API_KEY: str | None = Field(
+        default=None, description="LLM API key, for the 'openai' provider."
+    )
+    LLM_MAX_TOKENS: int = Field(
+        default=1024,
+        gt=0,
+        description="The most tokens the model may generate in one reply.",
+    )
+    LLM_TIMEOUT: float = Field(
+        default=60,
+        gt=0,
+        description="Maximum amount of seconds the model may take to answer one query, all "
+        "tool calls and corrections included.",
+    )
+
+    @model_validator(mode="after")
+    def validate_openai_settings(self) -> AIConfiguration:
+        if self.LLM_PROVIDER == "openai" and not (
+            self.LLM_BASE_URL and self.LLM_API_KEY
+        ):
+            raise ValueError(
+                "LLM_BASE_URL and LLM_API_KEY are required for the 'openai' provider."
+            )
+        return self
 
 
 class OIDCConfiguration(BaseSettings):
@@ -134,7 +178,11 @@ class OIDCConfiguration(BaseSettings):
         ),
     )
     OIDC_SCOPE: str = Field(
-        default="openid profile email", description="OIDC scopes to request."
+        default="openid profile email offline_access",
+        description=(
+            "OIDC scopes to request. LS AAI issues a refresh token only when "
+            "`offline_access` is requested and allowed for the client."
+        ),
     )
     OIDC_SECURE_COOKIE: bool = Field(
         default=True,
@@ -162,35 +210,6 @@ class OIDCConfiguration(BaseSettings):
         """URL to send the user to after logout: redirect_url's origin, path dropped."""
         parsed = urlparse(self.redirect_url)
         return f"{parsed.scheme}://{parsed.netloc}/"
-
-
-class JWTConfiguration(BaseSettings):
-    """Session JWT configuration."""
-
-    JWT_KEY: str = Field(
-        description="Base64-encoded secret key used to sign session JWTs."
-    )
-    JWT_ISSUER: str = Field(
-        default="sd-search-api", description="Session JWT issuer claim."
-    )
-    JWT_ALGORITHM: str = Field(
-        default="HS256", description="Session JWT signing algorithm."
-    )
-
-    @field_validator("JWT_KEY")
-    @classmethod
-    def decode_jwt_key(cls, value: str) -> str:
-        """Decode JWT key from base64-encoded environment variable."""
-        try:
-            decoded = base64.b64decode(value, validate=True)
-            key = decoded.decode("utf-8")
-        except Exception as exc:
-            raise ValueError("JWT_KEY must be a valid base64-encoded string") from exc
-        if len(decoded) < 32:
-            raise ValueError(
-                "JWT_KEY must decode to at least 32 bytes (256 bits) for HS256 signing"
-            )
-        return key
 
 
 class SdSubmitSyncConfiguration(BaseSettings):
@@ -293,11 +312,6 @@ def ai_config() -> AIConfiguration:
 def oidc_config() -> OIDCConfiguration:
     """Get OIDC configuration."""
     return OIDCConfiguration()
-
-
-def jwt_config() -> JWTConfiguration:
-    """Get JWT configuration."""
-    return JWTConfiguration()
 
 
 def sd_submit_sync_config() -> SdSubmitSyncConfiguration:

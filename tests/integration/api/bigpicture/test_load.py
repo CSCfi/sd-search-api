@@ -3,7 +3,7 @@ import uuid
 
 import pytest
 
-from search_api.api.opensearch.models import ExtractedDocument
+from search_api.api.bigpicture.domain import BP_DOMAIN
 from search_api.api.bigpicture.extract.document import to_opensearch_values
 from search_api.api.bigpicture.extract.models import (
     BigpictureCodeAttributeValue,
@@ -11,13 +11,13 @@ from search_api.api.bigpicture.extract.models import (
     BigpictureSpecimenFields,
     BigpictureStainingFields,
 )
-from search_api.api.bigpicture.domain import BP_DOMAIN
-from search_api.services.ontology.term_cache import create_term_caches
 from search_api.api.bigpicture.models import BP_OPENSEARCH_INDEX
-from search_api.services.sync import SyncService
+from search_api.api.opensearch.models import ExtractedDocument
 from search_api.database.document import get_document
-from search_api.services.load import LoadService
 from search_api.database.repository import get_connection
+from search_api.services.load import LoadService
+from search_api.services.ontology.term_cache import create_term_caches
+from search_api.services.sync import SyncService
 
 os.environ.setdefault("POSTGRES_DB", os.environ["BP_POSTGRES_DB"])
 os.environ.setdefault("POSTGRES_PORT", os.environ["BP_POSTGRES_PORT"])
@@ -75,30 +75,29 @@ async def test_load_and_sync_fields():
         filtering_scopes=BP_DOMAIN.filtering_scopes,
     )
 
-    async with get_connection() as conn:
-        async with conn.cursor() as cur:
-            values, groups = to_opensearch_values(fields)
-            doc = ExtractedDocument(
-                id=image_id,
-                scope=fields.scope,
-                values=values,
-                groups=groups,
-            )
-            await load_service.store_document(cur, doc)
+    async with get_connection() as conn, conn.cursor() as cur:
+        values, groups = to_opensearch_values(fields)
+        doc = ExtractedDocument(
+            id=image_id,
+            scope=fields.scope,
+            values=values,
+            groups=groups,
+        )
+        await load_service.store_document(cur, doc)
 
-            payload = await get_document(cur, image_id)
-            assert payload is not None
+        payload = await get_document(cur, image_id)
+        assert payload is not None
 
-            assert payload["scope"] == "clinical"
-            assert payload["image_id"] == image_id
-            assert payload["dataset_id"] == dataset_id
-            assert payload["dataset_image_cnt"] == dataset_image_cnt
-            assert payload["dataset_short_name"] == dataset_short_name
-            assert payload["dataset_title"] == dataset_title
-            assert payload["dataset_description"] == dataset_description
-            assert len(payload.get("specimen", [])) == 1
-            assert len(payload.get("staining", [])) == 1
+        assert payload["scope"] == "clinical"
+        assert payload["image_id"] == image_id
+        assert payload["dataset_id"] == dataset_id
+        assert payload["dataset_image_cnt"] == dataset_image_cnt
+        assert payload["dataset_short_name"] == dataset_short_name
+        assert payload["dataset_title"] == dataset_title
+        assert payload["dataset_description"] == dataset_description
+        assert len(payload.get("specimen", [])) == 1
+        assert len(payload.get("staining", [])) == 1
 
-            await sync_service.sync_fields(cur, image_id)
+        await sync_service.sync_fields(cur, image_id)
 
     await sync_service.search.close()

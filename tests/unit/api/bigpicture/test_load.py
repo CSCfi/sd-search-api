@@ -1,5 +1,3 @@
-from search_api.api.opensearch.document import build_document
-from search_api.api.opensearch.models import ExtractedDocument
 from search_api.api.bigpicture.extract.document import to_opensearch_values
 from search_api.api.bigpicture.extract.models import (
     BigpictureCodeAttributeValue,
@@ -7,6 +5,8 @@ from search_api.api.bigpicture.extract.models import (
     BigpictureSpecimenFields,
     BigpictureStainingFields,
 )
+from search_api.api.opensearch.document import build_document
+from search_api.api.opensearch.models import ExtractedDocument
 
 # A concept id and the preferred term SNOMED CT gives it, since an extracted value
 # carries both.

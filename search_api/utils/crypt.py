@@ -36,13 +36,17 @@ def resolve_path(
 ) -> str | None:
     """Return the resolved path, accepting either a plain file or a ``.c4gh`` variant.
 
-    Tries ``path`` first; falls back to ``path + ".c4gh"``. Raises ``ValueError`` if
-    neither exists, unless ``optional`` is True, in which case None is returned.
+    Raises ``ValueError`` if neither exists, unless ``optional`` is True, in which case
+    None is returned. Also raises ``ValueError`` if both exist.
     """
-    if fs.exists(path):
-        return path
     c4gh_path = path + ".c4gh"
-    if fs.exists(c4gh_path):
+    is_plain = fs.exists(path)
+    is_c4gh = fs.exists(c4gh_path)
+    if is_plain and is_c4gh:
+        raise ValueError(f"Both {path} and {c4gh_path} exist.")
+    if is_plain:
+        return path
+    if is_c4gh:
         return c4gh_path
     if optional:
         return None

@@ -1,6 +1,5 @@
-from typing import Any, override
+from typing import Any, ClassVar, override
 
-from search_api.exceptions import SystemException
 from search_api.api.beacon.models import BeaconResultSet, BeaconResultSets
 from search_api.api.bigpicture.models import (
     BP_DOCUMENT_FIELDS,
@@ -15,6 +14,7 @@ from search_api.api.opensearch.search import (
     top_hits_source,
     top_hits_sub_agg,
 )
+from search_api.exceptions import SystemException
 
 # How many results one round trip fetches.
 _PAGE_SIZE = 1000
@@ -48,7 +48,9 @@ class BigpictureDatasetBeaconService(
     """OpenSearch beacon service grouping Bigpicture images into datasets."""
 
     # Get dataset metadata from one document per composite bucket.
-    _SUB_AGGS = {"dataset_info": top_hits_sub_agg(list(_DATASET_OTHER_FIELDS))}
+    _SUB_AGGS: ClassVar[dict[str, Any]] = {
+        "dataset_info": top_hits_sub_agg(list(_DATASET_OTHER_FIELDS))
+    }
 
     @staticmethod
     def _build_dataset(

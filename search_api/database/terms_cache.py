@@ -1,7 +1,7 @@
 """The terms_cache table."""
 
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Sequence
 
 from search_api.database.models import StoredTerm
 from search_api.database.repository import get_cursor

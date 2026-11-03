@@ -1,49 +1,50 @@
 import shutil
-from datetime import datetime, timezone
+import traceback
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import BaseModel, field_validator
 
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
+from search_api.api.bigpicture.extract import document
 from search_api.api.bigpicture.extract.document import (
     extract_dataset_documents,
     get_last_modification_time,
 )
+from search_api.api.bigpicture.extract.models import (
+    BigpictureSampleBiologicalBeingFields,
+)
 from search_api.api.extract_logs import invalid_scheme_log
 from search_api.api.opensearch.document import build_document
-from search_api.exceptions import UserException
-
-
-_XML_DIR = (
-    Path(__file__).resolve().parent.parent.parent.parent.parent
-    / "files"
-    / "bigpicture"
-    / "xml"
+from search_api.exceptions import SystemException, UserException
+from tests.utils.bigpicture import (
+    CLINICAL_2_0_DATASET_DIR,
+    CLINICAL_2_0_DATASET_ID,
+    CLINICAL_2_0_IMAGE_1_ID,
+    CLINICAL_2_0_IMAGE_2_ID,
+    CLINICAL_3_0_DATASET_DIR,
+    CLINICAL_3_0_DATASET_ID,
+    CLINICAL_3_0_IMAGE_1_ID,
+    CLINICAL_3_0_IMAGE_2_ID,
+    NON_CLINICAL_2_0_DATASET_DIR,
+    NON_CLINICAL_2_0_DATASET_ID,
+    NON_CLINICAL_2_0_IMAGE_1_ID,
+    NON_CLINICAL_2_0_IMAGE_2_ID,
 )
 
 
-CLINICAL_DATASET_DIR = _XML_DIR / "dataset_clinical"
-NON_CLINICAL_DATASET_DIR = _XML_DIR / "dataset_non_clinical"
+def test_extract_fields_clinical_2_0():
+    docs = {
+        doc.id: doc for doc in extract_dataset_documents(str(CLINICAL_2_0_DATASET_DIR))
+    }
+    assert set(docs) == {CLINICAL_2_0_IMAGE_1_ID, CLINICAL_2_0_IMAGE_2_ID}
 
-
-# Accessions as the submitter mints them: <center>-<type>-c{6}-c{6}. Only the
-# dataset and the images carry one; everything else is referenced by alias.
-CLINICAL_DATASET = "bb-dataset-hy4m2v-9tq7cx"
-CLINICAL_IMAGE_1 = "bb-image-k3n8pw-6dz2rj"
-CLINICAL_IMAGE_2 = "bb-image-q7v5tb-m4hs8n"
-NON_CLINICAL_DATASET = "bb-dataset-w2j6fd-3npx7k"
-NON_CLINICAL_IMAGE_1 = "bb-image-z9c4gs-7bqm2t"
-NON_CLINICAL_IMAGE_2 = "bb-image-v6h3rn-8kwd5p"
-
-
-def test_extract_fields_clinical():
-    docs = {doc.id: doc for doc in extract_dataset_documents(str(CLINICAL_DATASET_DIR))}
-    assert set(docs) == {CLINICAL_IMAGE_1, CLINICAL_IMAGE_2}
-
-    payload = build_document(docs[CLINICAL_IMAGE_1])
-    assert payload["image_id"] == CLINICAL_IMAGE_1
-    assert payload["dataset_id"] == CLINICAL_DATASET
+    payload = build_document(docs[CLINICAL_2_0_IMAGE_1_ID])
+    assert payload["image_id"] == CLINICAL_2_0_IMAGE_1_ID
+    assert payload["dataset_id"] == CLINICAL_2_0_DATASET_ID
     assert payload["dataset_description"] == "test_description"
 
     # The block and biological being are flattened to specimen.
@@ -65,7 +66,7 @@ def test_extract_fields_clinical():
     assert "staining_procedure_other" not in stain
     assert "staining_target" not in stain
 
-    payload2 = build_document(docs[CLINICAL_IMAGE_2])
+    payload2 = build_document(docs[CLINICAL_2_0_IMAGE_2_ID])
     stain2 = payload2["staining"][0]
     assert stain2["staining_procedure"] == "7"
     # The fixture has both a code and free text (the code takes precedence).
@@ -73,21 +74,56 @@ def test_extract_fields_clinical():
     assert stain2["staining_target"] == "pan Cytokeratin"
 
 
-def test_extract_fields_non_clinical():
-    docs = {
-        doc.id: doc for doc in extract_dataset_documents(str(NON_CLINICAL_DATASET_DIR))
-    }
-    assert set(docs) == {NON_CLINICAL_IMAGE_1, NON_CLINICAL_IMAGE_2}
+# There is no non-clinical 3.0 dataset because the sample, observation, policy
+# and staining schemas are the same in 2.0 and 3.0.
 
-    payload = build_document(docs[NON_CLINICAL_IMAGE_1])
+
+def test_extract_fields_clinical_3_0():
+    # Example XMLs for 2.0 and 3.0 metadata standards should yield
+    # identical OpenSearch documents. The content of the 2.0 XMLs
+    # is tested in test_extract_fields_clinical_2_0. Here we make
+    # sure that 2.0 and 3.0 OpenSearch documents are identical.
+
+    # The 2.0 accession of each 3.0 accession.
+    ids_2_0 = {
+        CLINICAL_3_0_DATASET_ID: CLINICAL_2_0_DATASET_ID,
+        CLINICAL_3_0_IMAGE_1_ID: CLINICAL_2_0_IMAGE_1_ID,
+        CLINICAL_3_0_IMAGE_2_ID: CLINICAL_2_0_IMAGE_2_ID,
+    }
+
+    # The 2.0 OpenSearch documents and logs.
+    expected = {}
+    for doc in extract_dataset_documents(str(CLINICAL_2_0_DATASET_DIR)):
+        payload = build_document(doc)
+        expected[payload["image_id"]] = (payload, doc.logs)
+
+    # The 3.0 OpenSearch documents and logs.
+    actual = {}
+    for doc in extract_dataset_documents(str(CLINICAL_3_0_DATASET_DIR)):
+        payload = build_document(doc)
+        payload["image_id"] = ids_2_0[payload["image_id"]]
+        payload["dataset_id"] = ids_2_0[payload["dataset_id"]]
+        actual[payload["image_id"]] = (payload, doc.logs)
+
+    assert actual == expected
+
+
+def test_extract_fields_non_clinical_2_0():
+    docs = {
+        doc.id: doc
+        for doc in extract_dataset_documents(str(NON_CLINICAL_2_0_DATASET_DIR))
+    }
+    assert set(docs) == {NON_CLINICAL_2_0_IMAGE_1_ID, NON_CLINICAL_2_0_IMAGE_2_ID}
+
+    payload = build_document(docs[NON_CLINICAL_2_0_IMAGE_1_ID])
     assert payload["scope"] == "non_clinical"
     # The short name is excluded for non-clinical datasets.
     assert "dataset_short_name" not in payload
     # No clinical diagnosis reaches a non-clinical dataset's observation items.
     assert all("diagnosis" not in item for item in payload["observation"])
 
-    assert payload["image_id"] == NON_CLINICAL_IMAGE_1
-    assert payload["dataset_id"] == NON_CLINICAL_DATASET
+    assert payload["image_id"] == NON_CLINICAL_2_0_IMAGE_1_ID
+    assert payload["dataset_id"] == NON_CLINICAL_2_0_DATASET_ID
     assert payload["dataset_description"] == "test_description"
 
     # One observation item per Finding statement, holding all five of its fields.
@@ -98,7 +134,7 @@ def test_extract_fields_non_clinical():
             "finding_chronicity": "C14141",
             "finding_distribution": "C25253",
             "finding_result_category": "C53529",
-            "observation_type": "confirmed",
+            "observation_type": "distinct",
         }
     ]
     specimen = payload["specimen"][0]
@@ -117,7 +153,7 @@ def test_extract_fields_non_clinical():
     assert "staining_procedure_other" not in stain
     assert "staining_target" not in stain
 
-    payload2 = build_document(docs[NON_CLINICAL_IMAGE_2])
+    payload2 = build_document(docs[NON_CLINICAL_2_0_IMAGE_2_ID])
     stain2 = payload2["staining"][0]
     assert stain2["staining_procedure"] == "7"
     # The fixture has both a code and free text (the code takes precedence).
@@ -130,7 +166,7 @@ def test_extract_fields_non_clinical():
             "finding": "C41428",
             "finding_severity": "C147501",
             "finding_result_category": "C53529",
-            "observation_type": "confirmed",
+            "observation_type": "distinct",
         }
     ]
     # This statement declares no MICHRON or MIDISTR, so neither is indexed.
@@ -139,7 +175,9 @@ def test_extract_fields_non_clinical():
 
 
 def test_extract_diagnoses():
-    docs = {doc.id: doc for doc in extract_dataset_documents(str(CLINICAL_DATASET_DIR))}
+    docs = {
+        doc.id: doc for doc in extract_dataset_documents(str(CLINICAL_2_0_DATASET_DIR))
+    }
 
     def observation_type_by_diagnosis(payload) -> dict[str, str]:
         return {
@@ -147,27 +185,31 @@ def test_extract_diagnoses():
             for item in payload["observation"]
         }
 
-    image1 = observation_type_by_diagnosis(build_document(docs[CLINICAL_IMAGE_1]))
-    image2 = observation_type_by_diagnosis(build_document(docs[CLINICAL_IMAGE_2]))
+    image1 = observation_type_by_diagnosis(
+        build_document(docs[CLINICAL_2_0_IMAGE_1_ID])
+    )
+    image2 = observation_type_by_diagnosis(
+        build_document(docs[CLINICAL_2_0_IMAGE_2_ID])
+    )
 
-    # A diagnosis stated for the image itself, or stated as Distinct, is confirmed
-    # for that image; one reaching several images via another ref is a candidate.
+    # A diagnosis stated for the image itself, or stated as Distinct, is distinct
+    # for that image; one reaching several images via another ref is a summary.
     # Image 1: CASE_REF and SPECIMEN_REF (Distinct, both images), IMAGE_REF
     # (image 1), BIOLOGICAL_BEING_REF and BLOCK_REF (Summary, both images).
     assert image1 == {
-        "109355002": "confirmed",
-        "254837009": "confirmed",
-        "73211009": "confirmed",
-        "363346000": "candidate",
-        "38341003": "candidate",
+        "109355002": "distinct",
+        "254837009": "distinct",
+        "73211009": "distinct",
+        "363346000": "summary",
+        "38341003": "summary",
     }
     # Image 2 differs only in SLIDE_REF (Distinct, image 2) replacing IMAGE_REF.
     assert image2 == {
-        "195967001": "confirmed",
-        "254837009": "confirmed",
-        "73211009": "confirmed",
-        "363346000": "candidate",
-        "38341003": "candidate",
+        "195967001": "distinct",
+        "254837009": "distinct",
+        "73211009": "distinct",
+        "363346000": "summary",
+        "38341003": "summary",
     }
 
     # The equality assertions above already exclude the non-SNOMED code 8500/3 and
@@ -177,10 +219,10 @@ def test_extract_diagnoses():
         assert "404684003" not in image
 
 
-def _copy_clinical_xml_dir(tmp_path: Path) -> Path:
-    """Copy the dataset_clinical fixture to tmp_path."""
-    dst = tmp_path / "dataset_clinical"
-    shutil.copytree(CLINICAL_DATASET_DIR, dst)
+def _copy_xml_dir(src: Path, tmp_path: Path) -> Path:
+    """Copy a dataset fixture to tmp_path."""
+    dst = tmp_path / src.name
+    shutil.copytree(src, dst)
     return dst
 
 
@@ -188,11 +230,23 @@ def _replace_in_xml(path: Path, old: str, new: str) -> None:
     path.write_text(path.read_text().replace(old, new))
 
 
-def test_extract_requires_dataset_accession(tmp_path):
-    root = _copy_clinical_xml_dir(tmp_path)
+def test_extract_rejects_unsupported_version(tmp_path):
+    root = _copy_xml_dir(CLINICAL_2_0_DATASET_DIR, tmp_path)
     _replace_in_xml(
         root / "METADATA" / "dataset.xml",
-        f'<DATASET alias="1" accession="{CLINICAL_DATASET}">',
+        "<METADATA_STANDARD>2.0.0</METADATA_STANDARD>",
+        "<METADATA_STANDARD>4.0.0</METADATA_STANDARD>",
+    )
+
+    with pytest.raises(UserException, match="Unsupported metadata standard version"):
+        list(extract_dataset_documents(str(root)))
+
+
+def test_extract_requires_dataset_accession(tmp_path):
+    root = _copy_xml_dir(CLINICAL_2_0_DATASET_DIR, tmp_path)
+    _replace_in_xml(
+        root / "METADATA" / "dataset.xml",
+        f'<DATASET alias="1" accession="{CLINICAL_2_0_DATASET_ID}">',
         '<DATASET alias="1">',
     )
 
@@ -201,10 +255,10 @@ def test_extract_requires_dataset_accession(tmp_path):
 
 
 def test_extract_image_id_with_accession_and_alias(tmp_path):
-    root = _copy_clinical_xml_dir(tmp_path)
+    root = _copy_xml_dir(CLINICAL_2_0_DATASET_DIR, tmp_path)
     _replace_in_xml(
         root / "METADATA" / "image.xml",
-        f'<IMAGE alias="2" accession="{CLINICAL_IMAGE_2}">',
+        f'<IMAGE alias="2" accession="{CLINICAL_2_0_IMAGE_2_ID}">',
         '<IMAGE alias="2">',
     )
 
@@ -212,10 +266,123 @@ def test_extract_image_id_with_accession_and_alias(tmp_path):
 
     # Only the first image has an accession. The second document id becomes
     # dataset accession followed by image alias.
-    assert set(docs) == {CLINICAL_IMAGE_1, f"{CLINICAL_DATASET}-2"}
-    opensearch_doc = build_document(docs[f"{CLINICAL_DATASET}-2"])
+    assert set(docs) == {CLINICAL_2_0_IMAGE_1_ID, f"{CLINICAL_2_0_DATASET_ID}-2"}
+    opensearch_doc = build_document(docs[f"{CLINICAL_2_0_DATASET_ID}-2"])
     assert opensearch_doc["image_id"] == "2"
-    assert opensearch_doc["dataset_id"] == CLINICAL_DATASET
+    assert opensearch_doc["dataset_id"] == CLINICAL_2_0_DATASET_ID
+
+
+def test_extract_dataset_fields_from_dataset_root(tmp_path):
+    # A DATASET root rather than a DATASET_SET.
+    root = _copy_xml_dir(CLINICAL_2_0_DATASET_DIR, tmp_path)
+    _replace_in_xml(root / "METADATA" / "dataset.xml", "<DATASET_SET>", "")
+    _replace_in_xml(root / "METADATA" / "dataset.xml", "</DATASET_SET>", "")
+
+    docs = list(extract_dataset_documents(str(root)))
+
+    payload = build_document(docs[0])
+    assert payload["dataset_short_name"] == "test_short_name"
+    assert payload["dataset_title"] == "test_title"
+    assert payload["dataset_description"] == "test_description"
+
+
+@pytest.mark.parametrize(
+    ("file", "old", "new", "expected"),
+    [
+        (
+            "image.xml",
+            f'<IMAGE alias="2" accession="{CLINICAL_2_0_IMAGE_2_ID}">',
+            '<IMAGE alias="1">',
+            "Duplicate IMAGE alias in {path}.",
+        ),
+        (
+            "image.xml",
+            f'<IMAGE alias="2" accession="{CLINICAL_2_0_IMAGE_2_ID}">',
+            f'<IMAGE alias="2" accession="{CLINICAL_2_0_IMAGE_1_ID}">',
+            "Duplicate IMAGE accession in {path}.",
+        ),
+        (
+            "sample.xml",
+            '<SLIDE alias="2">',
+            '<SLIDE alias="1">',
+            "Duplicate SLIDE alias in {path}.",
+        ),
+        (
+            "staining.xml",
+            '<STAINING alias="2">',
+            '<STAINING alias="1">',
+            "Duplicate STAINING alias in {path}.",
+        ),
+    ],
+)
+def test_extract_rejects_duplicate_identifiers(tmp_path, file, old, new, expected):
+    root = _copy_xml_dir(CLINICAL_2_0_DATASET_DIR, tmp_path)
+    path = root / "METADATA" / file
+    _replace_in_xml(path, old, new)
+
+    with pytest.raises(UserException) as exc:
+        list(extract_dataset_documents(str(root)))
+    assert str(exc.value) == expected.format(path=path)
+
+
+@pytest.mark.parametrize(
+    "accession",
+    [
+        # Excluded from the random part: i, l, o, 0 and 1.
+        "bb-dataset-hy4m2v-9tq7cl",
+        # Not a dataset accession.
+        "bb-image-hy4m2v-9tq7cx",
+        # Upper case random part.
+        "bb-dataset-HY4M2V-9TQ7CX",
+        # Too long random part.
+        "bb-dataset-hy4m2v-9tq7cxx",
+        # No center.
+        "-dataset-hy4m2v-9tq7cx",
+    ],
+)
+def test_extract_rejects_invalid_dataset_accession(tmp_path, accession):
+    root = _copy_xml_dir(CLINICAL_2_0_DATASET_DIR, tmp_path)
+    path = root / "METADATA" / "dataset.xml"
+    _replace_in_xml(path, CLINICAL_2_0_DATASET_ID, accession)
+
+    with pytest.raises(SystemException) as exc:
+        list(extract_dataset_documents(str(root)))
+    assert str(exc.value) == (
+        f"Dataset accession in {path} is not a Bigpicture accession."
+    )
+
+
+@pytest.mark.parametrize(
+    "accession",
+    [
+        # Excluded from the random part: i, l, o, 0 and 1.
+        "bb-image-q7v5tb-m4hs8o",
+        # Not an image accession.
+        "bb-dataset-q7v5tb-m4hs8n",
+    ],
+)
+def test_extract_rejects_invalid_image_accession(tmp_path, accession):
+    root = _copy_xml_dir(CLINICAL_2_0_DATASET_DIR, tmp_path)
+    path = root / "METADATA" / "image.xml"
+    _replace_in_xml(path, CLINICAL_2_0_IMAGE_2_ID, accession)
+
+    with pytest.raises(SystemException) as exc:
+        list(extract_dataset_documents(str(root)))
+    assert str(exc.value) == f"Image accession in {path} is not a Bigpicture accession."
+
+
+def test_extract_accepts_any_accession_center(tmp_path):
+    # The center is set for each deployment of the SD Submit API.
+    root = _copy_xml_dir(CLINICAL_2_0_DATASET_DIR, tmp_path)
+    for file in ("dataset.xml", "image.xml", "policy.xml", "observation.xml"):
+        _replace_in_xml(root / "METADATA" / file, '"bb-', '"TEST1-')
+
+    docs = list(extract_dataset_documents(str(root)))
+
+    assert {doc.id for doc in docs} == {
+        CLINICAL_2_0_IMAGE_1_ID.replace("bb-", "TEST1-"),
+        CLINICAL_2_0_IMAGE_2_ID.replace("bb-", "TEST1-"),
+    }
 
 
 @pytest.fixture
@@ -231,18 +398,18 @@ def mock_fs():
 def test_get_last_modification_time_mtime(mock_fs):
     """mtime as a UNIX timestamp (float) is converted to a UTC datetime."""
     ts = 1_700_000_000.0
-    expected = datetime.fromtimestamp(ts, tz=timezone.utc)
+    expected = datetime.fromtimestamp(ts, tz=UTC)
     fs = mock_fs({"/a": {"mtime": ts}})
 
     result = get_last_modification_time(fs, ["/a"])
 
     assert result == expected
-    assert result.tzinfo == timezone.utc
+    assert result.tzinfo == UTC
 
 
 def test_get_last_modification_time_last_modified(mock_fs):
     """last_modified as a tz-aware datetime is returned unchanged."""
-    dt = datetime(2024, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+    dt = datetime(2024, 1, 15, 12, 0, 0, tzinfo=UTC)
     fs = mock_fs({"/a": {"last_modified": dt}})
 
     result = get_last_modification_time(fs, ["/a"])
@@ -257,14 +424,14 @@ def test_get_last_modification_time_LastModified(mock_fs):
 
     result = get_last_modification_time(fs, ["/a"])
 
-    assert result == naive.replace(tzinfo=timezone.utc)
-    assert result.tzinfo == timezone.utc
+    assert result == naive.replace(tzinfo=UTC)
+    assert result.tzinfo == UTC
 
 
 def test_get_last_modification_time_returns_max(mock_fs):
     """The newest mtime across multiple paths is returned."""
-    older = datetime(2023, 1, 1, tzinfo=timezone.utc)
-    newer = datetime(2024, 6, 1, tzinfo=timezone.utc)
+    older = datetime(2023, 1, 1, tzinfo=UTC)
+    newer = datetime(2024, 6, 1, tzinfo=UTC)
     fs = mock_fs({"/a": {"mtime": older}, "/b": {"mtime": newer}})
 
     result = get_last_modification_time(fs, ["/a", "/b"])
@@ -301,12 +468,12 @@ def test_get_last_modification_time_no_files():
     ],
 )
 def test_extract_scope_supported_dataset_types(tmp_path, value, expected):
-    root = _copy_clinical_xml_dir(tmp_path)
+    root = _copy_xml_dir(CLINICAL_2_0_DATASET_DIR, tmp_path)
     _replace_in_xml(root / "METADATA" / "policy.xml", "Clinical/Anonymized", value)
 
     docs = {doc.id: doc for doc in extract_dataset_documents(str(root))}
 
-    assert build_document(docs[CLINICAL_IMAGE_1])["scope"] == expected
+    assert build_document(docs[CLINICAL_2_0_IMAGE_1_ID])["scope"] == expected
 
 
 @pytest.mark.parametrize(
@@ -318,7 +485,7 @@ def test_extract_scope_supported_dataset_types(tmp_path, value, expected):
     ],
 )
 def test_extract_scope_unsupported_dataset_types(tmp_path, value):
-    root = _copy_clinical_xml_dir(tmp_path)
+    root = _copy_xml_dir(CLINICAL_2_0_DATASET_DIR, tmp_path)
     _replace_in_xml(root / "METADATA" / "policy.xml", "Clinical/Anonymized", value)
 
     with pytest.raises(UserException, match="Unsupported 'type_of_dataset' value"):
@@ -333,7 +500,7 @@ def test_extract_scope_unsupported_dataset_types(tmp_path, value):
     ],
 )
 def test_extract_scope_requires_attribute_and_value(tmp_path, old, new):
-    root = _copy_clinical_xml_dir(tmp_path)
+    root = _copy_xml_dir(CLINICAL_2_0_DATASET_DIR, tmp_path)
     _replace_in_xml(root / "METADATA" / "policy.xml", old, new)
 
     with pytest.raises(UserException, match="Missing 'type_of_dataset' attribute"):
@@ -341,26 +508,74 @@ def test_extract_scope_requires_attribute_and_value(tmp_path, old, new):
 
 
 def test_extract_scope_requires_policy_file(tmp_path):
-    root = _copy_clinical_xml_dir(tmp_path)
+    root = _copy_xml_dir(CLINICAL_2_0_DATASET_DIR, tmp_path)
     (root / "METADATA" / "policy.xml").unlink()
 
     with pytest.raises(ValueError, match="Missing file: .*policy.xml"):
         list(extract_dataset_documents(str(root)))
 
 
-def test_extract_invalid_scheme_error():
-    dropped = invalid_scheme_log(
-        "diagnosis",
-        "8500/3",
-        "Infiltrating duct carcinoma, NOS",
-        "ICDO",
-        SNOMED_ONTOLOGY_ID,
+# A model whose validator puts the input value in its error message.
+#
+# Pydantic copies a validator's error message into the error's 'msg', so the value
+# leaks into 'msg' even with include_input=False. This model lets the test check
+# that the error message from extract_dataset_documents does not include the
+# model value.
+class _ValueInMessageModel(BaseModel):
+    value: str
+
+    @field_validator("value")
+    @classmethod
+    def _reject(cls, value: str) -> str:
+        raise ValueError(f"{value!r} is not allowed")
+
+
+@pytest.mark.parametrize(
+    ("raise_validation_error", "expected"),
+    [
+        # Pydantic's own message does not quote the value.
+        (
+            lambda: BigpictureSampleBiologicalBeingFields(sex="Jane Doe"),  # type: ignore[arg-type]
+            "Invalid BigpictureSampleBiologicalBeingFields: sex: literal_error",
+        ),
+        # A validator's message may quote the value.
+        (
+            lambda: _ValueInMessageModel(value="Jane Doe"),
+            "Invalid _ValueInMessageModel: value: value_error",
+        ),
+    ],
+)
+def test_extract_does_not_quote_values(
+    monkeypatch: pytest.MonkeyPatch,
+    raise_validation_error: Callable[[], BaseModel],
+    expected: str,
+):
+    def _mock_extract_dataset_documents(*_args):
+        raise_validation_error()
+        yield
+
+    monkeypatch.setattr(
+        document, "_extract_dataset_documents", _mock_extract_dataset_documents
     )
 
-    clinical = {
-        doc.id: doc.logs for doc in extract_dataset_documents(str(CLINICAL_DATASET_DIR))
-    }
-    non_clinical = list(extract_dataset_documents(str(NON_CLINICAL_DATASET_DIR)))
+    with pytest.raises(ValueError) as exc:
+        list(extract_dataset_documents("root"))
+    assert str(exc.value) == expected
+    # Check that the value is not in the logged traceback.
+    assert "Jane" not in "".join(traceback.format_exception(exc.value))
 
-    assert clinical == {CLINICAL_IMAGE_1: [dropped], CLINICAL_IMAGE_2: [dropped]}
+
+def test_extract_invalid_scheme_error():
+    dropped = invalid_scheme_log("diagnosis", SNOMED_ONTOLOGY_ID)
+
+    clinical = {
+        doc.id: doc.logs
+        for doc in extract_dataset_documents(str(CLINICAL_2_0_DATASET_DIR))
+    }
+    non_clinical = list(extract_dataset_documents(str(NON_CLINICAL_2_0_DATASET_DIR)))
+
+    assert clinical == {
+        CLINICAL_2_0_IMAGE_1_ID: [dropped],
+        CLINICAL_2_0_IMAGE_2_ID: [dropped],
+    }
     assert all(not doc.logs for doc in non_clinical)

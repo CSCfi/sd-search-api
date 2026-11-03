@@ -24,15 +24,14 @@ data:
   # Set to "true" to enable POST /ai/*; also set LLM_* vars in the secret
   FEATURE_AI: "false"
 
-  # LLM base URL (only used when FEATURE_AI=true)
-  LLM_BASE_URL: ""
-
   # OIDC Relying Party login (LifeScience AAI)
   # Must be the UI's own hostname, not the API's — the OIDC callback sets a
   # host-only session cookie, and the UI's own /api/ calls need to see it.
   BASE_URL: "https://sd-search-ui.apps.example.com"
   OIDC_URL: "https://login.aai.example.org"
-  OIDC_SCOPE: "openid profile email"
+  # offline_access: LS AAI issues the refresh token behind /refresh only when it is
+  # requested, and the client registration must allow it.
+  OIDC_SCOPE: "openid profile email offline_access"
   # Send the user back to the UI's search page after login/logout instead of
   # the default (this API's own /docs).
   OIDC_REDIRECT_URL: "https://sd-search-ui.apps.example.com/search"

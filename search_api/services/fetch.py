@@ -9,11 +9,14 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import TracebackType
+from typing import Self
 
 import httpx
 
 from search_api.api.opensearch.models import ExtractedDocument
 from search_api.exceptions import SystemException, UserException
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -93,7 +96,7 @@ class SdSubmitFetchClient:
         # Managed by the context manager.
         self._client: httpx.AsyncClient | None = None
 
-    async def __aenter__(self) -> "SdSubmitFetchClient":
+    async def __aenter__(self) -> Self:
         """Open the HTTP client."""
         self._client = httpx.AsyncClient(
             timeout=_SD_SUBMIT_TIMEOUT,
@@ -203,7 +206,7 @@ class SdSubmitFetchClient:
             raise SystemException(f"SD submit API request to '{url}' failed.") from ex
 
         if response.is_error:
-            logging.error(
+            logger.error(
                 "SD submit API %s request to '%s' returned %d: %s",
                 method,
                 url,

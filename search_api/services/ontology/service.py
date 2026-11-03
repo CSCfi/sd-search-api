@@ -183,7 +183,7 @@ def get_ontology_id_by_field(
     return result
 
 
-_PROVIDERS: dict[str, "OntologyService"] = {}
+_PROVIDERS: dict[str, OntologyService] = {}
 
 
 def register_ontology_service(ontology_id: str, service: OntologyService) -> None:

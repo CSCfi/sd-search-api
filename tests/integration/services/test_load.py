@@ -9,9 +9,11 @@ import pytest_asyncio
 from search_api.api.beacon.models import BeaconFilteringOntology, OntologyRestriction
 from search_api.api.extract_logs import ExtractLog
 from search_api.api.opensearch.models import (
+    ONTOLOGY_OTHER_VALUE_FIELD_SUFFIX,
     ExtractedDocument,
-    OpenSearchFieldType,
     OpenSearchBeaconFilteringTerm,
+    OpenSearchField,
+    OpenSearchFieldType,
     OpenSearchFieldValue,
 )
 from search_api.database.document import DOCUMENT_TABLE, get_document
@@ -19,9 +21,9 @@ from search_api.database.document_log import (
     DOCUMENT_LOG_TABLE,
     read_document_logs,
 )
+from search_api.database.models import StoredTerm
 from search_api.database.ontology_cache import ONTOLOGY_CACHE_TABLE
 from search_api.database.repository import get_cursor
-from search_api.database.models import StoredTerm
 from search_api.database.terms_cache import (
     TERMS_CACHE_TABLE,
     insert_terms,
@@ -282,14 +284,16 @@ async def test_load_valid_concept_id(single_concept_ontology_id, document_id):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "provided_concept_id",
+    ("provided_concept_id", "quoted_id"),
     [
-        "invalid",  # Not well-formed
-        _UNKNOWN_CONCEPT_ID,
+        # Not well-formed, so not quoted in the message as it may be free text.
+        ("invalid", ""),
+        # Well-formed, so quoted in the message.
+        (_UNKNOWN_CONCEPT_ID, f" '{_UNKNOWN_CONCEPT_ID}'"),
     ],
 )
 async def test_load_invalid_concept_id(
-    single_concept_ontology_id, document_id, provided_concept_id
+    single_concept_ontology_id, document_id, provided_concept_id, quoted_id
 ):
     """Storing a document with invalid concepts does not cache the preferred term.
 
@@ -306,8 +310,10 @@ async def test_load_invalid_concept_id(
     assert [(log.severity, log.message) for log in logs] == [
         (
             "WARNING",
-            f"The provided concept id '{provided_concept_id}' is invalid for "
-            f"field '{_FIELD_ID}' of ontology '{single_concept_ontology_id}'.",
+            (
+                f"The provided concept id{quoted_id} is invalid for "
+                f"field '{_FIELD_ID}' of ontology '{single_concept_ontology_id}'."
+            ),
         ),
         (
             "ERROR",
@@ -335,8 +341,10 @@ async def test_replace_concept_true(replacement_ontology_id, document_id):
     assert [(log.severity, log.message) for log in logs] == [
         (
             "WARNING",
-            f"Provided concept id '{_REPLACED_CONCEPT_ID}' was replaced by "
-            f"'{_REPLACEMENT_CONCEPT_ID}' for field '{_FIELD_ID}'.",
+            (
+                f"Provided concept id '{_REPLACED_CONCEPT_ID}' was replaced by "
+                f"'{_REPLACEMENT_CONCEPT_ID}' for field '{_FIELD_ID}'."
+            ),
         )
     ]
     # The replacement is cached.
@@ -386,13 +394,17 @@ async def test_resolve_concept_id_from_meaning(single_concept_ontology_id, docum
     assert [(log.severity, log.message) for log in logs] == [
         (
             "WARNING",
-            f"The provided concept id 'C404' is invalid for field '{_FIELD_ID}' "
-            f"of ontology '{single_concept_ontology_id}'.",
+            (
+                f"The provided concept id 'C404' is invalid for field '{_FIELD_ID}' "
+                f"of ontology '{single_concept_ontology_id}'."
+            ),
         ),
         (
             "WARNING",
-            f"Concept id '{_CONCEPT_ID}' was resolved from the provided textual "
-            f"concept value '{_PREFERRED_TERM.lower()}' for field '{_FIELD_ID}'.",
+            (
+                f"Concept id '{_CONCEPT_ID}' was resolved from the provided textual "
+                f"concept value '{_PREFERRED_TERM.lower()}' for field '{_FIELD_ID}'."
+            ),
         ),
     ]
     # Test cached preferred term.
@@ -421,14 +433,18 @@ async def test_resolve_multiple_concepts_id_from_meaning(
     assert [(log.severity, log.message) for log in logs] == [
         (
             "WARNING",
-            f"The provided concept id 'C404' is invalid for field '{_FIELD_ID}' "
-            f"of ontology '{shared_term_and_parent_ontology_id}'.",
+            (
+                f"The provided concept id 'C404' is invalid for field '{_FIELD_ID}' "
+                f"of ontology '{shared_term_and_parent_ontology_id}'."
+            ),
         ),
         (
             "ERROR",
-            f"Textual concept value '{_SHARED_PREFERRED_TERM}' resolves to several "
-            f"concept ids for field '{_FIELD_ID}': "
-            f"{_CHILD_CONCEPT_ID}, {_ORPHAN_CONCEPT_ID}.",
+            (
+                f"Textual concept value '{_SHARED_PREFERRED_TERM}' resolves to several "
+                f"concept ids for field '{_FIELD_ID}': "
+                f"{_CHILD_CONCEPT_ID}, {_ORPHAN_CONCEPT_ID}."
+            ),
         ),
         (
             "ERROR",
@@ -457,19 +473,25 @@ async def test_resolve_retired_concept_id_from_meaning(
     assert [(log.severity, log.message) for log in logs] == [
         (
             "WARNING",
-            f"The provided concept id 'C404' is invalid for field '{_FIELD_ID}' "
-            f"of ontology '{replacement_ontology_id}'.",
+            (
+                f"The provided concept id 'C404' is invalid for field '{_FIELD_ID}' "
+                f"of ontology '{replacement_ontology_id}'."
+            ),
         ),
         (
             "WARNING",
-            f"Concept id '{_REPLACED_CONCEPT_ID}' was resolved from the provided "
-            f"textual concept value '{_REPLACED_PREFERRED_TERM}' "
-            f"for field '{_FIELD_ID}'.",
+            (
+                f"Concept id '{_REPLACED_CONCEPT_ID}' was resolved from the provided "
+                f"textual concept value '{_REPLACED_PREFERRED_TERM}' "
+                f"for field '{_FIELD_ID}'."
+            ),
         ),
         (
             "WARNING",
-            f"Provided concept id '{_REPLACED_CONCEPT_ID}' was replaced by "
-            f"'{_REPLACEMENT_CONCEPT_ID}' for field '{_FIELD_ID}'.",
+            (
+                f"Provided concept id '{_REPLACED_CONCEPT_ID}' was replaced by "
+                f"'{_REPLACEMENT_CONCEPT_ID}' for field '{_FIELD_ID}'."
+            ),
         ),
     ]
 
@@ -539,8 +561,10 @@ async def test_ambiguous_meaning_resolved_by_restriction(
     assert [(log.severity, log.message) for log in logs] == [
         (
             "WARNING",
-            f"Concept id '{_CHILD_CONCEPT_ID}' was resolved from the provided "
-            f"textual concept value '{_SHARED_PREFERRED_TERM}' for field '{_FIELD_ID}'.",
+            (
+                f"Concept id '{_CHILD_CONCEPT_ID}' was resolved from the provided "
+                f"textual concept value '{_SHARED_PREFERRED_TERM}' for field '{_FIELD_ID}'."
+            ),
         )
     ]
 
@@ -565,8 +589,10 @@ async def test_provided_concept_id_outside_restriction(
     assert [(log.severity, log.message) for log in logs] == [
         (
             "ERROR",
-            f"Concept id '{_ORPHAN_CONCEPT_ID}' is not among the ontology "
-            f"'{shared_term_and_parent_ontology_id}' concepts allowed for field '{_FIELD_ID}'.",
+            (
+                f"Concept id '{_ORPHAN_CONCEPT_ID}' is not among the ontology "
+                f"'{shared_term_and_parent_ontology_id}' concepts allowed for field '{_FIELD_ID}'."
+            ),
         )
     ]
     assert await read_terms(shared_term_and_parent_ontology_id) == []
@@ -626,3 +652,107 @@ async def test_concept_id_already_indexed_is_accepted(
         logs = await read_document_logs(cur, document_id)
     assert stored[_FIELD_ID] == concept_id
     assert logs == []
+
+
+_FREE_TEXT_FIELD_ID = f"{_FIELD_ID}{ONTOLOGY_OTHER_VALUE_FIELD_SUFFIX}"
+
+
+async def _load_document_with_free_text(
+    ontology_id: str, document_id: str, free_text: str
+) -> None:
+    """Load a document whose one ontologyOrValue field has free text and no code.
+
+    The document is built and stored using the real load, which resolves the
+    free text, writes any logs to document_log, stores the document in Postgres,
+    and caches the preferred terms of the concepts it resolved.
+    """
+    field = _ontology_field(ontology_id, "ontologyOrValue")
+    free_text_field = OpenSearchField(id=_FREE_TEXT_FIELD_ID, type="keyword")
+    document = ExtractedDocument(
+        id=document_id,
+        values=[OpenSearchFieldValue(field=free_text_field, value=free_text)],
+    )
+    await LoadService(create_term_caches({ontology_id}), [field]).store_documents(
+        iter([document])
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_concept_id_from_free_text(
+    single_concept_ontology_id, document_id
+):
+    """Free text that names one concept is indexed as that concept.
+
+    A search for the text resolves it to the concept, so the document is
+    indexed under the concept id, not as free text that no search would reach.
+    """
+    await _load_document_with_free_text(
+        single_concept_ontology_id, document_id, _PREFERRED_TERM.lower()
+    )
+
+    async with get_cursor() as cur:
+        document = await get_document(cur, document_id)
+        logs = await read_document_logs(cur, document_id)
+    assert document[_FIELD_ID] == _CONCEPT_ID
+    assert _FREE_TEXT_FIELD_ID not in document
+    assert [(log.severity, log.message) for log in logs] == [
+        (
+            "WARNING",
+            (
+                f"Concept id '{_CONCEPT_ID}' was resolved from the provided textual "
+                f"concept value '{_PREFERRED_TERM.lower()}' for field '{_FIELD_ID}'."
+            ),
+        )
+    ]
+    # read_terms reads the terms cache table. The load cached the concept's
+    # preferred term there for this field, which is how /values labels the
+    # concept.
+    assert {
+        (term.field_id, term.concept_id, term.preferred_term)
+        for term in await read_terms(single_concept_ontology_id)
+    } == {(_FIELD_ID, _CONCEPT_ID, _PREFERRED_TERM)}
+
+
+@pytest.mark.asyncio
+async def test_resolve_no_concept_id_from_free_text(
+    single_concept_ontology_id, document_id
+):
+    """Free text that names no concept is indexed as free text, with no log."""
+    await _load_document_with_free_text(
+        single_concept_ontology_id, document_id, "home-made fixative"
+    )
+
+    async with get_cursor() as cur:
+        document = await get_document(cur, document_id)
+        assert await read_document_logs(cur, document_id) == []
+    assert document[_FREE_TEXT_FIELD_ID] == "home-made fixative"
+    assert _FIELD_ID not in document
+
+
+@pytest.mark.asyncio
+async def test_resolve_multiple_concepts_id_from_free_text(
+    shared_term_and_parent_ontology_id, document_id
+):
+    """Free text that names several concepts is indexed as free text.
+
+    No single concept can be chosen, which is logged as for a meaning.
+    """
+    await _load_document_with_free_text(
+        shared_term_and_parent_ontology_id, document_id, _SHARED_PREFERRED_TERM
+    )
+
+    async with get_cursor() as cur:
+        document = await get_document(cur, document_id)
+        logs = await read_document_logs(cur, document_id)
+    assert document[_FREE_TEXT_FIELD_ID] == _SHARED_PREFERRED_TERM
+    assert _FIELD_ID not in document
+    assert [(log.severity, log.message) for log in logs] == [
+        (
+            "ERROR",
+            (
+                f"Textual concept value '{_SHARED_PREFERRED_TERM}' resolves to several "
+                f"concept ids for field '{_FIELD_ID}': "
+                f"{_CHILD_CONCEPT_ID}, {_ORPHAN_CONCEPT_ID}."
+            ),
+        )
+    ]

@@ -1,7 +1,7 @@
 """Signing of JWT tokens."""
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import jwt
@@ -35,7 +35,7 @@ def sign_service_token(
     :return: The signed token.
     """
 
-    issued_at = datetime.now(timezone.utc)
+    issued_at = datetime.now(UTC)
     claims = {
         "iss": issuer,
         "sub": issuer,

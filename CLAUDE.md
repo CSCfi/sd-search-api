@@ -41,15 +41,15 @@ search_api/
 │   ├── {admin,auth,beacon,jwk,opensearch}/   # generic routers and services
 │   └── bigpicture/     # everything Bigpicture-specific, nowhere else:
 │       ├── domain.py models.py ai.py opensearch.py local.py remote.py   # its two DocumentSources
-│       ├── extract/    # XML in, one document per image out: models.py refs.py values.py document.py
+│       ├── extract/    # XML in, one document per image out: models.py refs.py values.py version.py document.py
 │       ├── config/     # hand-edited fields/scopes YAML
 │       ├── index/      # GENERATED mapping (`index generate` writes it)
-│       └── schemas/    # XSDs
+│       └── schemas/    # XSDs, one directory per metadata standard version (2.0/, 3.0/)
 ├── services/
 │   ├── ontology/       # service.py registrations.py snomed.py send.py term_cache.py values.py
 │   │   └── cache/      # one whole small ontology in memory
 │   ├── fetch.py        # DocumentSource (ABC) + SdSubmitFetchClient
-│   └── auth.py session.py load.py sync.py poller.py value_counts.py validate.py
+│   └── auth.py access_token.py oidc_metadata.py load.py sync.py poller.py value_counts.py validate.py
 ├── database/           # every line of SQL, one module per table: repository.py models.py document.py
 │   │                   #   document_log.py terms_cache.py ontology_cache.py load.py
 │   └── schema/         # create.sql drop.sql
@@ -64,19 +64,29 @@ search_api/
 `main.py` picks a deployment by `DEPLOYMENT_TYPE`, looks it up in `api/deployments.py` `DOMAINS`, and builds
 `make_beacon_router(domain)` + `make_lifespan(domain)`; the admin router mounts only when `ADMIN_KEY` is set. A new
 deployment is a new `Domain` in `DOMAINS` (see `bigpicture/domain.py`). Besides the index name, beacon metadata,
-filtering terms/scopes and `replace_concepts`, it carries `local_source` / `remote_source`
-(`DocumentSource | None` — the `load` and `fetch` commands; `None` means that command has nothing to do), one
-`beacon_service_factory` for the **query-less** service behind `/status`, `/health`, `/values`, `/suggestions` and
+filtering terms/scopes and `replace_concepts`, it carries `local_source` / `remote_source` (`DocumentSource | None`
+— the `load` and `fetch` commands; `None` means that command has nothing to do), one `beacon_service_factory` for
+the **query-less** service behind `/status`, `/health`, `/values`, `/suggestions`, `/ai/filters` and
 `ValueCountsUpdater`, and `query_endpoints: Sequence[BeaconQueryEndpoint]`, one per entity endpoint (`/datasets`,
-`/images`) with its `path`, its own service factory, `result_sets_response_model` and — only under `FEATURE_AI` —
-its AI persona, mounted at `/ai<path>`; each endpoint needs its own service because each has a different result
-shape. **The model only chooses filters**: an `/ai` route runs them through the very query `/datasets` or `/images`
-does and returns its response beside the interpretation, so no record is ever written by the model. It takes
-the same `requestedGranularity` and `requestedScope`, but defaults to `record` where a Beacon query defaults to
-`count`. A scope shows the model only the fields indexed for it, since a filter on any other field would
-constrain nothing there, and a model that fails or never gives valid filters is a `503`. `make_lifespan` builds one term cache per ontology into `app.state.ontology_term_services`
-and one `app.state.beacon_service`; routes must read **that** instance, since value counts are cached in a dict on
-it and filled in the background, so a per-request one would start empty.
+`/images`) with its `path`, its own service factory and `result_sets_response_model`; each endpoint needs its own
+service because each has a different result shape. The `Domain`'s `ai_assistant_description` is the persona behind
+`POST /ai/filters` (only under `FEATURE_AI`). **The model only recommends filters**: the route returns the
+interpretation and the filters and runs no query, so the model never sees a record; the client shows the filters and
+the user runs them through `/datasets` or `/images`. **A query may edit the current filters** sent with it, and the
+response gives every filter that results: the model gives only the filters it adds or changes, and a field with no
+value to remove its filter, and the code keeps the rest, so it cannot drop or alter them; `answerable` is `false`, with the current
+filters unchanged, when the query cannot be expressed as filters. **A keyword or ontology value must be in the index**, so a
+client can select it among `/values`: the model finds values with a `get_values(field_id, text,
+include_descendants)` tool (`ai/services.py`), built on the very code behind `/suggestions`
+(`services/field_values.py`), and its answer is checked against `/values` and sent back to correct otherwise. An
+ontology value comes back as its concept id; a name the ontology knows the concept by, such as a synonym, is
+resolved as a query resolves it, and with `includeDescendantTerms` a broader concept is replaced by its listed
+descendants, since a client must be able to display every value. A `requestedScope` shows the model only the fields
+indexed for it, since a filter on any other field would constrain nothing there. A model that never gives a valid
+answer gets the current filters unchanged and a fixed explanation, as for a query no filter can express, so a `503` means that the
+model's server could not be reached or answered with an HTTP error, or that a store the model's tools read failed.
+`make_lifespan` builds one term cache per ontology into `app.state.ontology_term_services` and one `app.state.beacon_service`; routes must read **that** instance, since
+value counts are cached in a dict on it and filled in the background, so a per-request one would start empty.
 
 ### Load path
 
@@ -114,7 +124,12 @@ out on `logs` and becomes `document_log` rows, replaced on every reload.
 (id, title, description), `image` (ids, slide mappings), `policy` (scope), `sample` (biological beings, cases,
 specimens, blocks), `staining`, and `observation` (diagnoses and findings, the only optional one).
 `dataset_files(fs, root)` resolves the same six paths alone (plain or `.c4gh`), so `local.py` can date a dataset
-without reading it. `scope` is the part of the policy's `type_of_dataset` before the `/`. Every `CODE_ATTRIBUTE`
+without reading it. **The dataset's `METADATA_STANDARD` picks the XML schemas** every one of the six files is
+validated against (`extract/version.py`, one `schemas/<version>/` directory per supported version), so it is read
+before anything is validated and an unsupported version is a `UserException`. Only validation is version-aware:
+3.0 adds `BIGPICTURE_NODE` and `LANDING_PAGE_REF` to the dataset, drops the observation's `ANNOTATION_REF` and
+restricts an image to one `IMAGE_OF`, none of which is indexed, so one extraction path serves both versions.
+`scope` is the part of the policy's `type_of_dataset` before the `/`. Every `CODE_ATTRIBUTE`
 contributes the pair `(CODE, MEANING)`, the meaning being the fallback when the code is no concept id; a value
 whose scheme is not the field's ontology is dropped with an error, and an **`ontologyOrValue`** field takes its
 code in precedence over free text, so `<id>_other` is filled only when no code was read. Fields and filtering
@@ -128,7 +143,7 @@ them; an `ontology`/`ontologyOrValue` field may declare an `ontologyRestriction`
 |---|---|
 | `GET /info` `/filtering_terms` `/filtering_scopes` | metadata, filter definitions |
 | `POST /datasets` `/images` | Beacon V2 search: images aggregated into datasets / one per image |
-| `POST /ai/datasets` `/ai/images` | natural-language search (gated by `FEATURE_AI`) |
+| `POST /ai/filters` | filters recommended for a natural-language query (gated by `FEATURE_AI`) |
 | `GET /filtering_terms/{field_id}/values` `/suggestions` | values with counts; autocomplete |
 | `GET /status` | documents indexed and pending, total and per scope, last sync time |
 | `GET /health` | both stores answer; a `503` names the one that did not |
@@ -137,6 +152,40 @@ them; an `ontology`/`ontologyOrValue` field may declare an `ontologyRestriction`
 `values`/`suggestions` accept `scope=<id>`; omitting it does not filter, and a scope the field does not declare is
 a `400`. `AuthMiddleware` requires a session outside `PUBLIC_PATHS` — hence `/health` and `/info` anonymous,
 `/status` a `401`. `/admin` is gated by `ADMIN_KEY`; `POST /admin/caches/reload` pushes a write to a running server.
+
+### Auth (`api/auth/routes.py`, `services/{auth,access_token,oidc_metadata}.py`, `api/middlewares.py`)
+
+**The session is the LS AAI access token itself**, nothing minted: `/callback` (idpyoidc `RPHandler`, code + PKCE)
+puts it in the `access_token` cookie (`HttpOnly`, `SameSite=Strict`, `Path=/`, `Max-Age` = `expires_in`, 1 h), so
+the UI's nginx can forward it unchanged as a bearer token to Dataset-on-Demand. A login's state (PKCE verifier,
+nonce) lives in `RPHandler`'s memory from `/login` to its callback, which drops it **however it ends**.
+
+`AuthMiddleware` takes the token from that cookie (parsed leniently, as Starlette's `request.cookies` is:
+`SimpleCookie` stops at the first cookie it deems invalid, losing ours behind another's) or `Authorization: Bearer`
+and **validates it locally** against the issuer's JWKS, never by introspection: asymmetric `alg` only (refusing HS256
+and `none` before any lookup), `typ` `at+jwt` (RFC 9068 — what keeps out ID and refresh tokens signed with the very
+same key), a `kid`, `iss` equal to the **discovered** issuer (LS AAI's has a trailing slash), `aud` containing
+`OIDC_CLIENT_ID`, `exp` and `sub`. A cached key is checked on the event loop; only a fetch goes to a thread. An
+unknown `kid`, or a cached key set that cannot be used, refetches the keys **at most once a minute**, since anyone can
+name a key; within that minute it is a `503`, not a `401`, since it may be a key just rotated in. Keys or discovery
+unreachable or unusable (an HTML error page, JSON that is no key set) are a `503` as well, so a client does not loop
+through `/refresh` and `/login`. `/callback` and `/refresh` run **the middleware's own validator before setting the
+cookie**, so a provider issuing tokens this API rejects (audience, `typ`, issuer) is a logged `503` at login, not a
+login whose every call is a `401`.
+
+**The refresh token rides only to `/refresh`** (cookie `Path=/refresh`, `Max-Age` from its unverified `exp`, about a
+month): `POST /refresh` redeems it at the token endpoint directly with httpx, not through `RPHandler`, whose login
+state is in-process memory and gone after a restart or on another replica, and **resets both cookies, since LS AAI
+rotates the refresh token**. A spent or expired one is `invalid_grant` (LS AAI says `invalid_token`), answered `401`
+**leaving the cookies alone**: they are shared by every tab, and the tab that lost a refresh race would otherwise
+delete the ones the winner was just given. **Any other refusal from the token endpoint** — the client's credentials
+or permissions — **is logged and a `503`**, so a misconfiguration cannot pass for every session expiring.
+
+Refresh is client-driven: a `401`, one `POST /refresh` at a time across tabs, a retry, and a retry again before a
+refresh `401` counts as logged out. LS AAI issues no refresh token unless `offline_access` is requested, hence its
+place in the default `OIDC_SCOPE`. `tests/integration/mockauth.py` issues tokens shaped like LS AAI's: an `at+jwt`
+access token, and a JWT refresh token that is replaced on every use and refused once spent, without revoking the one
+that replaced it.
 
 ### Query path
 
@@ -172,7 +221,9 @@ hook. Unresolved values survive the prepared filter only for `ontologyOrValue`. 
 cascade** (`ontology/values.py`), so a value indexed and a value searched for reach the same concept: the source's
 code is kept when the ontology has it, and only otherwise is the **meaning** beside it resolved — one match a
 `WARNING`, none an `ERROR`, and several an `ERROR` too unless the field's `ontologyRestriction` picks out exactly
-one. A retired concept is then substituted, which buys reach rather than a name: retiring one strips its
+one. An `ontologyOrValue` field's **free text is resolved too**, as a meaning without a code: naming one allowed
+concept, it is indexed as that concept, since a search for the text would resolve to it; otherwise it stays in
+`<id>_other`. A retired concept is then substituted, which buys reach rather than a name: retiring one strips its
 relationships, so no subtree query reaches a document citing it.
 
 **A load enforces the `ontologyRestriction`** as well as resolving through it: a concept outside the field's part
@@ -201,7 +252,7 @@ default would match on one word, far too broad given that results are never rank
 Settings (`conf.py`) are mostly **required** — no hardcoded host/db/password. Defaults: `POSTGRES_PORT=5432`,
 `POSTGRES_POOL_{MIN_SIZE=2,MAX_SIZE=10,MAX_LIFETIME=3600,TIMEOUT=5}`, `OPENSEARCH_PORT=9200`, `DEPLOYMENT_ENV=dev`,
 `{TERM,ONTOLOGY,VALUE_COUNT}_CACHE_REFRESH=300`, `FEATURE_AI=false`, `ADMIN_KEY=None`, `OIDC_SECURE_COOKIE=true`,
-`JWT_ALGORITHM=HS256`. There is **one class per source**, since a `BaseSettings` validates every field it declares:
+`OIDC_SCOPE="openid profile email offline_access"`. There is **one class per source**, since a `BaseSettings` validates every field it declares:
 bundled, a `load <dir>` would demand submit API settings it never uses. **The server pools its Postgres connections
 and nothing else does** (`database/repository.py`): with no pool open, `get_connection()` connects directly.
 
@@ -209,6 +260,11 @@ and nothing else does** (`database/repository.py`): with no pool open, `get_conn
 
 `tests/` mirrors the package. `tests/unit/` is what `tox` runs and needs nothing external; `tests/integration/`
 needs Postgres and OpenSearch (`tests/integration/.env` is a working config set); `tests/performance/` is Locust.
+The Bigpicture XML fixtures sit under `tests/files/bigpicture/xml/<version>/<dataset>/`, one directory per metadata
+standard version beside the schemas, and `tests/utils/bigpicture.py` is the one place their paths and accessions are
+written down; `tests/integration/bigpicture.py` checks and deletes what loading them stores. **A read takes one
+dataset directory or a parent of several, never a parent of parents**, so a test loading every dataset loads each
+version directory in turn.
 Integration `conftest.py` gives `bp_opensearch_docs` (override with inline documents) and `bp_opensearch_index` (a
 `bp-image-index-test-<uuid>`, so runs are isolated). `@pytest.mark.requires_snowstorm` is skipped by
 `SKIP_SNOWSTORM_TESTS=true`, set in CI, which cannot reach the internal-only Snowstorm, while

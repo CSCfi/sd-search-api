@@ -12,10 +12,11 @@ services:
       dockerfile: ./dockerfiles/Dockerfile
       context: .
     image: cscfi/sd-search-api
-    command: [ "uv", "run", "sd_search_api" ]
+    command: [ "uv", "run", "--no-dev", "sd_search_api" ]
     environment:
       - DEPLOYMENT_TYPE=Bigpicture
       - DEPLOYMENT_ENV=${DEPLOYMENT_ENV}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - POSTGRES_HOST=bp-postgres
       - POSTGRES_DB=${BP_POSTGRES_DB}
       - POSTGRES_PORT=${BP_POSTGRES_PORT}
@@ -31,15 +32,19 @@ services:
       - C4GH_KEY_FILE=${C4GH_KEY_FILE:-}
       - C4GH_PASSPHRASE=${C4GH_PASSPHRASE:-}
       - ADMIN_KEY=${ADMIN_KEY}
+      - FEATURE_AI=${FEATURE_AI:-false}
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
       - LLM_BASE_URL=${LLM_BASE_URL}
       - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_MODEL=${LLM_MODEL}
+      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-1024}
+      - LLM_TIMEOUT=${LLM_TIMEOUT:-60}
       - BASE_URL=${BASE_URL}
       - OIDC_URL=${OIDC_URL:-http://mockauth:8080}
       - OIDC_CLIENT_ID=${OIDC_CLIENT_ID}
       - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET}
       - OIDC_REDIRECT_URL=${OIDC_REDIRECT_URL}
       - OIDC_SECURE_COOKIE=${OIDC_SECURE_COOKIE:-true}
-      - JWT_KEY=${JWT_KEY}
     depends_on:
       bp-postgres:
         condition: service_healthy

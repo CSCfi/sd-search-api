@@ -1,6 +1,5 @@
 import io
 import os
-from collections.abc import Iterator
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -46,18 +45,19 @@ _XML_METADATA_FILES = [
 ]
 
 
-async def _documents(root: str, c4gh_key_file: str | None = None) -> Iterator:
+async def _store_documents(
+    load_service: LoadService, root: str, c4gh_key_file: str | None = None
+) -> None:
+    """Store every document set read from the root, each with its own date."""
     if c4gh_key_file is not None:
         os.environ["C4GH_KEY_FILE"] = c4gh_key_file
     else:
         os.environ.pop("C4GH_KEY_FILE", None)
 
-    documents = [
-        document
-        async for source in BigpictureLocalSource().read(root)
-        for document in source.documents
-    ]
-    return iter(documents)
+    async for document_set in BigpictureLocalSource().read(root):
+        await load_service.store_documents(
+            iter(document_set.documents), document_set.modified_at, document_set.id
+        )
 
 
 def _mock_term_caches() -> dict[str, OntologyTermCache]:
@@ -141,7 +141,7 @@ async def test_extract_and_load_fields_plain():
         filtering_scopes=BP_DOMAIN.filtering_scopes,
     )
     for version_dir in VERSION_DIRS:
-        await load_service.store_documents(await _documents(str(version_dir)))
+        await _store_documents(load_service, str(version_dir))
 
     async with get_connection() as conn, conn.cursor() as cur:
         await assert_dataset_images_stored(cur)
@@ -171,11 +171,12 @@ async def test_extract_and_load_fields_c4gh(tmp_path):
                 outfile,
             )
 
-    await LoadService(
+    load_service = LoadService(
         term_caches=_mock_term_caches(),
         filtering_terms=BP_DOMAIN.filtering_terms,
         filtering_scopes=BP_DOMAIN.filtering_scopes,
-    ).store_documents(await _documents(str(tmp_path), c4gh_key_file=str(seckey_path)))
+    )
+    await _store_documents(load_service, str(tmp_path), c4gh_key_file=str(seckey_path))
 
     async with get_connection() as conn, conn.cursor() as cur:
         for image_id in CLINICAL_2_0_IMAGE_IDS:

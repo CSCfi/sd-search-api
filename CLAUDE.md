@@ -24,6 +24,8 @@ uv run python scripts/admin.py Bigpicture sync                  # only documents
 uv run python scripts/admin.py Bigpicture index generate        # writes the mapping file only
 uv run python scripts/admin.py Bigpicture index create|recreate # recreate marks docs pending: sync after
 uv run python scripts/admin.py Bigpicture clear|recreate        # docs+terms+logs+marker / both stores
+uv run python scripts/admin.py Bigpicture delete <document>     # one doc+logs, e.g. an image
+uv run python scripts/admin.py Bigpicture delete-set <set>      # one document set's docs+logs, e.g. withdrawn
 uv run python scripts/admin.py Bigpicture refresh snomed|send   # cached preferred terms
 uv run python scripts/admin.py snomed import --release-file <SnomedCT_*.zip>   # hours; shared Snowstorm
 ```
@@ -64,7 +66,7 @@ search_api/
 `main.py` picks a deployment by `DEPLOYMENT_TYPE`, looks it up in `api/deployments.py` `DOMAINS`, and builds
 `make_beacon_router(domain)` + `make_lifespan(domain)`; the admin router mounts only when `ADMIN_KEY` is set. A new
 deployment is a new `Domain` in `DOMAINS` (see `bigpicture/domain.py`). Besides the index name, beacon metadata,
-filtering terms/scopes and `replace_concepts`, it carries `local_source` / `remote_source` (`DocumentSource | None`
+filtering terms/scopes, `replace_concepts` and `document_set_id_field` (what makes documents a *document set*, loaded, replaced and deleted together: a Bigpicture dataset's images), it carries `local_source` / `remote_source` (`DocumentSource | None`
 — the `load` and `fetch` commands; `None` means that command has nothing to do), one `beacon_service_factory` for
 the **query-less** service behind `/status`, `/health`, `/values`, `/suggestions`, `/ai/filters` and
 `ValueCountsUpdater`, and `query_endpoints: Sequence[BeaconQueryEndpoint]`, one per entity endpoint (`/datasets`,
@@ -91,21 +93,34 @@ value counts are cached in a dict on it and filled in the background, so a per-r
 ### Load path
 
 **Postgres is primary.** `document` holds `id`, `payload` (JSONB, already in OpenSearch shape), `modified_at`,
-`synced_at`; `LoadService` stores extracted documents, skipping any not newer than what is stored. `synced_at IS
-NULL` is pending, and `SyncService` bulk-indexes those rows and stamps them, re-pushes included.
+`synced_at` and `set_id` (the document set's id, indexed, so a set's rows are found without reading every payload; the payload
+carries it too, in the field OpenSearch matches); `LoadService` stores extracted documents, skipping any not newer than what is stored. `synced_at IS
+NULL` is pending, and `SyncService` bulk-indexes those rows and stamps them, re-pushes included. It stamps only
+a row still at the version it read (`xmin`), so a row written during the sync stays pending for the next one.
 
-**`DocumentSource` (ABC, `services/fetch.py`) is the whole of what generic code knows about reading**:
-`read(root, marker)`, an async generator yielding `SourceDocuments` — the marker reached once those documents are
-stored, and the documents. `_read_documents` in `scripts/admin.py` is one loop over both sources; it reads no
-configuration, opens no client, and does not know a unit is a dataset or a submission.
+**`DocumentSource` (ABC, `services/fetch.py`) is the whole of what generic code knows about reading**: `read(root,
+marker)`, an async generator yielding one `DocumentSet` at a time — the set's id, the marker reached once its
+documents are stored, the set's `modified_at`, and the documents. **The date belongs to the set** (a Bigpicture
+dataset), not to its documents, which have none: it tells one version of a set from another, and `store_documents`
+writes it on every row of the set. `_read_documents` in `scripts/admin.py` is one loop over both sources; it
+reads no configuration and does not know a set came from a dataset directory or a submission.
+
+**A `DocumentSet` holds every document of the set**, so **a republished set replaces its documents**: after storing a
+set, a stored document of it (by `Domain.document_set_id_field`) that the new version lacks is deleted from Postgres,
+with its log rows (`LoadService.store_document_set`).
+Only one older than the set's `modified_at` goes, so reading an older version again deletes nothing. A sync never sees a
+deleted row, so **the sync deletes it from OpenSearch**: before indexing a set's pending documents, it deletes the
+set's indexed documents whose ids Postgres no longer has, and a failure leaves them pending, so the next sync retries. A source takes the set's id from its documents with `document_set_id`, which
+refuses documents of several sets, so the id and the value the deletes match always agree. A withdrawn set is removed
+by `delete-set <document_set>`, one document by `delete <document>`.
 
 - `BigpictureLocalSource` walks the tree, one unit per dataset directory, and **dates every dataset before parsing
   any**: that orders them oldest first, skips one outside the period without reading its XML, and keeps one dataset
-  in memory rather than the whole tree.
+  in memory rather than the whole tree. That date is the set's.
 - `BigpictureRemoteSource` yields one unit per published submission, and **the archive is read by the very code
   that reads a directory** (an fsspec `ZipFileSystem` handed to `extract_dataset_documents`), so the two cannot
-  drift. A zip entry's date is when the archive was built, so it stamps each document with the submission's
-  publication date instead, and asks from `_FETCH_OVERLAP` before its marker.
+  drift. A zip entry's date is when the archive was built, so the set is dated by the submission's publication
+  date instead, and it asks from `_FETCH_OVERLAP` before its marker.
 - **The resume point is an opaque marker, not a date** (`database/load.py`, one upserted row), passed straight back
   to the source. Nothing moves it backwards, and it is written after the whole run, so a failure repeats.
 - A fetch **signs a token per request** (`utils/token.py`, `private_key_jwt`, `exp` 60 s) and carries no `kid`, so

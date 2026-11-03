@@ -60,9 +60,11 @@ async def read_document_logs(
     ]
 
 
-async def delete_document_logs(cur: AsyncCursor, document_id: str) -> int:
+async def delete_document_logs(cur: AsyncCursor, document_ids: list[str]) -> int:
+    """Delete the log rows of the documents and return how many were deleted."""
     await cur.execute(
-        f"DELETE FROM {DOCUMENT_LOG_TABLE} WHERE document_id = %s", (document_id,)
+        f"DELETE FROM {DOCUMENT_LOG_TABLE} WHERE document_id = ANY(%s)",
+        (document_ids,),
     )
     return cur.rowcount
 

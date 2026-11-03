@@ -11,13 +11,15 @@ from typing import override
 from fsspec.implementations.zip import ZipFileSystem  # type: ignore
 
 from search_api.api.bigpicture.extract.document import extract_dataset_documents
+from search_api.api.bigpicture.models import BP_DATASET_ID_FIELD
 from search_api.api.opensearch.models import ExtractedDocument
 from search_api.conf import sd_submit_sync_config
 from search_api.exceptions import UserException
 from search_api.services.fetch import (
+    DocumentSet,
     DocumentSource,
     SdSubmitFetchClient,
-    SourceDocuments,
+    document_set_id,
 )
 from search_api.utils.token import sign_service_token
 
@@ -44,7 +46,8 @@ def _extract_archive(archive: bytes) -> Iterator[ExtractedDocument]:
             "The submission archive is not a readable zip archive."
         ) from ex
 
-    return extract_dataset_documents("/", fs)
+    # The SD Submit API assigns dataset and image accessions.
+    return extract_dataset_documents("/", fs, require_image_accessions=True)
 
 
 # Account for transactional loads started before and finished after previous fetch.
@@ -59,14 +62,14 @@ class BigpictureRemoteSource(DocumentSource):
         self,
         root: str | None = None,
         marker: str | None = None,
-    ) -> AsyncIterator[SourceDocuments]:
+    ) -> AsyncIterator[DocumentSet]:
         """
         Fetch the submissions published since the marker, oldest published first.
 
         :param root: Ignored parameter.
         :param marker: The publication date a previous fetch reached, in ISO 8601, or None
             for every published submission.
-        :return: The documents of each published submission.
+        :return: The dataset from each published submission.
         """
 
         published_since = (
@@ -94,12 +97,7 @@ class BigpictureRemoteSource(DocumentSource):
                 archive = await client.get_submission_objects(submission.submission_id)
 
                 try:
-                    documents = [
-                        document.model_copy(
-                            update={"modified_at": submission.published}
-                        )
-                        for document in _extract_archive(archive)
-                    ]
+                    documents = list(_extract_archive(archive))
                 except Exception:
                     logger.exception(
                         "Failed to extract documents from submission %s.",
@@ -113,7 +111,10 @@ class BigpictureRemoteSource(DocumentSource):
                     len(documents),
                 )
 
-                yield SourceDocuments(
+                # A submission is one dataset.
+                yield DocumentSet(
+                    id=document_set_id(documents, BP_DATASET_ID_FIELD),
                     marker=submission.published.isoformat(),
+                    modified_at=submission.published,
                     documents=documents,
                 )

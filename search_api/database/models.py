@@ -24,6 +24,17 @@ class StoredOntology(BaseModel):
     concepts: list[dict[str, Any]]
 
 
+class UnsyncedDocument(BaseModel):
+    """A document table row pending sync."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    payload: dict[str, Any]
+    # The row version when it was read for optimistic locking.
+    version: str
+
+
 class StoredDocumentLog(BaseModel):
     """A document_log table row."""
 

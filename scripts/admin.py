@@ -17,9 +17,11 @@ from search_api.api.domain import Domain
 from search_api.api.opensearch.client import create_search
 from search_api.api.opensearch.index import create_index
 from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorService
-from search_api.database.document import count_documents, reset_synced_at
+from search_api.database.document import (
+    count_documents,
+    reset_synced_at,
+)
 from search_api.database.document_log import (
-    delete_all_document_logs,
     log_document_log,
 )
 from search_api.database.load import (
@@ -122,20 +124,20 @@ async def _read_documents(
 
     count = 0
     read_marker = None
-    async for itr in source.read(root, marker):
-        count += len(itr.documents)
+    async for document_set in source.read(root, marker):
+        count += len(document_set.documents)
 
         if load_service is None:
-            for doc in itr.documents:
+            for doc in document_set.documents:
                 logger.info("Would load document %s.", doc.id)
                 for log in extraction_logs(doc):
                     log_document_log(log)
             continue
 
-        logger.info("Loading %d document(s).", len(itr.documents))
-        await load_service.store_documents(iter(itr.documents))
+        logger.info("Loading %d document(s).", len(document_set.documents))
+        await load_service.store_document_set(document_set)
         # Update incremental load marker.
-        read_marker = itr.marker
+        read_marker = document_set.marker
 
     logger.info(
         "%d document(s) %s.",
@@ -189,7 +191,7 @@ async def _reset(domain: Domain) -> None:
 
 async def _sync(domain: Domain) -> None:
     """Sync the documents pending sync to OpenSearch."""
-    sync_service = SyncService(domain.opensearch_index)
+    sync_service = SyncService(domain.opensearch_index, domain.document_set_id_field)
     try:
         async with get_cursor() as cur:
             await sync_service.sync_fields(cur)
@@ -217,8 +219,6 @@ async def _clear(domain: Domain, args: argparse.Namespace) -> None:
 
         async with get_cursor() as cur:
             await sync_service.delete_all_documents(cur)
-            log_count = await delete_all_document_logs(cur)
-            logger.info("Deleted %d document log row(s).", log_count)
 
         # The terms are cleared after the documents.
         term_count = await delete_all_terms()
@@ -229,6 +229,66 @@ async def _clear(domain: Domain, args: argparse.Namespace) -> None:
         logger.info("Deleted the incremental load marker.")
     finally:
         await sync_service.search.close()
+
+
+async def _delete(domain: Domain, args: argparse.Namespace) -> None:
+    """Delete a document immediately from the database and the OpenSearch index."""
+
+    if not _confirm(
+        f"Document '{args.document}' will be deleted from database and OpenSearch "
+        f"Index '{domain.opensearch_index}', together with its document logs.",
+        args.document,
+    ):
+        logger.info("Aborted, nothing was deleted.")
+        return
+
+    sync_service = SyncService(domain.opensearch_index)
+    try:
+        async with get_cursor() as cur:
+            await sync_service.delete_document(cur, args.document)
+    finally:
+        await sync_service.search.close()
+
+    _log_value_counts_stale()
+
+
+async def _delete_set(domain: Domain, args: argparse.Namespace) -> None:
+    """Delete a document set immediately from the database and the OpenSearch index."""
+
+    if domain.document_set_id_field is None:
+        raise SystemException(f"The {domain.name} deployment has no document sets.")
+
+    if not _confirm(
+        f"Every document of document set '{args.document_set}' will be deleted "
+        f"from database and OpenSearch Index '{domain.opensearch_index}', together "
+        f"with their document logs.",
+        args.document_set,
+    ):
+        logger.info("Aborted, nothing was deleted.")
+        return
+
+    sync_service = SyncService(domain.opensearch_index)
+    try:
+        async with get_cursor() as cur:
+            await sync_service.delete_document_set(
+                cur, domain.document_set_id_field, args.document_set
+            )
+    finally:
+        await sync_service.search.close()
+
+    _log_value_counts_stale()
+
+
+def _log_value_counts_stale() -> None:
+    """Tell the operator the server still counts the deleted documents."""
+
+    # Each server caches its value counts in memory. It refreshes them only when a
+    # sync to OpenSearch updates synced_at. A deletion does not update synced_at.
+    logger.info(
+        "The /values and /suggestions counts still include the deleted documents. "
+        "They are refreshed when a sync next indexes a document. To refresh them "
+        "now, call POST /admin/caches/reload on every server."
+    )
 
 
 async def _recreate(domain: Domain, args: argparse.Namespace) -> None:
@@ -482,6 +542,32 @@ if __name__ == "__main__":
             ),
         )
 
+        # delete
+        delete_parser = commands.add_parser(
+            "delete",
+            help=(
+                "Delete one document from the database and the OpenSearch index, "
+                "e.g. a Bigpicture image."
+            ),
+        )
+        delete_parser.add_argument(
+            "document",
+            help="The document's id, such as a Bigpicture image accession.",
+        )
+
+        # delete-set
+        delete_set_parser = commands.add_parser(
+            "delete-set",
+            help=(
+                "Delete one document set from the database and the OpenSearch "
+                "index, e.g. a Bigpicture dataset."
+            ),
+        )
+        delete_set_parser.add_argument(
+            "document_set",
+            help="The document set's id, such as a Bigpicture dataset accession.",
+        )
+
         # recreate
         commands.add_parser(
             "recreate",
@@ -543,5 +629,9 @@ if __name__ == "__main__":
         asyncio.run(_refresh_ontology(_ONTOLOGY_IDS[args.ontology]))
     elif args.command == "clear":
         asyncio.run(_clear(domain, args))
+    elif args.command == "delete":
+        asyncio.run(_delete(domain, args))
+    elif args.command == "delete-set":
+        asyncio.run(_delete_set(domain, args))
     elif args.command == "recreate":
         asyncio.run(_recreate(domain, args))

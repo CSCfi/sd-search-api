@@ -13,6 +13,7 @@ from search_api.exceptions import UserException
 from search_api.services.fetch import SdSubmitFetchClient, SdSubmitPublishedSubmission
 from tests.utils.bigpicture import (
     CLINICAL_2_0_DATASET_DIR,
+    CLINICAL_2_0_DATASET_ID,
     CLINICAL_3_0_DATASET_DIR,
 )
 from tests.utils.keys import base64_pem_private_key
@@ -43,10 +44,7 @@ def test_extract_archive(dataset_dir: Path) -> None:
     from_directory = list(extract_dataset_documents(str(dataset_dir)))
 
     assert from_archive
-    assert from_archive == [
-        document.model_copy(update={"modified_at": None}) for document in from_directory
-    ]
-    assert all(document.modified_at is not None for document in from_directory)
+    assert from_archive == from_directory
 
 
 def test_extract_archive_not_zip() -> None:
@@ -88,11 +86,12 @@ def mock_sd_submit_api(monkeypatch):
 async def test_read_source(
     mock_sd_submit_api,
 ) -> None:
-    source_docs = [source async for source in BigpictureRemoteSource().read()]
+    (document_set,) = [
+        document_set async for document_set in BigpictureRemoteSource().read()
+    ]
 
-    assert [source.marker for source in source_docs] == [PUBLISHED.isoformat()]
-
+    assert document_set.marker == PUBLISHED.isoformat()
+    assert document_set.id == CLINICAL_2_0_DATASET_ID
+    assert document_set.modified_at == PUBLISHED
     # The clinical dataset has two images (documents).
-    documents = source_docs[0].documents
-    assert len(documents) == 2
-    assert all(document.modified_at == PUBLISHED for document in documents)
+    assert len(document_set.documents) == 2

@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -167,7 +166,6 @@ class ExtractedDocument(BaseModel):
     scope: str | None = None
     values: list[OpenSearchFieldValue] = Field(default_factory=list)
     groups: list[OpenSearchGroup] = Field(default_factory=list)
-    modified_at: datetime | None = None
     # Document extraction logs, written to the database by the load.
     logs: list[ExtractLog] = Field(default_factory=list)
 

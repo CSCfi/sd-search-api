@@ -21,7 +21,9 @@ data:
   # Snowstorm SNOMED CT server
   SNOWSTORM_URL: "https://snowstorm.example.com"
 
-  # Set to "true" to enable POST /ai/*; also set LLM_* vars in the secret
+  # Set to "true" to enable POST /ai/*; also set LLM_* vars in the secret.
+  # Users' queries are sent to the LLM. For sensitive data, use a self-hosted
+  # LLM. Bigpicture requires one.
   FEATURE_AI: "false"
 
   # OIDC Relying Party login (LifeScience AAI)

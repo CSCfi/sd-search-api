@@ -11,9 +11,10 @@ from search_api.api.bigpicture.extract.document import (
     extract_dataset_documents,
     get_last_modification_time,
 )
+from search_api.api.bigpicture.models import BP_DATASET_ID_FIELD
 from search_api.conf import crypt4gh_config
 from search_api.exceptions import SystemException, UserException
-from search_api.services.fetch import DocumentSource, SourceDocuments
+from search_api.services.fetch import DocumentSet, DocumentSource, document_set_id
 from search_api.utils.crypt import load_c4gh_keys
 from search_api.utils.dir import list_directories
 
@@ -55,7 +56,7 @@ class BigpictureLocalSource(DocumentSource):
         self,
         root: str | None = None,
         marker: str | None = None,
-    ) -> AsyncIterator[SourceDocuments]:
+    ) -> AsyncIterator[DocumentSet]:
         """Reads the Bigpicture datasets from a directory, oldest modified first.
 
         :param root: The directory to read. Either one dataset directory or a parent of
@@ -63,7 +64,7 @@ class BigpictureLocalSource(DocumentSource):
         :param marker: The modification date a previous read reached, in ISO 8601, or None
             for every dataset under the root.
         :raises UserException: if no root was given.
-        :return: The documents of each dataset directory.
+        :return: The dataset from each dataset directory.
         """
 
         if root is None:
@@ -106,4 +107,9 @@ class BigpictureLocalSource(DocumentSource):
             logger.info(
                 "Read dataset %s with %d document(s).", directory, len(documents)
             )
-            yield SourceDocuments(marker=modified_at.isoformat(), documents=documents)
+            yield DocumentSet(
+                id=document_set_id(documents, BP_DATASET_ID_FIELD),
+                marker=modified_at.isoformat(),
+                modified_at=modified_at,
+                documents=documents,
+            )

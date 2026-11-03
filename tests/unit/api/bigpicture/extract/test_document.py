@@ -272,6 +272,18 @@ def test_extract_image_id_with_accession_and_alias(tmp_path):
     assert opensearch_doc["dataset_id"] == CLINICAL_2_0_DATASET_ID
 
 
+def test_extract_image_without_accession_when_accessions_are_required(tmp_path):
+    root = _copy_xml_dir(CLINICAL_2_0_DATASET_DIR, tmp_path)
+    _replace_in_xml(
+        root / "METADATA" / "image.xml",
+        f'<IMAGE alias="2" accession="{CLINICAL_2_0_IMAGE_2_ID}">',
+        '<IMAGE alias="2">',
+    )
+
+    with pytest.raises(SystemException, match="has no accession"):
+        list(extract_dataset_documents(str(root), require_image_accessions=True))
+
+
 def test_extract_dataset_fields_from_dataset_root(tmp_path):
     # A DATASET root rather than a DATASET_SET.
     root = _copy_xml_dir(CLINICAL_2_0_DATASET_DIR, tmp_path)

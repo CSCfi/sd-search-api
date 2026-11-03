@@ -1,5 +1,6 @@
 import os
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 
@@ -21,6 +22,9 @@ from search_api.services.sync import SyncService
 
 os.environ.setdefault("POSTGRES_DB", os.environ["BP_POSTGRES_DB"])
 os.environ.setdefault("POSTGRES_PORT", os.environ["BP_POSTGRES_PORT"])
+
+
+_MODIFIED_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 def get_code(code: str) -> BigpictureCodeAttributeValue:
@@ -83,7 +87,7 @@ async def test_load_and_sync_fields():
             values=values,
             groups=groups,
         )
-        await load_service.store_document(cur, doc)
+        await load_service.store_document(cur, doc, _MODIFIED_AT, None)
 
         payload = await get_document(cur, image_id)
         assert payload is not None

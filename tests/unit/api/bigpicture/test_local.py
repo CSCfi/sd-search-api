@@ -10,9 +10,11 @@ import pytest
 from search_api.api.bigpicture import local
 from search_api.api.bigpicture.local import BigpictureLocalSource
 from search_api.exceptions import UserException
-from search_api.services.fetch import SourceDocuments
+from search_api.services.fetch import DocumentSet
 from tests.utils.bigpicture import (
     CLINICAL_2_0_DATASET_DIR,
+    CLINICAL_2_0_DATASET_ID,
+    NON_CLINICAL_2_0_DATASET_ID,
     VERSION_DIRS,
     XML_DIR_2_0,
 )
@@ -26,54 +28,67 @@ def unencrypted(monkeypatch):
     monkeypatch.delenv("C4GH_PASSPHRASE", raising=False)
 
 
-async def _read(root: Path, **kwargs) -> list[SourceDocuments]:
-    return [docs async for docs in BigpictureLocalSource().read(str(root), **kwargs)]
+async def _read(root: Path, **kwargs) -> list[DocumentSet]:
+    return [
+        document_set
+        async for document_set in BigpictureLocalSource().read(str(root), **kwargs)
+    ]
 
 
 @pytest.mark.asyncio
 async def test_read_bigpicture_dataset_directory(unencrypted) -> None:
-    source_docs = await _read(CLINICAL_2_0_DATASET_DIR)
-    assert len(source_docs) == 1
-    assert source_docs[0].documents
-    assert datetime.fromisoformat(source_docs[0].marker)
+    (document_set,) = await _read(CLINICAL_2_0_DATASET_DIR)
+    assert document_set.documents
+    assert document_set.id == CLINICAL_2_0_DATASET_ID
+    assert document_set.modified_at == datetime.fromisoformat(document_set.marker)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("version_dir", VERSION_DIRS, ids=lambda path: path.name)
 async def test_read_bigpicture_dataset_directories(unencrypted, version_dir) -> None:
-    source_docs = await _read(version_dir)
-    assert len(source_docs) == len(
+    document_sets = await _read(version_dir)
+    assert len(document_sets) == len(
         [path for path in version_dir.iterdir() if (path / "METADATA").is_dir()]
     )
-    assert all(unit.documents for unit in source_docs)
+    assert all(document_set.documents for document_set in document_sets)
+
+
+@pytest.mark.asyncio
+async def test_read_bigpicture_one_set_per_dataset(unencrypted) -> None:
+    document_sets = await _read(XML_DIR_2_0)
+    assert {document_set.id for document_set in document_sets} == {
+        CLINICAL_2_0_DATASET_ID,
+        NON_CLINICAL_2_0_DATASET_ID,
+    }
 
 
 @pytest.mark.asyncio
 async def test_read_bigpicture_oldest_first(unencrypted) -> None:
-    source_docs = await _read(XML_DIR_2_0)
-    markers = [unit.marker for unit in source_docs]
+    document_sets = await _read(XML_DIR_2_0)
+    markers = [document_set.marker for document_set in document_sets]
     assert markers == sorted(markers)
 
 
 @pytest.mark.asyncio
 async def test_read_bigpicture_skips_not_newer(unencrypted) -> None:
-    source_docs = await _read(CLINICAL_2_0_DATASET_DIR)
-    assert len(source_docs) == 1
-    marker = source_docs[0].marker
+    document_sets = await _read(CLINICAL_2_0_DATASET_DIR)
+    assert len(document_sets) == 1
+    marker = document_sets[0].marker
 
     # Marker causes datasets to be skipped on subsequent read.
     assert await _read(CLINICAL_2_0_DATASET_DIR, marker=marker) == []
 
     earlier = datetime.fromisoformat(marker) - timedelta(seconds=1)
     assert (
-        await _read(CLINICAL_2_0_DATASET_DIR, marker=earlier.isoformat()) == source_docs
+        await _read(CLINICAL_2_0_DATASET_DIR, marker=earlier.isoformat())
+        == document_sets
     )
 
 
 @pytest.mark.asyncio
 async def test_read_bigpicture_missing_directory(unencrypted) -> None:
     with pytest.raises(UserException, match="No directory to read"):
-        _ = [docs async for docs in BigpictureLocalSource().read()]
+        _ = [document_set async for document_set in BigpictureLocalSource().read()]
 
 
 @pytest.mark.asyncio

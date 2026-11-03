@@ -7,11 +7,17 @@ from itertools import count
 import httpx
 import pytest
 
+from search_api.api.opensearch.models import (
+    ExtractedDocument,
+    OpenSearchField,
+    OpenSearchFieldValue,
+)
 from search_api.exceptions import SystemException, UserException
 from search_api.services.fetch import (
     _SD_SUBMIT_SYNC_PATH,
     SdSubmitFetchClient,
     SdSubmitPublishedSubmission,
+    document_set_id,
 )
 
 SD_SUBMIT_API_URL = "https://submitter.example/api"
@@ -209,3 +215,54 @@ async def test_sd_submit_client_is_closed() -> None:
 
     with pytest.raises(SystemException, match="outside its context manager"):
         await client.get_published_submissions()
+
+
+# document_set_id
+#
+
+_SET_FIELD = OpenSearchField(id="set_id", type="keyword")
+
+
+def _extracted_document(doc_id: str, set_id: str) -> ExtractedDocument:
+    """A document of the given document set."""
+    return ExtractedDocument(
+        id=doc_id, values=[OpenSearchFieldValue(field=_SET_FIELD, value=set_id)]
+    )
+
+
+def test_document_set_id_shared_set_id():
+    docs = [_extracted_document("id_1", "set_1"), _extracted_document("id_2", "set_1")]
+    assert document_set_id(docs, "set_id") == "set_1"
+
+
+def test_document_set_id_without_documents():
+    with pytest.raises(SystemException, match="^A document set has no documents.$"):
+        document_set_id([], "set_id")
+
+
+def test_document_set_id_rejects_several_set_ids():
+    docs = [_extracted_document("id_1", "set_1"), _extracted_document("id_2", "set_2")]
+    with pytest.raises(
+        SystemException,
+        match="Documents 'id_1' and 'id_2' belong to different document sets",
+    ):
+        document_set_id(docs, "set_id")
+
+
+def test_document_set_id_rejects_document_without_set():
+    other_field = OpenSearchField(id="other", type="keyword")
+    without_set = ExtractedDocument(
+        id="id_2", values=[OpenSearchFieldValue(field=other_field, value="set_1")]
+    )
+    docs = [_extracted_document("id_1", "set_1"), without_set]
+    with pytest.raises(SystemException, match="Document 'id_2' has no document set id"):
+        document_set_id(docs, "set_id")
+
+
+def test_document_set_id_rejects_value_not_a_string():
+    integer_field = OpenSearchField(id="set_id", type="integer")
+    doc = ExtractedDocument(
+        id="id_1", values=[OpenSearchFieldValue(field=integer_field, value=1)]
+    )
+    with pytest.raises(SystemException, match="not a string: 'set_id' is int"):
+        document_set_id([doc], "set_id")

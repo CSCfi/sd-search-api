@@ -114,11 +114,26 @@ async def get_connection() -> AsyncGenerator[AsyncConnection]:
 @asynccontextmanager
 async def get_cursor() -> AsyncGenerator[AsyncCursor]:
     """
-    Get a new database cursor.
+    Get a new database cursor that auto-commits.
 
-    :return: a new database cursor.
+    :return: a new database cursor that auto-commits.
     """
     async with get_connection() as con, con.cursor(row_factory=tuple_row) as cur:
+        yield cur
+
+
+@asynccontextmanager
+async def get_transaction_cursor() -> AsyncGenerator[AsyncCursor]:
+    """
+    Get a new database cursor in a transaction.
+
+    :return: a new database cursor in a transaction.
+    """
+    async with (
+        get_connection() as con,
+        con.transaction(),
+        con.cursor(row_factory=tuple_row) as cur,
+    ):
         yield cur
 
 

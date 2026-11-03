@@ -4,6 +4,7 @@ import io
 import json
 import os
 import time
+from types import SimpleNamespace
 from typing import Any
 from urllib.error import URLError
 
@@ -85,11 +86,11 @@ def jwks(monkeypatch):
     """Stub the JWKS endpoint, below PyJWKClient's own caching.
 
     Each fetch answers with the next entry of `responses`, the last one repeating; an
-    exception entry is raised, as `urlopen` would, and a bytes entry is the raw body.
+    exception entry is raised, as the opener would, and a bytes entry is the raw body.
     """
     state: dict[str, Any] = {"responses": [{"keys": [_jwk(KEY, "rsa1")]}], "fetches": 0}
 
-    def urlopen(request, timeout=None, context=None):
+    def open(request, timeout=None):
         state["fetches"] += 1
         responses = state["responses"]
         response = responses[0] if len(responses) == 1 else responses.pop(0)
@@ -99,7 +100,11 @@ def jwks(monkeypatch):
             return io.BytesIO(response)
         return io.BytesIO(json.dumps(response).encode())
 
-    monkeypatch.setattr(jwks_client.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(
+        jwks_client.urllib.request,
+        "build_opener",
+        lambda *handlers: SimpleNamespace(open=open),
+    )
     return state
 
 
@@ -174,11 +179,11 @@ async def test_cached_key_set_is_parsed_once(jwks, monkeypatch):
     monkeypatch.setattr(access_token_module.PyJWKSet, "from_dict", from_dict)
     validator = _validator()
     await validator.validate(_token())
-    parses["count"] = 0  # the first lookup's own parse, by PyJWKClient
+    parses["count"] = 0  # the first lookup's own parses, by PyJWKClient
 
     for _ in range(5):
         await validator.validate(_token())
-    assert parses["count"] == 1
+    assert parses["count"] == 0
 
 
 @pytest.mark.asyncio

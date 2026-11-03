@@ -12,7 +12,7 @@ from pydantic_ai.exceptions import UnexpectedModelBehavior
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
-    RetryPromptPart,
+    RetryFeedbackPart,
     TextPart,
     ThinkingPart,
     ToolCallPart,
@@ -61,11 +61,17 @@ def _log_conversation(query: str, messages: list[ModelMessage]) -> None:
             if isinstance(part, ToolCallPart):
                 line = f"model called {part.tool_name}({part.args_as_json_str()})"
             elif isinstance(part, ToolReturnPart):
-                line = f"{part.tool_name} returned: {part.model_response_str()}"
-            elif isinstance(part, RetryPromptPart):
-                # The tool whose call was wrong. A plain text answer has none.
-                tool = f" for {part.tool_name}" if part.tool_name else ""
-                line = f"sent back to the model{tool}: {part.model_response()}"
+                # A call that was wrong is answered with the error to correct.
+                if part.outcome == "retried":
+                    line = (
+                        f"sent back to the model for {part.tool_name}: "
+                        f"{part.model_response_str()}"
+                    )
+                else:
+                    line = f"{part.tool_name} returned: {part.model_response_str()}"
+            elif isinstance(part, RetryFeedbackPart):
+                # A plain text answer called no tool.
+                line = f"sent back to the model: {part.model_response()}"
             elif isinstance(part, ThinkingPart):
                 line = f"model thought: {part.content}"
             elif isinstance(part, TextPart):

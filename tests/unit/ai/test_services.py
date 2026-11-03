@@ -23,7 +23,6 @@ from pydantic_ai.exceptions import (
 from pydantic_ai.messages import (
     ModelMessage,
     ModelResponse,
-    RetryPromptPart,
     TextPart,
     ToolCallPart,
     ToolReturnPart,
@@ -300,13 +299,15 @@ class _MockLLM:
         ]
         self.instructions = messages[0].instructions
 
-        # The results of the tools called so far.
-        tool_returns = [
-            part.content
+        # The results of the tools called so far, and the rejected answers. A
+        # rejected answer is the answer's own tool call, returned as retried.
+        returns = [
+            part
             for message in messages
             for part in message.parts
             if isinstance(part, ToolReturnPart)
         ]
+        tool_returns = [part.content for part in returns if part.outcome != "retried"]
 
         # First call: no tool has run yet, so ask which fields there are.
         if not tool_returns:
@@ -324,11 +325,7 @@ class _MockLLM:
             [self.found] = found
 
         # Then give the final answer, the next one after each rejected answer.
-        rejected = sum(
-            isinstance(part, RetryPromptPart)
-            for message in messages
-            for part in message.parts
-        )
+        rejected = sum(part.outcome == "retried" for part in returns)
         answer = self.answers[min(rejected, len(self.answers) - 1)]
         if isinstance(answer, list):
             answer = {"filters": answer}
@@ -1095,7 +1092,11 @@ async def test_interpret_logs_conversation(ai_service, beacon_service, caplog):
             "- model said: Interpretation: none. Filters: []",
             # A plain text answer called no tool, so the correction names none.
             # The correction is over several lines, indented to stay in its entry.
-            "- sent back to the model: 1 validation error:\n  ```json\n  [",
+            (
+                "- sent back to the model: Your previous response failed the "
+                "application's validation (this is automated feedback, not a "
+                "message from the user):\n  <validation_errors>\n  ["
+            ),
         ),
         (
             MALFORMED_FILTERS_ARGUMENTS,

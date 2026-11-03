@@ -246,6 +246,8 @@ def extract_dataset_documents(
     root: str,
     fs: fsspec.AbstractFileSystem | None = None,
     keys: list | None = None,
+    *,
+    require_image_accessions: bool = False,
 ) -> Iterator[ExtractedDocument]:
     """
     Extract search fields from a single Bigpicture XML dataset directory.
@@ -254,10 +256,12 @@ def extract_dataset_documents(
     :param fs: Optional fsspec filesystem. If None, a local filesystem is used.
     :param keys: Crypt4GH keys for decrypting ``.c4gh`` files, as returned by
         ``load_c4gh_keys``. If None, only plain files are accepted.
+    :param require_image_accessions: Reject the dataset if an image has no
+        accession. Otherwise, the image alias is used.
     :raises ValueError: if a value read from the XML fails a model's validation.
     """
     try:
-        yield from _extract_dataset_documents(root, fs, keys)
+        yield from _extract_dataset_documents(root, fs, keys, require_image_accessions)
     except ValidationError as ex:
         # A safety net for any Pydantic model built from source documents. Pydantic quotes
         # the input that failed and we keep this out by constructing the error message
@@ -273,6 +277,7 @@ def _extract_dataset_documents(
     root: str,
     fs: fsspec.AbstractFileSystem | None,
     keys: list | None,
+    require_image_accessions: bool,
 ) -> Iterator[ExtractedDocument]:
     """Extract search fields from a single Bigpicture XML dataset directory."""
     if fs is None:
@@ -280,7 +285,6 @@ def _extract_dataset_documents(
         fs = fsspec.filesystem("file")
 
     files = dataset_files(fs, root)
-    modified_at = get_last_modification_time(fs, files.paths)
 
     # Map other ids to image ids.
 
@@ -346,6 +350,8 @@ def _extract_dataset_documents(
     for xml in image_xml.xpath("/IMAGE | /IMAGE_SET/IMAGE"):
         image_ids = object_ids(xml)
         # An image loaded from a directory may have no accession.
+        if image_ids.accession is None and require_image_accessions:
+            raise SystemException(f"Image in {files.image} has no accession.")
         if image_ids.accession is not None and not _IMAGE_ACCESSION.fullmatch(
             image_ids.accession
         ):
@@ -447,7 +453,6 @@ def _extract_dataset_documents(
             dataset_short_name=dataset_short_name if is_clinical else None,
             dataset_title=dataset_title,
             dataset_description=dataset_description,
-            dataset_modified_at=modified_at,
         )
 
     # Add specimen fields. A specimen is extracted from exactly one
@@ -534,7 +539,6 @@ def _extract_dataset_documents(
         values, groups = to_opensearch_values(bp_fields)
         yield ExtractedDocument(
             id=map_image_id_to_document_id[image_id],
-            modified_at=bp_fields.dataset_modified_at,
             values=values,
             groups=groups,
             scope=bp_fields.scope,

@@ -115,7 +115,8 @@ class FeatureConfiguration(BaseSettings):
 
     FEATURE_AI: bool = Field(
         default=False,
-        description="Enable the POST /ai/* endpoints. Disabled by default.",
+        description="Enable the POST /ai/* endpoints. Disabled by default. They send "
+        "users' queries to the LLM. For sensitive data, use a self-hosted LLM.",
     )
 
 

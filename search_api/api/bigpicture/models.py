@@ -140,6 +140,8 @@ def _document_fields() -> dict[str, OpenSearchField]:
 
 BP_DOCUMENT_FIELDS: dict[str, OpenSearchField] = _document_fields()
 
+BP_DATASET_ID_FIELD = "dataset_id"
+
 BP_META_RESPONSE = BeaconInfoMeta(
     beaconId=BP_BEACON_ID,
     returnedSchemas=[BeaconSchema(entityType=schema) for schema in BP_SCHEMAS],

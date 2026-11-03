@@ -23,11 +23,13 @@ CREATE TABLE ontology_cache (
 -- Documents to be synced to OpenSearch.
 CREATE TABLE document (
     id          TEXT        NOT NULL PRIMARY KEY,
+    set_id      TEXT,
     payload     JSONB       NOT NULL,
-    modified_at TIMESTAMPTZ,
+    modified_at TIMESTAMPTZ NOT NULL,
     synced_at   TIMESTAMPTZ
 );
 
+CREATE INDEX idx_document_set_id ON document (set_id);
 CREATE INDEX idx_document_synced_at ON document (synced_at);
 
 -- Problems found while loading a document.

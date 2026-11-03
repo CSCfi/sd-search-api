@@ -333,11 +333,16 @@ uv run python scripts/admin.py --env-file <path> ...
 ```bash
 uv run python scripts/admin.py Bigpicture load /path/to/dataset/
 ```
+The directory is either one dataset directory or a parent of several; which one is inferred. Only the datasets
+changed since the previous `load` or `fetch` are loaded: the two commands share one resume point.
+
 Options:
-- `--multi-dir` — the directory holds several dataset subdirectories instead of one dataset.
-- `--dry-run` — parse and validate the sources, writing nothing.
+- `--full` — forget the resume point and load every dataset.
+- `--dry-run` — read and validate the datasets, reporting what would be loaded, writing nothing.
 - `--sync` — sync to OpenSearch after loading.
-- `--c4gh-key-file FILE`, `--c4gh-passphrase PASSPHRASE` — decrypt `.c4gh` XML files while reading them.
+
+`.c4gh` XML files are decrypted with the Crypt4GH key set by `C4GH_KEY_FILE`, and `C4GH_PASSPHRASE` if the key is
+protected.
 
 #### Fetch from the SD Submit API
 
@@ -347,6 +352,9 @@ uv run python scripts/admin.py Bigpicture fetch --sync
 
 Loads published submissions from metadata-submitter instead of a directory, with the same options as `load`.
 It requires sd-search-api to be registered as a sync client: see [docs/sync.md](docs/sync.md).
+
+Either command replaces a republished dataset: images missing from the newer version are deleted from the database,
+and the next sync deletes them from the OpenSearch index. An older or the same version read again deletes nothing.
 
 #### Sync documents to OpenSearch
 
@@ -366,6 +374,24 @@ uv run python scripts/admin.py Bigpicture clear
 ```
 
 The deployment name has to be typed to confirm. Refused when `DEPLOYMENT_ENV=prod`.
+
+#### Delete a dataset or an image
+
+Delete one dataset's images from the database and the OpenSearch index, with their document logs. Use it for a
+withdrawn dataset.
+
+```bash
+uv run python scripts/admin.py Bigpicture delete-set <dataset accession>
+```
+
+Delete one image, leaving the rest of its dataset:
+
+```bash
+uv run python scripts/admin.py Bigpicture delete <image accession>
+```
+
+The server's value counts still include the deleted documents until the next sync, or until
+`POST /admin/caches/reload`.
 
 #### Recreate the database schema and the OpenSearch index
 
@@ -449,6 +475,9 @@ The AI endpoint `POST /ai/filters` is configured with these environment variable
 | `LLM_TIMEOUT`    | `60`      | Seconds the model may take to answer one query. After that the endpoint answers `503`. |
 
 Providers other than `openai`, such as `anthropic`, read their credentials from their own environment variables.
+
+The endpoint sends the model the user's query and the current filters. For sensitive data, the model
+should still be self-hosted rather than a commercial provider's. Bigpicture requires a self-hosted model.
 
 ## Performance tests
 

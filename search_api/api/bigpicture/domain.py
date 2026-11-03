@@ -11,6 +11,7 @@ from search_api.api.bigpicture.local import BigpictureLocalSource
 from search_api.api.bigpicture.models import (
     BP_BEACON_ID,
     BP_BEACON_NAME,
+    BP_DATASET_ID_FIELD,
     BP_DOMAIN_NAME,
     BP_FILTERING_SCOPES,
     BP_FILTERING_TERM_BY_ID,
@@ -90,4 +91,5 @@ BP_DOMAIN = Domain(
     local_source=BP_LOCAL_SOURCE,
     remote_source=BP_REMOTE_SOURCE,
     public_jwks=bp_public_jwks,
+    document_set_id_field=BP_DATASET_ID_FIELD,
 )

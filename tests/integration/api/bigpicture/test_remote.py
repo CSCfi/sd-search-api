@@ -134,10 +134,11 @@ async def test_token_rejected(overrides):
 
 @pytest.mark.asyncio
 async def test_read_source(published_submissions):
-    source_docs = [source async for source in BigpictureRemoteSource().read()]
+    document_sets = [
+        document_set async for document_set in BigpictureRemoteSource().read()
+    ]
 
-    assert source_docs
-    assert all(unit.documents for unit in source_docs)
-    assert [unit.marker for unit in source_docs] == sorted(
-        unit.marker for unit in source_docs
-    )
+    assert document_sets
+    assert all(document_set.documents for document_set in document_sets)
+    markers = [document_set.marker for document_set in document_sets]
+    assert markers == sorted(markers)

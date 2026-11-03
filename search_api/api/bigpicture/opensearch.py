@@ -2,6 +2,7 @@ from typing import Any, ClassVar, override
 
 from search_api.api.beacon.models import BeaconResultSet, BeaconResultSets
 from search_api.api.bigpicture.models import (
+    BP_DATASET_ID_FIELD,
     BP_DOCUMENT_FIELDS,
     BigpictureBeaconDatasetResult,
     BigpictureBeaconImageResult,
@@ -19,12 +20,11 @@ from search_api.exceptions import SystemException
 # How many results one round trip fetches.
 _PAGE_SIZE = 1000
 
-_DATASET_ID_FIELD = "dataset_id"
 _IMAGE_ID_FIELD = "image_id"
 _DATASET_OTHER_FIELDS = ("dataset_title", "dataset_description", "dataset_image_cnt")
 
 # Validate field constants against fields.yaml.
-for _field_id in (_DATASET_ID_FIELD, _IMAGE_ID_FIELD, *_DATASET_OTHER_FIELDS):
+for _field_id in (BP_DATASET_ID_FIELD, _IMAGE_ID_FIELD, *_DATASET_OTHER_FIELDS):
     if _field_id not in BP_DOCUMENT_FIELDS:
         raise SystemException(f"'{_field_id}' is not a declared field in fields.yaml.")
 
@@ -35,11 +35,11 @@ def _group_by(field_id: str) -> dict[str, Any]:
 
 
 # Groups by dataset_id alone, so one bucket is one dataset.
-_DATASET_COUNT_SOURCES = [_group_by(_DATASET_ID_FIELD)]
+_DATASET_COUNT_SOURCES = [_group_by(BP_DATASET_ID_FIELD)]
 
 # Groups by dataset_id and image_id together, so one bucket is one image
 # within a dataset. This is needed to report which images matched.
-_DATASET_RECORD_SOURCES = [_group_by(_DATASET_ID_FIELD), _group_by(_IMAGE_ID_FIELD)]
+_DATASET_RECORD_SOURCES = [_group_by(BP_DATASET_ID_FIELD), _group_by(_IMAGE_ID_FIELD)]
 
 
 class BigpictureDatasetBeaconService(
@@ -74,7 +74,7 @@ class BigpictureDatasetBeaconService(
     async def _get_count(self, query_clause: dict[str, Any]) -> int:
         # Datasets can be counted by grouping by dataset_id without sub aggregations.
         dataset_ids = {
-            bucket["key"][_DATASET_ID_FIELD]
+            bucket["key"][BP_DATASET_ID_FIELD]
             async for bucket in iter_paged_buckets(
                 self.client,
                 self.index_name,
@@ -101,7 +101,7 @@ class BigpictureDatasetBeaconService(
             # only has dataset_id and image_id, not these fields.
             sub_aggs=BigpictureDatasetBeaconService._SUB_AGGS,
         ):
-            dataset_id = bucket["key"][_DATASET_ID_FIELD]
+            dataset_id = bucket["key"][BP_DATASET_ID_FIELD]
             if dataset_id not in datasets:
                 datasets[dataset_id] = BigpictureDatasetBeaconService._build_dataset(
                     dataset_id, bucket

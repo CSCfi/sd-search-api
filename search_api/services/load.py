@@ -2,6 +2,7 @@
 
 import logging
 from collections.abc import Iterator, Sequence
+from datetime import datetime
 
 from psycopg import AsyncCursor
 
@@ -14,11 +15,17 @@ from search_api.api.opensearch.models import (
     OpenSearchFieldValue,
 )
 from search_api.api.scopes import validate_document_scope
-from search_api.database.document import get_modified_at, upsert_document
+from search_api.database.document import (
+    delete_dropped_documents,
+    get_modified_at,
+    reset_synced_at_by_set,
+    upsert_document,
+)
 from search_api.database.document_log import delete_document_logs, write_document_log
 from search_api.database.models import StoredDocumentLog
-from search_api.database.repository import get_cursor
+from search_api.database.repository import get_cursor, get_transaction_cursor
 from search_api.exceptions import SystemException, UserException
+from search_api.services.fetch import DocumentSet
 from search_api.services.ontology.term_cache import OntologyTermCache
 from search_api.services.ontology.values import (
     cache_concept_terms,
@@ -118,13 +125,26 @@ class LoadService:
         except UserException as e:
             raise UserException(f"Document '{doc.id}': {e}") from e
 
-    async def store_document(self, cur: AsyncCursor, doc: ExtractedDocument) -> None:
+    async def store_document(
+        self,
+        cur: AsyncCursor,
+        doc: ExtractedDocument,
+        modified_at: datetime,
+        document_set_id: str | None,
+    ) -> None:
         """Store one extracted document to the database.
 
+        :param cur: The database cursor.
+        :param doc: The extracted document.
+        :param modified_at: When the document's document set was modified.
+        :param document_set_id: The document's document set, or None for a deployment
+            without document sets.
         :raises UserException: if the document does not match the deployment.
         """
         self.validate_document(doc)
-        await upsert_document(cur, doc.id, build_document(doc), doc.modified_at)
+        await upsert_document(
+            cur, doc.id, build_document(doc), modified_at, document_set_id
+        )
 
     async def _initialise(self) -> None:
         """Initialise in-memory caches and ontologies before documents are loaded."""
@@ -143,15 +163,23 @@ class LoadService:
 
         self._initialised = True
 
-    async def store_documents(self, docs_iter: Iterator[ExtractedDocument]) -> None:
+    async def store_documents(
+        self,
+        docs_iter: Iterator[ExtractedDocument],
+        modified_at: datetime,
+        document_set_id: str | None,
+    ) -> None:
         """
         Store extracted documents to the database.
 
-        Documents that are not newer than what is already stored are skipped.
-        Preferred terms for ontology concepts are stored in the term cache for
-        the concept's ontology.
+        The documents are of one document set, and are stored with its modification
+        date. A document whose stored date is not older is skipped. Preferred terms
+        for ontology concepts are stored in the term cache for the concept's ontology.
 
         :param docs_iter: Iterator of extracted documents.
+        :param modified_at: When the document set was modified.
+        :param document_set_id: The document set's id, or None for a deployment
+            without document sets.
         """
         await self._initialise()
 
@@ -160,12 +188,8 @@ class LoadService:
 
         async with get_cursor() as cur:
             for doc in docs_iter:
-                existing = await get_modified_at(cur, doc.id)
-                if (
-                    existing is not None
-                    and doc.modified_at is not None
-                    and existing >= doc.modified_at
-                ):
+                stored_modified_at = await get_modified_at(cur, doc.id)
+                if stored_modified_at is not None and stored_modified_at >= modified_at:
                     logger.debug(
                         "Skipping document %s — not newer than stored.", doc.id
                     )
@@ -173,7 +197,7 @@ class LoadService:
                     continue
 
                 # A document loaded again replaces its log rows.
-                await delete_document_logs(cur, doc.id)
+                await delete_document_logs(cur, [doc.id])
 
                 # Write log messages from document extraction.
                 for log in extraction_logs(doc):
@@ -189,9 +213,56 @@ class LoadService:
                 await resolve_concepts(
                     cur, doc, self._ontology_bindings, self._replace_concepts
                 )
-                await self.store_document(cur, doc)
                 await cache_concept_terms(doc, self._ontology_bindings)
+                # The document must be stored last, because retry skips stored documents.
+                await self.store_document(cur, doc, modified_at, document_set_id)
                 loaded += 1
                 logger.debug("Loaded document %s.", doc.id)
 
         logger.info("Done — loaded %d, skipped %d document(s).", loaded, skipped)
+
+    async def store_document_set(self, document_set: DocumentSet) -> None:
+        """
+        Store a document set's documents, and delete stored documents that are no longer part of it.
+
+        :param document_set: Documents in the document set.
+        """
+        await self.store_documents(
+            iter(document_set.documents), document_set.modified_at, document_set.id
+        )
+        await self._delete_dropped_documents(document_set)
+
+    async def _delete_dropped_documents(self, document_set: DocumentSet) -> None:
+        """
+        Delete documents from the database that are no longer part of the current document set.
+
+        The modified_at is a property of the document set but stored individually
+        for each document. A stored document removed from the document set is
+        deleted only if its modified_at precedes the current document set
+        modified_at.
+
+        The next sync deletes the documents from the OpenSearch index.
+
+        :param document_set: Every document of the document set.
+        """
+        if document_set.id is None:
+            return
+        # Use transaction: log row deletion needs deleted document ids.
+        async with get_transaction_cursor() as cur:
+            ids = await delete_dropped_documents(
+                cur,
+                document_set.id,
+                [doc.id for doc in document_set.documents],
+                document_set.modified_at,
+            )
+            await delete_document_logs(cur, ids)
+            if ids:
+                # The next sync deletes these from the index only if the set has a
+                # pending document. A sync since the set was stored may have left none.
+                await reset_synced_at_by_set(cur, document_set.id)
+        if ids:
+            logger.info(
+                "Deleted %d document(s) no longer in document set %s from the database.",
+                len(ids),
+                document_set.id,
+            )

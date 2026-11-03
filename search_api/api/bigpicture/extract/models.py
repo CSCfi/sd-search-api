@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
@@ -113,8 +112,6 @@ class BigpictureFields(BaseModel):
     specimen: set[BigpictureSpecimenFields] = Field(default_factory=set)
     staining: set[BigpictureStainingFields] = Field(default_factory=set)
     observation: set[BigpictureObservationFields] = Field(default_factory=set)
-    # Newest file modification date in the dataset.
-    dataset_modified_at: datetime | None = None
 
 
 def _nested_groups() -> tuple[str, ...]:

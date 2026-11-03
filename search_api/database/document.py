@@ -11,6 +11,7 @@ from typing import Any
 from psycopg import AsyncCursor
 from psycopg.types.json import Json
 
+from search_api.database.models import UnsyncedDocument
 from search_api.database.repository import get_cursor
 
 DOCUMENT_TABLE = "document"
@@ -20,19 +21,21 @@ async def upsert_document(
     cur: AsyncCursor,
     doc_id: str,
     payload: dict[str, Any],
-    modified_at: datetime | None,
+    modified_at: datetime,
+    set_id: str | None,
 ) -> None:
     """Insert or replace a document, marking it unsynced."""
     await cur.execute(
         f"""
-        INSERT INTO {DOCUMENT_TABLE} (id, payload, modified_at, synced_at)
-        VALUES (%s, %s, %s, NULL)
+        INSERT INTO {DOCUMENT_TABLE} (id, payload, modified_at, synced_at, set_id)
+        VALUES (%s, %s, %s, NULL, %s)
         ON CONFLICT (id) DO UPDATE
         SET payload = EXCLUDED.payload,
             modified_at = EXCLUDED.modified_at,
-            synced_at = NULL
+            synced_at = NULL,
+            set_id = EXCLUDED.set_id
         """,
-        (doc_id, Json(payload), modified_at),
+        (doc_id, Json(payload), modified_at, set_id),
     )
 
 
@@ -47,7 +50,7 @@ async def get_document(cur: AsyncCursor, doc_id: str) -> dict[str, Any] | None:
 
 
 async def get_modified_at(cur: AsyncCursor, doc_id: str) -> datetime | None:
-    """Return a document's stored modified_at, or None if not present."""
+    """Return a document's stored modified_at, or None if the document is not stored."""
     await cur.execute(
         f"SELECT modified_at FROM {DOCUMENT_TABLE} WHERE id = %s",
         (doc_id,),
@@ -66,24 +69,38 @@ async def max_synced_at() -> datetime | None:
 
 async def iter_unsynced(
     cur: AsyncCursor, doc_id: str | None = None
-) -> AsyncIterator[tuple[str, dict[str, Any]]]:
-    """Yield (id, payload) for unsynced documents optionally filtered to one id."""
-    query = f"SELECT id, payload FROM {DOCUMENT_TABLE} WHERE synced_at IS NULL"
+) -> AsyncIterator[UnsyncedDocument]:
+    """Yield the unsynced documents, optionally filtered to one id.
+
+    Includes row version for optimistic locking in mark_synced.
+    """
+    query = (
+        f"SELECT id, payload, xmin::text FROM {DOCUMENT_TABLE} WHERE synced_at IS NULL"
+    )
     params: list[Any] = []
     if doc_id is not None:
         query += " AND id = %s"
         params.append(doc_id)
     await cur.execute(query, params)
     async for row in cur:
-        yield row[0], row[1]
+        yield UnsyncedDocument(id=row[0], payload=row[1], version=row[2])
 
 
-async def mark_synced(cur: AsyncCursor, ids: Sequence[str]) -> None:
-    """Mark documents as synced to OpenSearch."""
-    await cur.execute(
-        f"UPDATE {DOCUMENT_TABLE} SET synced_at = now() WHERE id = ANY(%s)",
-        (list(ids),),
+async def mark_synced(cur: AsyncCursor, documents: Sequence[UnsyncedDocument]) -> int:
+    """Mark documents as synced to OpenSearch.
+
+    Uses optimistic locking to only mark those document rows synced that were
+    not updated since selecting rows for syncing.
+
+    :param documents: The documents to be synced from iter_unsynced.
+    :return: The number of documents marked synced.
+    """
+    await cur.executemany(
+        f"UPDATE {DOCUMENT_TABLE} SET synced_at = now() "
+        f"WHERE id = %s AND xmin::text = %s",
+        [(doc.id, doc.version) for doc in documents],
     )
+    return cur.rowcount
 
 
 async def unsynced_count(cur: AsyncCursor) -> int:
@@ -113,10 +130,74 @@ async def count_documents() -> int:
     return row[0] if row else 0
 
 
+async def get_document_ids_by_sets(
+    cur: AsyncCursor, set_ids: Sequence[str]
+) -> list[str]:
+    """Return the ids of the document sets' documents."""
+    await cur.execute(
+        f"SELECT id FROM {DOCUMENT_TABLE} WHERE set_id = ANY(%s)",
+        (list(set_ids),),
+    )
+    return [row[0] for row in await cur.fetchall()]
+
+
 async def reset_synced_at(cur: AsyncCursor) -> int:
     """Reset every document to pending sync and return the number of documents."""
     await cur.execute(f"UPDATE {DOCUMENT_TABLE} SET synced_at = NULL")
     return cur.rowcount
+
+
+async def reset_synced_at_by_set(cur: AsyncCursor, set_id: str) -> int:
+    """Reset the document set's documents to pending sync.
+
+    :return: The number of documents reset.
+    """
+    await cur.execute(
+        f"UPDATE {DOCUMENT_TABLE} SET synced_at = NULL WHERE set_id = %s",
+        (set_id,),
+    )
+    return cur.rowcount
+
+
+async def delete_document(cur: AsyncCursor, doc_id: str) -> bool:
+    """Delete a document and return True if the document existed."""
+    await cur.execute(f"DELETE FROM {DOCUMENT_TABLE} WHERE id = %s", (doc_id,))
+    return cur.rowcount > 0
+
+
+async def delete_documents_by_set(cur: AsyncCursor, set_id: str) -> list[str]:
+    """Delete the document set's documents and return their ids."""
+    await cur.execute(
+        f"DELETE FROM {DOCUMENT_TABLE} WHERE set_id = %s RETURNING id",
+        (set_id,),
+    )
+    return [row[0] for row in await cur.fetchall()]
+
+
+async def delete_dropped_documents(
+    cur: AsyncCursor,
+    set_id: str,
+    current_ids: Sequence[str],
+    current_modified_at: datetime,
+) -> list[str]:
+    """Delete the documents no longer part of a newer document set version.
+
+    :param cur: The database cursor.
+    :param set_id: The document set id.
+    :param current_ids: The ids of the documents in the current document set version
+        being loaded.
+    :param current_modified_at: When the current document set version was modified.
+        A stored document modified before this is from an older document set version
+        and is deleted unless it is included in ``current_ids``.
+    :return: The ids of the deleted documents.
+    """
+    await cur.execute(
+        f"DELETE FROM {DOCUMENT_TABLE} "
+        f"WHERE set_id = %s AND NOT id = ANY(%s) AND modified_at < %s "
+        f"RETURNING id",
+        (set_id, list(current_ids), current_modified_at),
+    )
+    return [row[0] for row in await cur.fetchall()]
 
 
 async def delete_all_documents(cur: AsyncCursor) -> int:

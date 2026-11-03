@@ -66,6 +66,14 @@ class Domain:
     remote_source: DocumentSource | None = None
     # Public keys for verifying signed JWTs.
     public_jwks: Callable[[], list[dict[str, Any]]] | None = None
+    # Optional keyword field to store the document set id for a document.
+    # The keyword field must be a top-level OpenSearch field. For example,
+    # Bigpicture images are treated as documents, and they belong to
+    # Bigpicture datasets treated as document sets. If a newer version of a
+    # document set is loaded, existing documents are changed to match the
+    # new documents in the document set, by adding, replacing or deleting
+    # documents as needed.
+    document_set_id_field: str | None = None
 
     @property
     def nested_groups(self) -> set[str]:

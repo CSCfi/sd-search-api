@@ -2,6 +2,8 @@ import os
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -29,6 +31,7 @@ from search_api.database.terms_cache import (
     insert_terms,
     read_terms,
 )
+from search_api.exceptions import SystemException
 from search_api.services.load import LoadService
 from search_api.services.ontology.cache.models import (
     CachedOntology,
@@ -74,6 +77,9 @@ _PARENT_RESTRICTION = OntologyRestriction(
 
 # Shaped like a concept id, but in none of the ontologies above.
 _UNKNOWN_CONCEPT_ID = "C404"
+
+# The date of the document set the test documents are stored as.
+_MODIFIED_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
 
 class OntologySourceWithOneConcept(OntologySource):
@@ -259,7 +265,7 @@ async def _load_document_with_ontology_value(
         create_term_caches({ontology_id}),
         [field],
         replace_concepts=replace_concepts,
-    ).store_documents(iter([document]))
+    ).store_documents(iter([document]), _MODIFIED_AT, None)
 
 
 @pytest.mark.asyncio
@@ -280,6 +286,24 @@ async def test_load_valid_concept_id(single_concept_ontology_id, document_id):
     } == {(_FIELD_ID, _CONCEPT_ID, _PREFERRED_TERM)}
     async with get_cursor() as cur:
         assert await read_document_logs(cur, document_id) == []
+
+
+@pytest.mark.asyncio
+async def test_term_caching_failure_does_not_store_the_document(
+    single_concept_ontology_id, document_id, monkeypatch
+):
+    """A retry skips stored documents, so documents are stored after terms are cached."""
+    cache_terms = AsyncMock(side_effect=SystemException("term_caching_failure"))
+    monkeypatch.setattr("search_api.services.load.cache_concept_terms", cache_terms)
+
+    with pytest.raises(SystemException, match="term_caching_failure"):
+        await _load_document_with_ontology_value(
+            single_concept_ontology_id, document_id, _CONCEPT_ID
+        )
+
+    cache_terms.assert_awaited_once()
+    async with get_cursor() as cur:
+        assert await get_document(cur, document_id) is None
 
 
 @pytest.mark.asyncio
@@ -514,7 +538,7 @@ async def test_load_writes_extraction_logs(single_concept_ontology_id, document_
 
     await LoadService(
         create_term_caches({single_concept_ontology_id}), [field]
-    ).store_documents(iter([document]))
+    ).store_documents(iter([document]), _MODIFIED_AT, None)
 
     async with get_cursor() as cur:
         logs = await read_document_logs(cur, document_id)
@@ -673,7 +697,7 @@ async def _load_document_with_free_text(
         values=[OpenSearchFieldValue(field=free_text_field, value=free_text)],
     )
     await LoadService(create_term_caches({ontology_id}), [field]).store_documents(
-        iter([document])
+        iter([document]), _MODIFIED_AT, None
     )
 
 

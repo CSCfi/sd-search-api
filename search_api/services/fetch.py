@@ -5,7 +5,7 @@ Includes an implementation that uses the SD Submit API sync API.
 
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import TracebackType
@@ -20,13 +20,69 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
-class SourceDocuments:
-    """Documents read from a source."""
+class DocumentSet:
+    """One document set read from a source.
 
+    Contains all document in the set.
+    """
+
+    # The document set id. None for a deployment without document sets.
+    id: str | None
     # How far the source has been read once these are stored, as a marker only the source
     # understands: it is what a later read is given to resume from.
     marker: str
+    # When the document set was modified.
+    modified_at: datetime
     documents: list[ExtractedDocument] = field(default_factory=list)
+
+
+def document_set_id(documents: Sequence[ExtractedDocument], field_id: str) -> str:
+    """
+    Return the document set id the documents share.
+
+    A document set has at least one document.
+
+    :param documents: The documents of one document set.
+    :param field_id: The field containing the document set id.
+    :return: The document set id.
+    :raises SystemException: if there are no documents, a document has no document set
+        id or has one that is not a string, or the documents belong to different
+        document sets.
+    """
+    if not documents:
+        raise SystemException("A document set has no documents.")
+    first_doc = documents[0]
+    set_id = _document_set_id(first_doc, field_id)
+    for doc in documents[1:]:
+        if _document_set_id(doc, field_id) != set_id:
+            raise SystemException(
+                f"Documents '{first_doc.id}' and '{doc.id}' belong to different document "
+                f"sets: their '{field_id}' values differ."
+            )
+    return set_id
+
+
+def _document_set_id(doc: ExtractedDocument, field_id: str) -> str:
+    """
+    Return the document set id of one document.
+
+    :param doc: The document.
+    :param field_id: The field containing the document set id.
+    :return: The document set id.
+    :raises SystemException: if the document has no document set id, or has one that
+        is not a string.
+    """
+    value = next((v.value for v in doc.values if v.field.id == field_id), None)
+    if value is None:
+        raise SystemException(
+            f"Document '{doc.id}' has no document set id: no '{field_id}' value."
+        )
+    if not isinstance(value, str):
+        raise SystemException(
+            f"Document '{doc.id}' has a document set id that is not a string: "
+            f"'{field_id}' is {type(value).__name__}."
+        )
+    return value
 
 
 class DocumentSource(ABC):
@@ -37,7 +93,7 @@ class DocumentSource(ABC):
         self,
         root: str | None = None,
         marker: str | None = None,
-    ) -> AsyncIterator[SourceDocuments]:
+    ) -> AsyncIterator[DocumentSet]:
         """
         Get the documents modified since the marker.
 

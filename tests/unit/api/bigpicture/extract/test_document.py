@@ -419,7 +419,7 @@ def test_get_last_modification_time_last_modified(mock_fs):
 
 def test_get_last_modification_time_LastModified(mock_fs):
     """LastModified (S3 key) as a naive datetime gets UTC attached."""
-    naive = datetime(2024, 6, 1, 8, 30, 0)  # noqa: DTZ001
+    naive = datetime(2024, 6, 1, 8, 30, 0)
     fs = mock_fs({"/a": {"LastModified": naive}})
 
     result = get_last_modification_time(fs, ["/a"])

@@ -8,7 +8,6 @@ __pycache__/
 *.pyo
 
 ### Claude ###
-.claude/
 CLAUDE.local.md
 openspec
 

@@ -132,9 +132,9 @@ async def test_sd_submit_get_published_submissions_period(
 @pytest.mark.parametrize(
     "published_start,published_end",
     [
-        (datetime(2026, 1, 1), None),  # noqa: DTZ001
-        (None, datetime(2026, 2, 1)),  # noqa: DTZ001
-        (SINCE, datetime(2026, 2, 1)),  # noqa: DTZ001
+        (datetime(2026, 1, 1), None),
+        (None, datetime(2026, 2, 1)),
+        (SINCE, datetime(2026, 2, 1)),
     ],
 )
 @pytest.mark.asyncio

@@ -133,19 +133,15 @@ class AccessTokenValidator:
         path, which reports it.
         """
         cache = self._jwks_client.jwk_set_cache if self._jwks_client else None
-        data: Any = cache.get() if cache else None  # the raw JSON, until it expires
-        if not isinstance(data, dict):
+        data: Any = cache.get() if cache else None  # the parsed set, until it expires
+        if not isinstance(data, PyJWKSet):
             return None
         parsed = self._parsed
         if parsed is None or parsed[0] is not data:
-            try:
-                keys = PyJWKSet.from_dict(data).keys
-            except jwt.PyJWTError:
-                return None
             # The keys PyJWKClient counts as signing keys: `sig` or unspecified, with a `kid`.
             signing = {
                 k.key_id: k
-                for k in keys
+                for k in data.keys
                 if k.public_key_use in ("sig", None) and k.key_id
             }
             parsed = self._parsed = (data, signing)
@@ -154,11 +150,16 @@ class AccessTokenValidator:
     def _find_signing_key(self, client: PyJWKClient, kid: str) -> PyJWK:
         """Find the key named `kid`, refetching the key set at most once a minute.
 
-        An unusable cached set is refetched like a missing key: PyJWKClient caches
-        whatever JSON it was served, and would otherwise fail until the cache expired.
+        An unusable set is refetched like a missing key. PyJWKClient caches none that
+        has no keys, so with nothing cached the first lookup fetches too, and is held to
+        the same slot once one has been taken.
         """
         for refetch in (False, True):
-            if refetch:
+            if refetch or (
+                client.jwk_set_cache is not None
+                and client.jwk_set_cache.get() is None
+                and self._last_refetch > -math.inf
+            ):
                 with self._refetch_lock:
                     now = time.monotonic()
                     if now - self._last_refetch < JWKS_MIN_REFETCH_INTERVAL:

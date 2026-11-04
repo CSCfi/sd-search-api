@@ -133,6 +133,8 @@ class MockAuthRequestHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/token":
             self._token()
+        elif parsed.path == "/revoke":
+            self._revoke()
         else:
             self.send_response(404)
             self.end_headers()
@@ -144,6 +146,7 @@ class MockAuthRequestHandler(BaseHTTPRequestHandler):
                 "issuer": issuer,
                 "authorization_endpoint": f"{issuer}/authorize",
                 "token_endpoint": f"{issuer}/token",
+                "revocation_endpoint": f"{issuer}/revoke",
                 "userinfo_endpoint": f"{issuer}/userinfo",
                 "jwks_uri": f"{issuer}/jwks",
                 "response_types_supported": ["code"],
@@ -205,6 +208,19 @@ class MockAuthRequestHandler(BaseHTTPRequestHandler):
             return
 
         self._send_json(response)
+
+    def _revoke(self) -> None:
+        """RFC 7009: forget the token, and answer 200 even when it was unknown."""
+        length = int(self.headers.get("Content-Length", 0))
+        form = parse_qs(self.rfile.read(length).decode())
+        if not self._client_id_from_basic_auth():
+            self._send_json({"error": "invalid_client"}, status=401)
+            return
+        with self.server.lock:
+            self.server.refresh_tokens.pop(form.get("token", [""])[0], None)
+        self.send_response(200)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def _issue_tokens(self, client_id: str, scope: str) -> dict:
         """An RFC 9068 access token, plus a refresh token if `offline_access` was asked."""

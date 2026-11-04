@@ -3,7 +3,7 @@
 import base64
 import os
 import time
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import parse_qs, urlparse
 
 os.environ["BASE_URL"] = "http://localhost:8000"
@@ -28,6 +28,7 @@ from search_api.services.access_token import InvalidAccessToken
 from search_api.services.auth import AuthServiceHandler, RefreshRejected, TokenSet
 
 TOKEN_ENDPOINT = "http://localhost:9999/token"
+REVOCATION_ENDPOINT = "http://localhost:9999/revoke"
 
 
 class FakeMetadata:
@@ -36,6 +37,7 @@ class FakeMetadata:
             "issuer": "http://localhost:9999",
             "jwks_uri": "http://localhost:9999/jwks",
             "token_endpoint": TOKEN_ENDPOINT,
+            "revocation_endpoint": REVOCATION_ENDPOINT,
         }
 
 
@@ -456,6 +458,84 @@ async def test_refresh_provider_failure_raises_system_exception(
 
     with pytest.raises(SystemException):
         await handler.refresh("rt")
+
+
+@pytest.mark.asyncio
+async def test_revoke_posts_refresh_token_with_basic_auth(token_endpoint):
+    token_endpoint["responses"] = [httpx.Response(200)]
+    handler, _ = _handler_with_mock_rph()
+
+    await handler.revoke("rt")
+
+    (request,) = token_endpoint["requests"]
+    assert str(request.url) == REVOCATION_ENDPOINT
+    assert parse_qs(request.content.decode()) == {
+        "token": ["rt"],
+        "token_type_hint": ["refresh_token"],
+    }
+    expected = base64.b64encode(b"test-client-id:test-client-secret").decode()
+    assert request.headers["authorization"] == f"Basic {expected}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(
+            400,
+            json={
+                "error": "invalid_request",
+                "error_description": "Bad token: secret-rt",
+            },
+        ),
+        httpx.Response(500, text="secret-rt"),
+        httpx.ConnectError("unreachable"),
+    ],
+    ids=["refused", "server-error", "unreachable"],
+)
+async def test_revoke_failure_is_logged_without_the_token(
+    token_endpoint, caplog, response
+):
+    token_endpoint["responses"] = [response]
+    handler, _ = _handler_with_mock_rph()
+
+    with caplog.at_level("ERROR", logger="search_api.services.auth"):
+        await handler.revoke("secret-rt")
+
+    (record,) = [r for r in caplog.records if r.name == "search_api.services.auth"]
+    assert record.levelname == "ERROR"
+    assert "secret-rt" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_revoke_without_revocation_endpoint_logs_and_posts_nothing(
+    token_endpoint, caplog
+):
+    handler, _ = _handler_with_mock_rph()
+    metadata = await FakeMetadata().get()
+    del metadata["revocation_endpoint"]
+    handler._metadata.get = AsyncMock(return_value=metadata)  # type: ignore[method-assign]
+
+    await handler.revoke("rt")
+
+    assert token_endpoint["requests"] == []
+    assert "revocation_endpoint" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_revoke_with_discovery_unreachable_logs_and_returns(
+    token_endpoint, caplog
+):
+    handler, _ = _handler_with_mock_rph()
+    handler._metadata.get = AsyncMock(  # type: ignore[method-assign]
+        side_effect=SystemException("OIDC discovery failed.")
+    )
+
+    await handler.revoke("rt")
+
+    assert token_endpoint["requests"] == []
+    (record,) = [r for r in caplog.records if r.name == "search_api.services.auth"]
+    assert record.levelname == "ERROR"
 
 
 def test_initiate_web_session_sets_both_cookies_and_redirects():

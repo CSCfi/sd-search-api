@@ -169,3 +169,36 @@ def test_refresh_provider_unreachable_returns_503_and_keeps_cookies(
 
 def test_refresh_only_accepts_post(refreshing_service, client):
     assert client.get("/refresh").status_code == 405
+
+
+def _deleted_cookies(resp) -> dict[str, str]:
+    """Each Set-Cookie header, keyed by cookie name."""
+    headers = resp.headers.get_list("set-cookie")
+    return {header.split("=", 1)[0]: header for header in headers}
+
+
+def test_delete_refresh_revokes_and_clears_both_cookies(refreshing_service, client):
+    refreshing_service.revoke = AsyncMock()
+    client.cookies.set("refresh_token", "rt", path="/refresh")
+
+    resp = client.delete("/refresh")
+
+    assert resp.status_code == 204
+    refreshing_service.revoke.assert_awaited_once_with("rt")
+    cookies = _deleted_cookies(resp)
+    assert "Max-Age=0" in cookies["access_token"]
+    assert "Path=/;" in cookies["access_token"]
+    assert "Max-Age=0" in cookies["refresh_token"]
+    assert "Path=/refresh" in cookies["refresh_token"]
+
+
+def test_delete_refresh_without_cookie_skips_revocation_and_clears_cookies(
+    refreshing_service, client
+):
+    refreshing_service.revoke = AsyncMock()
+
+    resp = client.delete("/refresh")
+
+    assert resp.status_code == 204
+    refreshing_service.revoke.assert_not_awaited()
+    assert set(_deleted_cookies(resp)) == {"access_token", "refresh_token"}

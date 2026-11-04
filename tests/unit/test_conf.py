@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives.serialization import (
     Encoding,
     PrivateFormat,
 )
+from pydantic import ValidationError
 
 from search_api.conf import (
     AIConfiguration,
@@ -39,6 +40,24 @@ def test_post_logout_redirect_url_falls_back_to_base_url_origin():
     config = _oidc_config()
     assert config.redirect_url == "http://localhost:8000/docs"
     assert config.post_logout_redirect_url == "http://localhost:8000/"
+
+
+def test_secret_not_shown_in_repr():
+    config = _oidc_config()
+    assert "test-client-secret" not in repr(config)
+    assert "OIDC_CLIENT_SECRET=SecretStr('**********')" in repr(config)
+    assert config.OIDC_CLIENT_SECRET.get_secret_value() == "test-client-secret"
+
+
+def test_secret_not_shown_in_validation_error(monkeypatch):
+    monkeypatch.delenv("OIDC_URL", raising=False)
+    with pytest.raises(ValidationError, match="OIDC_URL") as exc_info:
+        OIDCConfiguration(
+            BASE_URL="http://localhost:8000",
+            OIDC_CLIENT_ID="test-client-id",
+            OIDC_CLIENT_SECRET="test-client-secret",
+        )
+    assert "test-client-secret" not in str(exc_info.value)
 
 
 def test_default_scope_asks_for_a_refresh_token(monkeypatch):
@@ -72,7 +91,7 @@ def test_sd_submit_sync_private_key_is_decoded() -> None:
         base64.b64encode(private_key.encode("utf-8")).decode("ascii")
     )
 
-    assert config.SD_SUBMIT_PRIVATE_KEY == private_key
+    assert config.SD_SUBMIT_PRIVATE_KEY.get_secret_value() == private_key
 
 
 def test_sd_submit_sync_default_issuer() -> None:

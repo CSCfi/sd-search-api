@@ -15,6 +15,6 @@ async def require_admin(
     # Compared in constant time, so the response time does not reveal how much of the
     # key matched.
     if key is None or not secrets.compare_digest(
-        credentials.credentials.encode(), key.encode()
+        credentials.credentials.encode(), key.get_secret_value().encode()
     ):
         raise HTTPException(status_code=403, detail="Forbidden")

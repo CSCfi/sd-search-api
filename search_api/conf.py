@@ -3,8 +3,18 @@ from typing import Literal
 from urllib.parse import urljoin, urlparse
 
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
-from pydantic import Field, computed_field, field_validator, model_validator
-from pydantic_settings import BaseSettings
+from pydantic import Field, SecretStr, computed_field, field_validator, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class _SecretSettings(BaseSettings):
+    """Settings that hold a secret.
+
+    Validation errors leave out the input values. Otherwise every input value,
+    the secret included, is shown when any of them fail validation.
+    """
+
+    model_config = SettingsConfigDict(hide_input_in_errors=True)
 
 
 class DeploymentConfiguration(BaseSettings):
@@ -31,14 +41,14 @@ class DeploymentConfiguration(BaseSettings):
         return value.upper() if isinstance(value, str) else value
 
 
-class DatabaseConfiguration(BaseSettings):
+class DatabaseConfiguration(_SecretSettings):
     """PostgreSQL connection configuration."""
 
     POSTGRES_HOST: str = Field(description="PostgreSQL host.")
     POSTGRES_PORT: int = Field(default=5432, description="PostgreSQL port.")
     POSTGRES_DB: str = Field(description="PostgreSQL database name.")
     POSTGRES_USER: str = Field(description="PostgreSQL user.")
-    POSTGRES_PASSWORD: str = Field(description="PostgreSQL password.")
+    POSTGRES_PASSWORD: SecretStr = Field(description="PostgreSQL password.")
 
     POSTGRES_POOL_MIN_SIZE: int = Field(
         default=2, description="Connections the pool keeps open."
@@ -58,13 +68,13 @@ class DatabaseConfiguration(BaseSettings):
     )
 
 
-class OpenSearchConfiguration(BaseSettings):
+class OpenSearchConfiguration(_SecretSettings):
     """OpenSearch connection configuration."""
 
     OPENSEARCH_HOST: str = Field(description="OpenSearch host.")
     OPENSEARCH_PORT: int = Field(default=9200, description="OpenSearch port.")
     OPENSEARCH_USER: str = Field(description="OpenSearch user.")
-    OPENSEARCH_PASSWORD: str = Field(description="OpenSearch password.")
+    OPENSEARCH_PASSWORD: SecretStr = Field(description="OpenSearch password.")
 
 
 class SnowstormConfiguration(BaseSettings):
@@ -98,10 +108,10 @@ class CacheConfiguration(BaseSettings):
     )
 
 
-class AdminConfiguration(BaseSettings):
+class AdminConfiguration(_SecretSettings):
     """Admin API configuration."""
 
-    ADMIN_KEY: str | None = Field(
+    ADMIN_KEY: SecretStr | None = Field(
         default=None,
         description=(
             "Secret key required to use admin endpoints. "
@@ -120,7 +130,7 @@ class FeatureConfiguration(BaseSettings):
     )
 
 
-class AIConfiguration(BaseSettings):
+class AIConfiguration(_SecretSettings):
     """AI/LLM configuration."""
 
     LLM_PROVIDER: str = Field(
@@ -134,7 +144,7 @@ class AIConfiguration(BaseSettings):
     LLM_BASE_URL: str | None = Field(
         default=None, description="LLM API base URL, for the 'openai' provider."
     )
-    LLM_API_KEY: str | None = Field(
+    LLM_API_KEY: SecretStr | None = Field(
         default=None, description="LLM API key, for the 'openai' provider."
     )
     LLM_MAX_TOKENS: int = Field(
@@ -160,7 +170,7 @@ class AIConfiguration(BaseSettings):
         return self
 
 
-class OIDCConfiguration(BaseSettings):
+class OIDCConfiguration(_SecretSettings):
     """OIDC relying party configuration."""
 
     BASE_URL: str = Field(description="Public base URL this API is served at.")
@@ -168,7 +178,7 @@ class OIDCConfiguration(BaseSettings):
     OIDC_CLIENT_ID: str = Field(
         description="OIDC client ID registered with the issuer."
     )
-    OIDC_CLIENT_SECRET: str = Field(
+    OIDC_CLIENT_SECRET: SecretStr = Field(
         description="OIDC client secret registered with the issuer."
     )
     OIDC_REDIRECT_URL: str | None = Field(
@@ -213,11 +223,11 @@ class OIDCConfiguration(BaseSettings):
         return f"{parsed.scheme}://{parsed.netloc}/"
 
 
-class SdSubmitSyncConfiguration(BaseSettings):
+class SdSubmitSyncConfiguration(_SecretSettings):
     """Configuration for syncing published submissions from the SD Submit API."""
 
     SD_SUBMIT_API_URL: str = Field(description="SD Submit API base URL.")
-    SD_SUBMIT_PRIVATE_KEY: str = Field(
+    SD_SUBMIT_PRIVATE_KEY: SecretStr = Field(
         description=(
             "Base64-encoded PEM EC private key to sign the SD Submit API JWT token. "
             "The submit API has the public key to verify the JWT token."
@@ -236,10 +246,10 @@ class SdSubmitSyncConfiguration(BaseSettings):
 
     @field_validator("SD_SUBMIT_PRIVATE_KEY")
     @classmethod
-    def decode_private_key(cls, value: str) -> str:
+    def decode_private_key(cls, value: SecretStr) -> SecretStr:
         """Decode and parse the base64-encoded PEM private key."""
         try:
-            key = base64.b64decode(value, validate=True)
+            key = base64.b64decode(value.get_secret_value(), validate=True)
         except Exception as ex:
             raise ValueError(
                 "SD_SUBMIT_PRIVATE_KEY must be a valid base64-encoded string"
@@ -251,10 +261,10 @@ class SdSubmitSyncConfiguration(BaseSettings):
             raise ValueError(
                 "SD_SUBMIT_PRIVATE_KEY must decode to an unencrypted PEM private key"
             ) from ex
-        return key.decode("utf-8")
+        return SecretStr(key.decode("utf-8"))
 
 
-class Crypt4GHConfiguration(BaseSettings):
+class Crypt4GHConfiguration(_SecretSettings):
     """Configuration for decrypting Crypt4GH encrypted source material."""
 
     C4GH_KEY_FILE: str | None = Field(
@@ -264,10 +274,15 @@ class Crypt4GHConfiguration(BaseSettings):
             "Unset when the source material is not encrypted."
         ),
     )
-    C4GH_PASSPHRASE: str | None = Field(
+    C4GH_PASSPHRASE: SecretStr | None = Field(
         default=None,
         description="Passphrase of the Crypt4GH private key, unset for an unprotected key.",
     )
+
+
+def secret_value(secret: SecretStr | None) -> str | None:
+    """Return the value of an optional secret, or None if it is unset."""
+    return secret.get_secret_value() if secret is not None else None
 
 
 def deployment_config() -> DeploymentConfiguration:

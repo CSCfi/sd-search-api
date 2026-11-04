@@ -12,7 +12,7 @@ from search_api.api.bigpicture.extract.document import (
     get_last_modification_time,
 )
 from search_api.api.bigpicture.models import BP_DATASET_ID_FIELD
-from search_api.conf import crypt4gh_config
+from search_api.conf import crypt4gh_config, secret_value
 from search_api.exceptions import SystemException, UserException
 from search_api.services.fetch import DocumentSet, DocumentSource, document_set_id
 from search_api.utils.crypt import load_c4gh_keys
@@ -74,7 +74,7 @@ class BigpictureLocalSource(DocumentSource):
 
         config = crypt4gh_config()
         keys = (
-            load_c4gh_keys(config.C4GH_KEY_FILE, config.C4GH_PASSPHRASE)
+            load_c4gh_keys(config.C4GH_KEY_FILE, secret_value(config.C4GH_PASSPHRASE))
             if config.C4GH_KEY_FILE
             else None
         )

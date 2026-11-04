@@ -30,7 +30,7 @@ def _connect_kwargs() -> dict[str, Any]:
         "port": cfg.POSTGRES_PORT,
         "dbname": cfg.POSTGRES_DB,
         "user": cfg.POSTGRES_USER,
-        "password": cfg.POSTGRES_PASSWORD,
+        "password": cfg.POSTGRES_PASSWORD.get_secret_value(),
         "autocommit": True,
     }
 

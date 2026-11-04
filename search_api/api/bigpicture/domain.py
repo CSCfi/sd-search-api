@@ -46,7 +46,7 @@ def bp_public_jwks() -> list[dict[str, Any]]:
         config = sd_submit_sync_config()
     except ValidationError:
         return []
-    return [public_key_jwk(config.SD_SUBMIT_PRIVATE_KEY)]
+    return [public_key_jwk(config.SD_SUBMIT_PRIVATE_KEY.get_secret_value())]
 
 
 BP_DOMAIN = Domain(

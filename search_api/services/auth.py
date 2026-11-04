@@ -93,7 +93,7 @@ class AuthServiceHandler:
             "aai": {
                 "issuer": config.OIDC_URL,
                 "client_id": config.OIDC_CLIENT_ID,
-                "client_secret": config.OIDC_CLIENT_SECRET,
+                "client_secret": config.OIDC_CLIENT_SECRET.get_secret_value(),
                 "client_type": "oidc",
                 "redirect_uris": [config.callback_url],
                 "preference": {
@@ -202,7 +202,10 @@ class AuthServiceHandler:
                         "refresh_token": refresh_token,
                     },
                     # client_secret_basic, as idpyoidc sends it for the code exchange.
-                    auth=(config.OIDC_CLIENT_ID, config.OIDC_CLIENT_SECRET),
+                    auth=(
+                        config.OIDC_CLIENT_ID,
+                        config.OIDC_CLIENT_SECRET.get_secret_value(),
+                    ),
                 )
         except httpx.HTTPError as exc:
             raise SystemException("OIDC token refresh failed.") from exc

@@ -34,6 +34,7 @@ from search_api.api.beacon.services import BeaconService
 from search_api.api.models import FieldValue
 from search_api.api.opensearch.clauses import iso8601_range_to_days
 from search_api.conf import ai_config as _ai_config
+from search_api.conf import secret_value
 from search_api.exceptions import SystemException, UserException
 from search_api.services.field_values import get_field_suggestions, get_field_values
 from search_api.services.ontology.service import get_ontology_service
@@ -627,7 +628,7 @@ class AIService:
             model = OpenAIChatModel(
                 cfg.LLM_MODEL,
                 provider=OpenAIProvider(
-                    base_url=cfg.LLM_BASE_URL, api_key=cfg.LLM_API_KEY
+                    base_url=cfg.LLM_BASE_URL, api_key=secret_value(cfg.LLM_API_KEY)
                 ),
             )
         else:

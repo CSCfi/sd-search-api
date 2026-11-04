@@ -60,6 +60,12 @@ def test_refresh_rejects_wrong_key(snomed_term_service, client):
     assert resp.status_code == 403
 
 
+def test_refresh_rejects_non_ascii_key(snomed_term_service, client, monkeypatch):
+    monkeypatch.setenv("ADMIN_KEY", "test-admin-kéy")
+    resp = client.post("/admin/snomed/refresh", headers=_auth("wrong-key"))
+    assert resp.status_code == 403
+
+
 def test_refresh_requires_auth_header(snomed_term_service, client):
     resp = client.post("/admin/snomed/refresh")
     assert resp.status_code == 401

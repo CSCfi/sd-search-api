@@ -234,6 +234,8 @@ class SdSubmitFetchClient:
                 f"instead of '{_SD_SUBMIT_ARCHIVE_MEDIA_TYPE}'."
             )
 
+        # Design decision: the archive is downloaded whole, with no size limit. It holds
+        # one submission's metadata, from the SD Submit API, and is expected to fit in memory.
         return response.content
 
     async def _request(

@@ -31,7 +31,7 @@ def _token(config: SdSubmitSyncConfiguration, **overrides: str):
     """
 
     signed = {
-        "private_key": config.SD_SUBMIT_PRIVATE_KEY,
+        "private_key": config.SD_SUBMIT_PRIVATE_KEY.get_secret_value(),
         "issuer": config.SD_SUBMIT_ISSUER,
         "audience": config.SD_SUBMIT_AUDIENCE,
     }

@@ -13,7 +13,7 @@ def create_search() -> AsyncOpenSearch:
     cfg = _opensearch_config()
     return AsyncOpenSearch(
         hosts=[{"host": cfg.OPENSEARCH_HOST, "port": cfg.OPENSEARCH_PORT}],
-        http_auth=(cfg.OPENSEARCH_USER, cfg.OPENSEARCH_PASSWORD),
+        http_auth=(cfg.OPENSEARCH_USER, cfg.OPENSEARCH_PASSWORD.get_secret_value()),
         use_ssl=True,
         verify_certs=False,
     )

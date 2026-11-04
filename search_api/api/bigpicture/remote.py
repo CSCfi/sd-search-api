@@ -79,7 +79,7 @@ class BigpictureRemoteSource(DocumentSource):
         config = sd_submit_sync_config()
         token = partial(
             sign_service_token,
-            private_key=config.SD_SUBMIT_PRIVATE_KEY,
+            private_key=config.SD_SUBMIT_PRIVATE_KEY.get_secret_value(),
             issuer=config.SD_SUBMIT_ISSUER,
             audience=config.SD_SUBMIT_AUDIENCE,
         )

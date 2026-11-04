@@ -157,3 +157,19 @@ def test_logout_clears_both_cookies(client):
         set()
     )
     assert client.get(PROTECTED_PATH).status_code == 401
+
+
+def test_delete_refresh_revokes_the_refresh_token(client):
+    login(client)
+    refresh_token, _ = _cookie(client, "refresh_token")
+
+    assert client.delete("/refresh").status_code == 204
+
+    assert {c.name for c in client.cookies.jar} & {"access_token", "refresh_token"} == (
+        set()
+    )
+    with httpx.Client(base_url=API_URL, timeout=30.0) as other_tab:
+        response = other_tab.post(
+            "/refresh", headers={"Cookie": f"refresh_token={refresh_token}"}
+        )
+    assert response.status_code == 401

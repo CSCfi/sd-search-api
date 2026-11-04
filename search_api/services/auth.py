@@ -243,6 +243,43 @@ class AuthServiceHandler:
         # The refresh token is kept when the provider does not rotate it.
         return await self._token_set(body, refresh_token)
 
+    async def revoke(self, refresh_token: str) -> None:
+        """Revoke a refresh token at the provider (RFC 7009), as far as it can be.
+
+        Never raises: the session ends in the browser whatever the provider says, so a
+        failure is only logged. RFC 7009 answers 200 even for a token already dead.
+        """
+        config = oidc_config()
+        try:
+            endpoint = (await self._metadata.get()).get("revocation_endpoint")
+            if not endpoint:
+                logger.warning("OIDC provider advertises no revocation_endpoint.")
+                return
+            async with httpx.AsyncClient(timeout=REFRESH_TIMEOUT) as client:
+                response = await client.post(
+                    endpoint,
+                    data={"token": refresh_token, "token_type_hint": "refresh_token"},
+                    auth=(
+                        config.OIDC_CLIENT_ID,
+                        config.OIDC_CLIENT_SECRET.get_secret_value(),
+                    ),
+                )
+        except (SystemException, httpx.HTTPError) as exc:
+            logger.error("OIDC refresh token revocation failed: %s", type(exc).__name__)
+            return
+
+        if not response.is_success:
+            # Only the error code: error_description may echo the token.
+            try:
+                error = response.json().get("error")
+            except ValueError, AttributeError:
+                error = None
+            logger.error(
+                "OIDC provider refused to revoke the refresh token: HTTP %s, error %r.",
+                response.status_code,
+                error if isinstance(error, str) else None,
+            )
+
     async def _token_set(
         self, response: dict[str, Any], refresh_token: str | None = None
     ) -> TokenSet:

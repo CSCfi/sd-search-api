@@ -189,6 +189,35 @@ async def test_sd_submit_get_submission_objects(content_type: str) -> None:
 
 
 @pytest.mark.asyncio
+async def test_sd_submit_get_submission_objects_escapes_submission_id() -> None:
+    client, requests = _mock_sd_submit_client(
+        httpx.Response(
+            200, content=b"archive bytes", headers={"Content-Type": "application/zip"}
+        )
+    )
+
+    async with client:
+        await client.get_submission_objects("../a/b?c=d#e f")
+
+    assert requests[0].url.raw_path.endswith(
+        f"{_SD_SUBMIT_SYNC_PATH}/..%2Fa%2Fb%3Fc%3Dd%23e%20f".encode()
+    )
+    assert requests[0].url.query == b""
+
+
+@pytest.mark.asyncio
+async def test_sd_submit_error_body_logged_escaped(caplog) -> None:
+    client, _ = _mock_sd_submit_client(httpx.Response(500, content=b"error\nNEWLINE"))
+
+    async with client:
+        with pytest.raises(SystemException, match="with 500"):
+            await client.get_submission_objects("submission_1")
+
+    assert "\n" not in caplog.text.strip()
+    assert "error\\nNEWLINE" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_sd_submit_get_submission_objects_invalid_media_type() -> None:
     client, _ = _mock_sd_submit_client(
         httpx.Response(

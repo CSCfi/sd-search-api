@@ -100,13 +100,13 @@ class BigpictureRemoteSource(DocumentSource):
                     documents = list(_extract_archive(archive))
                 except Exception:
                     logger.exception(
-                        "Failed to extract documents from submission %s.",
+                        "Failed to extract documents from submission %r.",
                         submission.submission_id,
                     )
                     raise
 
                 logger.info(
-                    "Fetched submission %s with %d document(s).",
+                    "Fetched submission %r with %d document(s).",
                     submission.submission_id,
                     len(documents),
                 )

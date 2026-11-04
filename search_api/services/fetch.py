@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from types import TracebackType
 from typing import Self
+from urllib.parse import quote
 
 import httpx
 
@@ -222,7 +223,8 @@ class SdSubmitFetchClient:
         :return: The zip archive of the metadata objects.
         """
 
-        path = f"{_SD_SUBMIT_SYNC_PATH}/{submission_id}"
+        # Escaped, so id containing "/", "?" or "#" cannot change the request path.
+        path = f"{_SD_SUBMIT_SYNC_PATH}/{quote(submission_id, safe='')}"
         response = await self._request("GET", path)
 
         media_type = response.headers.get("Content-Type", "").split(";")[0].strip()
@@ -263,7 +265,7 @@ class SdSubmitFetchClient:
 
         if response.is_error:
             logger.error(
-                "SD submit API %s request to '%s' returned %d: %s",
+                "SD submit API %s request to '%s' returned %d: %r",
                 method,
                 url,
                 response.status_code,

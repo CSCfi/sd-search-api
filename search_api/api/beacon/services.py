@@ -6,6 +6,7 @@ from search_api.api.beacon.models import (
     BeaconFilteringTerm,
     BeaconQueryFilter,
     BeaconQueryGranularity,
+    BeaconQueryPagination,
     BeaconResultSetResult,
     BeaconResultSets,
 )
@@ -51,7 +52,7 @@ class BeaconService[T: BeaconFilteringTerm](ABC):
 
 @dataclass
 class BeaconQueryResult[S: BeaconResultSetResult]:
-    """A query's total match count, and its records for record granularity."""
+    """A query's total match count, and one page of its records for record granularity."""
 
     total: int
     result_sets: BeaconResultSets[S]
@@ -66,5 +67,6 @@ class BeaconQueryService[S: BeaconResultSetResult](ABC):
         filters: list[BeaconQueryFilter],
         granularity: BeaconQueryGranularity = "record",
         scope: str | None = None,
+        pagination: BeaconQueryPagination | None = None,
     ) -> BeaconQueryResult[S]:
         pass

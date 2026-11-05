@@ -14,6 +14,7 @@ from search_api.api.beacon.models import (
     BeaconCountResponse,
     BeaconQuery,
     BeaconQueryFilter,
+    BeaconQueryPagination,
     BeaconQueryRequest,
     BeaconResultSet,
     BeaconResultSets,
@@ -116,7 +117,7 @@ class MockBeaconService(BeaconService[OpenSearchBeaconFilteringTerm]):
 class MockBeaconDatasetService(BeaconQueryService[BigpictureBeaconDatasetResult]):
     @override
     async def query(
-        self, filters, granularity="record", scope=None
+        self, filters, granularity="record", scope=None, pagination=None
     ) -> BeaconQueryResult[BigpictureBeaconDatasetResult]:
         return get_mock_dataset_query_result()
 
@@ -129,11 +130,12 @@ class MockBeaconImageService(BeaconQueryService[BigpictureBeaconImageResult]):
 
     @override
     async def query(
-        self, filters, granularity="record", scope=None
+        self, filters, granularity="record", scope=None, pagination=None
     ) -> BeaconQueryResult[BigpictureBeaconImageResult]:
         self.calls.append(
             {"filters": filters, "granularity": granularity, "scope": scope}
         )
+        self.pagination = pagination
         return get_mock_image_query_result()
 
 
@@ -234,6 +236,17 @@ def test_images_query(client: TestClient):
     assert response.responseSummary.exists
     assert response.responseSummary.numTotalResults == 1
     assert response.response.resultSet[0].results[0].imageId == "testImage"
+
+
+def test_query_passes_pagination(client: TestClient, image_service):
+    """The route passes the request's pagination to the query service unchanged."""
+    pagination = BeaconQueryPagination(skip=2, limit=5)
+    request = BeaconQueryRequest(
+        query=BeaconQuery(requestedGranularity="record", pagination=pagination)
+    )
+    resp = client.post("/images", json=request.model_dump())
+    assert resp.status_code == 200
+    assert image_service.pagination == pagination
 
 
 def test_query_returns_count_by_default(client: TestClient):

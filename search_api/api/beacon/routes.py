@@ -19,6 +19,7 @@ from search_api.api.beacon.models import (
     BeaconInfoResponse,
     BeaconQueryFilter,
     BeaconQueryGranularity,
+    BeaconQueryPagination,
     BeaconQueryRequest,
     BeaconResponseMeta,
     BeaconResultCountResponseSummary,
@@ -178,6 +179,7 @@ def make_beacon_router(domain: Domain) -> APIRouter:
                 request.query.filters,
                 granularity,
                 request.query.requestedScope,
+                request.query.pagination,
                 ontology_term_services,
             )
 
@@ -191,6 +193,7 @@ def make_beacon_router(domain: Domain) -> APIRouter:
         filters: list[BeaconQueryFilter],
         granularity: BeaconQueryGranularity,
         scope: str | None,
+        pagination: BeaconQueryPagination,
         ontology_term_services: dict[str, OntologyTermCache],
     ) -> BeaconQueryResult:
         """Resolve the ontology filters, then run the query."""
@@ -221,6 +224,7 @@ def make_beacon_router(domain: Domain) -> APIRouter:
             filters=other_filters + resolved_ontology_filters,
             granularity=granularity,
             scope=scope,
+            pagination=pagination,
         )
 
     def beacon_response(

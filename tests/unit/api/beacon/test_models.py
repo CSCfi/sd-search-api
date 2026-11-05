@@ -11,6 +11,7 @@ from search_api.api.beacon.models import (
     BeaconFilteringTerm,
     BeaconQuery,
     BeaconQueryFilter,
+    BeaconQueryPagination,
     OntologyRestriction,
 )
 
@@ -97,3 +98,17 @@ def test_query_at_limit_is_accepted():
 def test_query_over_limit_is_rejected(query):
     with pytest.raises(ValidationError):
         BeaconQuery.model_validate(query)
+
+
+# Pagination
+#
+
+
+def test_pagination():
+    pagination = BeaconQuery().pagination
+    assert pagination.skip == 0
+    assert pagination.limit == 0
+    assert pagination.offset == 0
+    # Skip counts pages, and a limit of 0 ignores it.
+    assert BeaconQueryPagination(skip=3, limit=20).offset == 60
+    assert BeaconQueryPagination(skip=2, limit=0).offset == 0

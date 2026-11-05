@@ -69,6 +69,24 @@ class BeaconQueryFilter(BaseModel):
     includeDescendantTerms: bool = False
 
 
+# https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/common/beaconCommonComponents.json
+class BeaconQueryPagination(BaseModel):
+    """Beacon V2 pagination of record granularity results.
+
+    Unlike the Beacon V2 default of 10, every record is returned by default and when the limit is 0.
+    """
+
+    # The number of pages to skip,
+    skip: int = Field(default=0, ge=0)
+    # The page size. 0 returns every record, and skip is then ignored.
+    limit: int = Field(default=0, ge=0)
+
+    @property
+    def offset(self) -> int:
+        """The number of records skipped."""
+        return self.skip * self.limit
+
+
 class BeaconQuery(BaseModel):
     """Beacon V2 query."""
 
@@ -76,6 +94,7 @@ class BeaconQuery(BaseModel):
         default_factory=list, max_length=MAX_FILTERS
     )
     requestedGranularity: BeaconQueryGranularity = "count"
+    pagination: BeaconQueryPagination = Field(default_factory=BeaconQueryPagination)
     # Beacon V2 extension.
     requestedScope: str | None = Field(default=None, max_length=MAX_ID_LENGTH)
 

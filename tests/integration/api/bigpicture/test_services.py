@@ -242,7 +242,7 @@ async def test_fetch_indexed_keywords_pagination_nested_field(
 @pytest.mark.asyncio
 async def test_image_query_pagination(bp_opensearch_index, image_service, monkeypatch):
     # 3 images, page_size 1, forces iter_paged_documents through three real pages.
-    monkeypatch.setattr(bp_opensearch, "_PAGE_SIZE", 1)
+    monkeypatch.setattr(bp_opensearch, "_FETCH_SIZE", 1)
 
     result = await image_service.query(filters=[], granularity="record")
 
@@ -260,7 +260,7 @@ async def test_dataset_query_pagination(
     # through multiple real pages, both for counting buckets and for building records.
     # This proves the per-dataset accumulator persists correctly across pages, rather
     # than being reset with each new page fetched.
-    monkeypatch.setattr(bp_opensearch, "_PAGE_SIZE", 1)
+    monkeypatch.setattr(bp_opensearch, "_FETCH_SIZE", 1)
 
     count_result = await dataset_service.query(filters=[], granularity="count")
     assert count_result.total == 1

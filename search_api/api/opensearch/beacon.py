@@ -11,6 +11,7 @@ from search_api.api.beacon.models import (
     BeaconFilteringScope,
     BeaconQueryFilter,
     BeaconQueryGranularity,
+    BeaconQueryPagination,
     BeaconResultSetResult,
     BeaconResultSets,
 )
@@ -312,8 +313,16 @@ class OpenSearchQueryBeaconService(OpenSearchBeaconService, BeaconQueryService[S
         """Return how many records match the given query clause."""
 
     @abstractmethod
-    async def _get_records(self, query_clause: dict[str, Any]) -> BeaconResultSets[S]:
-        """Return every record matching the given query clause."""
+    async def _get_records(
+        self, query_clause: dict[str, Any], offset: int, limit: int
+    ) -> BeaconResultSets[S]:
+        """Return one page of the records matching the given query clause.
+
+        :param query_clause: Restricts which records match.
+        :param offset: The number of matching records to skip.
+        :param limit: The most records to return, or 0 for every record.
+        :return: The records, in the same order for every page.
+        """
 
     @staticmethod
     def _get_boolean_result(resp: dict[str, Any]) -> BeaconQueryResult[Any]:
@@ -338,6 +347,7 @@ class OpenSearchQueryBeaconService(OpenSearchBeaconService, BeaconQueryService[S
         filters: list[BeaconQueryFilter],
         granularity: BeaconQueryGranularity = "record",
         scope: str | None = None,
+        pagination: BeaconQueryPagination | None = None,
     ) -> BeaconQueryResult[S]:
         """Execute the OpenSearch query."""
 
@@ -356,7 +366,11 @@ class OpenSearchQueryBeaconService(OpenSearchBeaconService, BeaconQueryService[S
                 result_sets=BeaconResultSets(),
             )
 
-        result_sets = await self._get_records(query_clause)
+        # The total counts every matching record, not only those in the page.
+        pagination = pagination or BeaconQueryPagination()
         return BeaconQueryResult(
-            total=len(result_sets.resultSet), result_sets=result_sets
+            total=await self._get_count(query_clause),
+            result_sets=await self._get_records(
+                query_clause, pagination.offset, pagination.limit
+            ),
         )

@@ -9,17 +9,29 @@ from search_api.api.bigpicture.models import (
     BigpictureBeaconImageResult,
 )
 from search_api.api.opensearch.beacon import OpenSearchQueryBeaconService
+from search_api.api.opensearch.clauses import build_terms_clause
 from search_api.api.opensearch.search import (
     count_documents,
     iter_paged_buckets,
     iter_paged_documents,
+    take_page,
     top_hits_source,
     top_hits_sub_agg,
 )
 from search_api.exceptions import SystemException
 
 # How many results one round trip fetches.
-_PAGE_SIZE = 1000
+_FETCH_SIZE = 1000
+
+
+def _fetch_size(offset: int, limit: int) -> int:
+    """How many results to fetch per round trip for a page, at most _FETCH_SIZE.
+
+    :param offset: The number of records skipped.
+    :param limit: The most records in the page, or 0 for every record.
+    """
+    return min(_FETCH_SIZE, offset + limit) if limit else _FETCH_SIZE
+
 
 _IMAGE_ID_FIELD = "image_id"
 _DATASET_OTHER_FIELDS = ("dataset_title", "dataset_description", "dataset_image_cnt")
@@ -80,7 +92,7 @@ class BigpictureDatasetBeaconService(
                 self.client,
                 self.index_name,
                 query_clause,
-                _PAGE_SIZE,
+                _FETCH_SIZE,
                 sources=_DATASET_COUNT_SOURCES,
             )
         }
@@ -88,14 +100,44 @@ class BigpictureDatasetBeaconService(
 
     @override
     async def _get_records(
-        self, query_clause: dict[str, Any]
+        self, query_clause: dict[str, Any], offset: int, limit: int
     ) -> BeaconResultSets[BigpictureBeaconDatasetResult]:
+        # Pages count datasets, not images. First find the dataset ids on this
+        # page, then read the matching images of those datasets only. When the
+        # page is every dataset, the query selects them already.
+        page_clause = query_clause
+        if offset or limit:
+            dataset_buckets = await take_page(
+                iter_paged_buckets(
+                    self.client,
+                    self.index_name,
+                    query_clause,
+                    _fetch_size(offset, limit),
+                    sources=_DATASET_COUNT_SOURCES,
+                ),
+                offset,
+                limit,
+            )
+            dataset_ids = [
+                bucket["key"][BP_DATASET_ID_FIELD] for bucket in dataset_buckets
+            ]
+            if not dataset_ids:
+                return BeaconResultSets()
+            page_clause = {
+                "bool": {
+                    "filter": [
+                        query_clause,
+                        build_terms_clause(BP_DATASET_ID_FIELD, dataset_ids),
+                    ]
+                }
+            }
+
         datasets: dict[str, BigpictureBeaconDatasetResult] = {}
         async for bucket in iter_paged_buckets(
             self.client,
             self.index_name,
-            query_clause,
-            _PAGE_SIZE,
+            page_clause,
+            _FETCH_SIZE,
             sources=_DATASET_RECORD_SOURCES,
             # Fetches dataset title, description, and image count from one
             # representative document per bucket. The composite key alone
@@ -131,21 +173,26 @@ class BigpictureImageBeaconService(
 
     @override
     async def _get_records(
-        self, query_clause: dict[str, Any]
+        self, query_clause: dict[str, Any], offset: int, limit: int
     ) -> BeaconResultSets[BigpictureBeaconImageResult]:
+        image_sources = await take_page(
+            iter_paged_documents(
+                self.client,
+                self.index_name,
+                query_clause,
+                _fetch_size(offset, limit),
+                source_fields=[_IMAGE_ID_FIELD],
+                sort_field=_IMAGE_ID_FIELD,
+            ),
+            offset,
+            limit,
+        )
         records = [
             BeaconResultSet[BigpictureBeaconImageResult](
                 id=source[_IMAGE_ID_FIELD],
                 setType="image",
                 results=[BigpictureBeaconImageResult(imageId=source[_IMAGE_ID_FIELD])],
             )
-            async for source in iter_paged_documents(
-                self.client,
-                self.index_name,
-                query_clause,
-                _PAGE_SIZE,
-                source_fields=[_IMAGE_ID_FIELD],
-                sort_field=_IMAGE_ID_FIELD,
-            )
+            for source in image_sources
         ]
         return BeaconResultSets(resultSet=records)

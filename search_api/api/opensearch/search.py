@@ -1,6 +1,7 @@
 """Document search and count: plain (unaggregated) and grouped (composite aggregation)."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
+from contextlib import aclosing
 from typing import Any
 
 from opensearchpy import AsyncOpenSearch, NotFoundError
@@ -61,7 +62,7 @@ async def iter_paged_documents(
     page_size: int,
     source_fields: list[str],
     sort_field: str,
-) -> AsyncIterator[dict[str, Any]]:
+) -> AsyncGenerator[dict[str, Any]]:
     """Yield every matching document's ``_source``, paging via search_after
     until exhausted. A page shorter than ``page_size`` is the last one.
 
@@ -156,7 +157,7 @@ async def iter_paged_buckets(
     page_size: int,
     sources: list[dict[str, Any]],
     sub_aggs: dict[str, Any] | None = None,
-) -> AsyncIterator[dict[str, Any]]:
+) -> AsyncGenerator[dict[str, Any]]:
     """Yield every bucket of a composite aggregation, paging until exhausted.
     A page shorter than ``page_size`` is the last one.
 
@@ -186,3 +187,23 @@ async def iter_paged_buckets(
         if len(buckets) < page_size:
             break
         after_key = agg["after_key"]
+
+
+async def take_page[T](items: AsyncGenerator[T], offset: int, limit: int) -> list[T]:
+    """Return the items from ``offset`` up to ``offset + limit``, reading no further.
+
+    :param items: The items, in order.
+    :param offset: The number of items to skip.
+    :param limit: The most items to return, or 0 for every item from ``offset``.
+    :return: The page of items.
+    """
+    page: list[T] = []
+    async with aclosing(items):
+        position = 0
+        async for item in items:
+            if position >= offset:
+                page.append(item)
+            position += 1
+            if limit and position >= offset + limit:
+                break
+    return page

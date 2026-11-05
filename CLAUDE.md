@@ -209,7 +209,9 @@ that replaced it.
 resolve first through `prepare_ontology_filter` (expanding to descendants on `includeDescendantTerms`, keeping only
 those the field's term cache lists, so a broad concept cannot outgrow one query); the filter `type` then picks a
 builder in `api/opensearch/clauses.py` — `text` → match, `controlledValue`/`keyword` → term(s),
-`ontology`/`ontologyOrValue` → term, `iso8601Range` → range in days.
+`ontology`/`ontologyOrValue` → term, `iso8601Range` → range in days. **Record granularity is paged** by Beacon
+`pagination`: `skip` counts pages, not records, and `limit` defaults to `0`, which returns every record, unlike the
+spec's 10. `numTotalResults` counts every match. A `/datasets` page is a page of datasets, each with all its matching images.
 
 - **A filter only constrains the scopes its field is indexed for**, so `_get_query_clause` emits one `should`
   branch per scope when any filter is scope-specific: filtering on clinical-only `diagnosis` leaves non-clinical

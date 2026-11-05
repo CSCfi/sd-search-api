@@ -2,9 +2,15 @@ import pytest
 from pydantic import ValidationError
 
 from search_api.api.beacon.models import (
+    MAX_FILTER_VALUE_LENGTH,
+    MAX_FILTER_VALUES,
+    MAX_FILTERS,
+    MAX_ID_LENGTH,
     SNOMED_ONTOLOGY_ID,
     BeaconFilteringOntology,
     BeaconFilteringTerm,
+    BeaconQuery,
+    BeaconQueryFilter,
     OntologyRestriction,
 )
 
@@ -54,3 +60,40 @@ def test_snomed_ecl_is_none_without_an_ontology_restriction():
 def test_ontology_restriction_requires_a_concept_id():
     with pytest.raises(ValidationError):
         OntologyRestriction(concept_ids=[], include_descendants=True)
+
+
+# Query limits
+#
+
+
+def test_query_at_limit_is_accepted():
+    value = "v" * MAX_FILTER_VALUE_LENGTH
+    query = BeaconQuery(
+        filters=[
+            BeaconQueryFilter(id="x" * MAX_ID_LENGTH, value=[value] * MAX_FILTER_VALUES)
+        ]
+        * MAX_FILTERS,
+        requestedScope="x" * MAX_ID_LENGTH,
+    )
+    assert len(query.filters) == MAX_FILTERS
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        {"filters": [{"id": "id", "value": "v"}] * (MAX_FILTERS + 1)},
+        {"filters": [{"id": "x" * (MAX_ID_LENGTH + 1), "value": "v"}]},
+        {"filters": [{"id": "id", "value": "v" * (MAX_FILTER_VALUE_LENGTH + 1)}]},
+        {"filters": [{"id": "id", "value": ["v"] * (MAX_FILTER_VALUES + 1)}]},
+        {
+            "filters": [
+                {"id": "id", "value": ["v", "v" * (MAX_FILTER_VALUE_LENGTH + 1)]}
+            ]
+        },
+        {"requestedScope": "x" * (MAX_ID_LENGTH + 1)},
+    ],
+    ids=["filters", "id", "value", "values", "value in list", "scope"],
+)
+def test_query_over_limit_is_rejected(query):
+    with pytest.raises(ValidationError):
+        BeaconQuery.model_validate(query)

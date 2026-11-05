@@ -206,8 +206,9 @@ that replaced it.
 
 `register_query_route(endpoint)` registers `/datasets` and `/images` from one handler; they differ only in which
 `BeaconQueryService` answers (by the endpoint's path) and which response model wraps the result. Ontology filters
-resolve first through `prepare_ontology_filter` (expanding to descendants on `includeDescendantTerms`); the filter
-`type` then picks a builder in `api/opensearch/clauses.py` — `text` → match, `controlledValue`/`keyword` → term(s),
+resolve first through `prepare_ontology_filter` (expanding to descendants on `includeDescendantTerms`, keeping only
+those the field's term cache lists, so a broad concept cannot outgrow one query); the filter `type` then picks a
+builder in `api/opensearch/clauses.py` — `text` → match, `controlledValue`/`keyword` → term(s),
 `ontology`/`ontologyOrValue` → term, `iso8601Range` → range in days.
 
 - **A filter only constrains the scopes its field is indexed for**, so `_get_query_clause` emits one `should`

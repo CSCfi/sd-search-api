@@ -5,7 +5,10 @@ from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
 from search_api.services.ontology.snomed import SnomedService
 from search_api.services.ontology.term_cache import OntologyTermCache
 
-router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)])
+# Admin routes are excluded from the public OpenAPI schema.
+router = APIRouter(
+    prefix="/admin", dependencies=[Depends(require_admin)], include_in_schema=False
+)
 
 
 def _snomed_term_service(request: Request) -> OntologyTermCache:

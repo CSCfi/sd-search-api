@@ -16,6 +16,10 @@ class TermCache(Protocol):
 
     async def get_concept_ids_by_term(self, field_id: str, term: str) -> set[str]: ...
 
+    async def get_terms_by_concept_id(
+        self, field_id: str, concept_ids: set[str]
+    ) -> dict[str, str]: ...
+
 
 def normalise_term(value: str) -> str:
     """Normalise a term so that it matches regardless of case and spacing."""
@@ -145,7 +149,16 @@ class OntologyService(ABC):
         for ids in resolved_ids:
             concept_ids.update(ids)
         if query_filter.includeDescendantTerms:
-            concept_ids.update(await self._find_descendant_ids(concept_ids))
+            descendant_ids = await self._find_descendant_ids(concept_ids)
+            if term_cache is not None:
+                # There is no reason to search for descendants that are not indexed,
+                # and leaving them out reduces the number of filter values being searched.
+                descendant_ids = set(
+                    await term_cache.get_terms_by_concept_id(
+                        filtering_term.id, descendant_ids
+                    )
+                )
+            concept_ids.update(descendant_ids)
         prepared_values: list[str] = list(concept_ids)
         # Only "ontologyOrValue" has a free-text field to match them against.
         if filtering_term.type == "ontologyOrValue":

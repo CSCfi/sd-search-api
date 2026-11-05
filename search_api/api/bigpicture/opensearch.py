@@ -1,4 +1,5 @@
 from typing import Any, ClassVar, override
+from urllib.parse import quote
 
 from search_api.api.beacon.models import BeaconResultSet, BeaconResultSets
 from search_api.api.bigpicture.models import (
@@ -64,7 +65,7 @@ class BigpictureDatasetBeaconService(
             datasetId=dataset_id,
             datasetTitle=source["dataset_title"],
             datasetDescription=source["dataset_description"],
-            datasetUrl=f"https://datasets.bigpicture.eu/datasets/{dataset_id.lower()}.html",
+            datasetUrl=f"https://datasets.bigpicture.eu/datasets/{quote(dataset_id.lower(), safe='')}.html",
             totalImageCount=source["dataset_image_cnt"],
             matchingImageCount=0,
             imageIds=[],

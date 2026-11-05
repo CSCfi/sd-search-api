@@ -76,7 +76,7 @@ class BeaconQueryPagination(BaseModel):
     Unlike the Beacon V2 default of 10, every record is returned by default and when the limit is 0.
     """
 
-    # The number of pages to skip,
+    # The number of pages to skip.
     skip: int = Field(default=0, ge=0)
     # The page size. 0 returns every record, and skip is then ignored.
     limit: int = Field(default=0, ge=0)

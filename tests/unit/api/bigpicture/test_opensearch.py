@@ -1,4 +1,8 @@
-from search_api.api.bigpicture.opensearch import BigpictureDatasetBeaconService
+from search_api.api.bigpicture.opensearch import (
+    _FETCH_SIZE,
+    BigpictureDatasetBeaconService,
+    _fetch_size,
+)
 
 
 def _bucket() -> dict:
@@ -22,3 +26,9 @@ def test_dataset_url_escapes_dataset_id():
         result.datasetUrl
         == "https://datasets.bigpicture.eu/datasets/..%2Fa%2Fb%3Fc%23d.html"
     )
+
+
+def test_fetch_size():
+    assert _fetch_size(offset=20, limit=10) == 30
+    assert _fetch_size(offset=_FETCH_SIZE, limit=10) == _FETCH_SIZE
+    assert _fetch_size(offset=0, limit=0) == _FETCH_SIZE

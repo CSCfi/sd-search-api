@@ -366,11 +366,12 @@ class OpenSearchQueryBeaconService(OpenSearchBeaconService, BeaconQueryService[S
                 result_sets=BeaconResultSets(),
             )
 
-        # The total counts every matching record, not only those in the page.
         pagination = pagination or BeaconQueryPagination()
-        return BeaconQueryResult(
-            total=await self._get_count(query_clause),
-            result_sets=await self._get_records(
-                query_clause, pagination.offset, pagination.limit
-            ),
+        result_sets = await self._get_records(
+            query_clause, pagination.offset, pagination.limit
         )
+        if pagination.offset or pagination.limit:
+            total = await self._get_count(query_clause)
+        else:
+            total = len(result_sets.resultSet)
+        return BeaconQueryResult(total=total, result_sets=result_sets)

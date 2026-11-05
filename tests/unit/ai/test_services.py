@@ -809,6 +809,40 @@ async def test_final_result_rejects_field_given_twice(deps):
     )
 
 
+@pytest.mark.asyncio
+async def test_final_result_rejects_too_many_values(deps, monkeypatch):
+    monkeypatch.setattr(ai_services, "MAX_FILTER_VALUES", 1)
+    with pytest.raises(ModelRetry) as error:
+        await final_result(
+            SimpleNamespace(deps=deps),
+            "i",
+            True,
+            [AIFilter(field=LABEL_SEX, value=["Female", "Male"])],
+        )
+    assert str(error.value) == (
+        f"Field '{LABEL_SEX}' matches 2 values, but a filter may have at most 1. "
+        "If it includes descendants, use a narrower concept or leave out the "
+        "descendants. Otherwise give fewer values."
+    )
+
+
+@pytest.mark.asyncio
+async def test_final_result_rejects_too_many_filters(deps, monkeypatch):
+    monkeypatch.setattr(ai_services, "MAX_FILTERS", 1)
+    deps.current_filters = [FILTER_IMAGE_IMG1]
+    with pytest.raises(ModelRetry) as error:
+        await final_result(
+            SimpleNamespace(deps=deps),
+            "i",
+            True,
+            [AIFilter(field=LABEL_SEX, value="Female")],
+        )
+    assert str(error.value) == (
+        "The query would have 2 filters, but it may have at most 1. "
+        "Give filters on fewer new fields."
+    )
+
+
 # Test _replace_with_indexed_values.
 #
 

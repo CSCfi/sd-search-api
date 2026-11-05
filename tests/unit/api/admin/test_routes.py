@@ -86,3 +86,7 @@ def test_reload_rejects_wrong_key(snomed_term_service, value_counts, client):
 def test_reload_requires_auth_header(snomed_term_service, value_counts, client):
     resp = client.post("/admin/caches/reload")
     assert resp.status_code == 401
+
+
+def test_admin_routes_not_in_schema():
+    assert not [path for path in app.openapi()["paths"] if path.startswith("/admin")]

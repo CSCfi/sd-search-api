@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.json_schema import SkipJsonSchema
@@ -24,6 +24,18 @@ BeaconFilteringTermType = Literal[
 # Beacon V2 query
 #
 
+# Maximum field id or scope id length in a query.
+MAX_ID_LENGTH = 256
+# Maximum number of filters in a query.
+MAX_FILTERS = 100
+# Maximum number of values for one filter in a query.
+MAX_FILTER_VALUES = 10_000
+# Maximum filter value length in a query, in characters. OpenSearch indexes a
+# # keyword of at most 32,766 bytes, so a longer value cannot match.
+MAX_FILTER_VALUE_LENGTH = 32_766
+
+_FilterValue = Annotated[str, Field(max_length=MAX_FILTER_VALUE_LENGTH)]
+
 
 # https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/requests/beaconRequestMeta.json
 class BeaconQueryMeta(BaseModel):
@@ -44,10 +56,13 @@ class BeaconQueryFilter(BaseModel):
     """
 
     # Used in all Beacon V2 filters.
-    id: str
+    id: str = Field(max_length=MAX_ID_LENGTH)
 
     # Used in Beacon V2 AlphanumericFilter.
-    value: str | list[str]
+    value: (
+        _FilterValue
+        | Annotated[list[_FilterValue], Field(max_length=MAX_FILTER_VALUES)]
+    )
     operator: Literal["="] = "="  # Only equality operator is supported
 
     # Used in Beacon V2 OntologyFilter.
@@ -57,10 +72,12 @@ class BeaconQueryFilter(BaseModel):
 class BeaconQuery(BaseModel):
     """Beacon V2 query."""
 
-    filters: list[BeaconQueryFilter] = Field(default_factory=list)
+    filters: list[BeaconQueryFilter] = Field(
+        default_factory=list, max_length=MAX_FILTERS
+    )
     requestedGranularity: BeaconQueryGranularity = "count"
     # Beacon V2 extension.
-    requestedScope: str | None = None
+    requestedScope: str | None = Field(default=None, max_length=MAX_ID_LENGTH)
 
 
 # https://github.com/ga4gh-beacon/beacon-v2/blob/main/framework/json/requests/beaconRequestBody.json

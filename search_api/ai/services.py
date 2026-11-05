@@ -29,7 +29,12 @@ from search_api.ai.models import (
     AIFilterableField,
     AIInterpretation,
 )
-from search_api.api.beacon.models import BeaconFilteringTerm, BeaconQueryFilter
+from search_api.api.beacon.models import (
+    MAX_FILTER_VALUES,
+    MAX_FILTERS,
+    BeaconFilteringTerm,
+    BeaconQueryFilter,
+)
 from search_api.api.beacon.services import BeaconService
 from search_api.api.models import FieldValue
 from search_api.api.opensearch.clauses import iso8601_range_to_days
@@ -410,10 +415,30 @@ async def final_result(
     # current filter.
     changed_field_ids = removed_field_ids | {f.id for f in query_filters}
     unchanged_filters = [f for f in current_filters if f.id not in changed_field_ids]
+    result_filters = unchanged_filters + query_filters
+
+    # The client sends these filters back in a query, so they must be within the
+    # query's limits.
+    labels = {t.id: t.label for t in ctx.deps.filtering_terms}
+    errors = [
+        f"Field '{labels[f.id]}' matches {len(f.value)} values, but a filter may "
+        f"have at most {MAX_FILTER_VALUES}. If it includes descendants, use a "
+        "narrower concept or leave out the descendants. Otherwise give fewer values."
+        for f in query_filters
+        if isinstance(f.value, list) and len(f.value) > MAX_FILTER_VALUES
+    ]
+    if len(result_filters) > MAX_FILTERS:
+        errors.append(
+            f"The query would have {len(result_filters)} filters, but it may have "
+            f"at most {MAX_FILTERS}. Give filters on fewer new fields."
+        )
+    if errors:
+        raise ModelRetry("\n".join(errors))
+
     return AIInterpretation(
         interpretation=interpretation,
         answerable=True,
-        filters=unchanged_filters + query_filters,
+        filters=result_filters,
     )
 
 

@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 
 import httpx
-from aiocache import cached  # type: ignore[import-untyped]
+from async_lru import alru_cache
 from pydantic import BaseModel
 from stdnum import verhoeff
 
@@ -22,6 +22,10 @@ logger = logging.getLogger(__name__)
 
 _PAGE_SIZE = 1000
 _CACHE_TTL = 60 * 60 * 24 * 30  # 30 days
+_CACHE_MAX_SIZE = 10_000
+# The result can contain hundreds of thousands of concepts, such as all descendants
+# of a concept.
+_ALL_CONCEPTS_CACHE_MAX_SIZE = 100
 _CONCEPT_ID_BATCH_SIZE = 50  # limit conceptIds to keep the request URL within limits
 # Snowstorm answers a shorter term with 400 "Search term must have at least 3
 # characters", so one is not sent rather than raising on the whole load or query.
@@ -68,7 +72,7 @@ def is_well_formed_concept_id(value: str) -> bool:
     return bool(verhoeff.is_valid(value))
 
 
-@cached(ttl=_CACHE_TTL)
+@alru_cache(maxsize=_CACHE_MAX_SIZE, ttl=_CACHE_TTL)
 async def _fetch_concepts(
     term: str,
     ecl: str | None,
@@ -119,7 +123,7 @@ async def _fetch_concepts(
 _EQUIVALENT_ASSOCIATIONS = ("SAME_AS", "REPLACED_BY")
 
 
-@cached(ttl=_CACHE_TTL)
+@alru_cache(maxsize=_CACHE_MAX_SIZE, ttl=_CACHE_TTL)
 async def _fetch_concept(concept_id: str, branch: str) -> dict | None:
     """Fetch one whole concept, or None if there is no such concept.
 
@@ -141,7 +145,7 @@ async def _fetch_concept(concept_id: str, branch: str) -> dict | None:
         return resp.json()
 
 
-@cached(ttl=_CACHE_TTL)
+@alru_cache(maxsize=_CACHE_MAX_SIZE, ttl=_CACHE_TTL)
 async def _is_selected_by_ecl(concept_id: str, ecl: str, branch: str) -> bool:
     """Return True if the ECL expression selects the concept.
 
@@ -160,7 +164,7 @@ async def _is_selected_by_ecl(concept_id: str, ecl: str, branch: str) -> bool:
         return bool(resp.json().get("items", []))
 
 
-@cached(ttl=_CACHE_TTL)
+@alru_cache(maxsize=_ALL_CONCEPTS_CACHE_MAX_SIZE, ttl=_CACHE_TTL)
 async def _fetch_all_concepts(ecl: str, branch: str) -> list[SnomedConcept]:
     """Fetch active concepts matching the ecl expression.
 

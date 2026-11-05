@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from search_api.api.beacon.models import BeaconQueryFilter
+from search_api.api.beacon.models import MAX_FILTERS, MAX_ID_LENGTH, BeaconQueryFilter
 
 
 class FieldValue(BaseModel):
@@ -58,11 +58,16 @@ class ValueCountsKey(BaseModel):
         return cls(field_id=field_id, scope=scope)
 
 
+# Maximum natural-language query length. The whole query is sent to the LLM.
+MAX_AI_QUERY_LENGTH = 5000
+
+
 class AIQueryRequest(BaseModel):
-    query: str
-    requestedScope: str | None = None
+    query: str = Field(max_length=MAX_AI_QUERY_LENGTH)
+    requestedScope: str | None = Field(default=None, max_length=MAX_ID_LENGTH)
     filters: list[BeaconQueryFilter] = Field(
         default_factory=list,
+        max_length=MAX_FILTERS,
         description=(
             "The current filters. The query may add, change or remove filters. "
             "The response returns every filter after these changes."

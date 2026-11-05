@@ -59,13 +59,25 @@ def filter(
 
 
 class MockTermCache:
-    def __init__(self, concept_ids_by_term: dict[str, set[str]] | None = None) -> None:
+    def __init__(
+        self,
+        concept_ids_by_term: dict[str, set[str]] | None = None,
+        indexed_concept_ids: set[str] | None = None,
+    ) -> None:
         self.concept_ids_by_term = concept_ids_by_term or {}
+        self.indexed_concept_ids = indexed_concept_ids or set()
         self.calls: list[tuple[str, str]] = []
+        self.indexed_calls: list[str] = []
 
     async def get_concept_ids_by_term(self, field_id: str, term: str) -> set[str]:
         self.calls.append((field_id, term))
         return set(self.concept_ids_by_term.get(term, ()))
+
+    async def get_terms_by_concept_id(
+        self, field_id: str, concept_ids: set[str]
+    ) -> dict[str, str]:
+        self.indexed_calls.append(field_id)
+        return {c: f"term of {c}" for c in concept_ids & self.indexed_concept_ids}
 
 
 class MockOntologyService(OntologyService):
@@ -257,6 +269,24 @@ async def test_prepare_ontology_filter_true_include_descendants(service):
     }
     # One call with every resolved concept id, not one call per value.
     assert service.find_descendant_calls == [{CONCEPT_ID_C1, CONCEPT_ID_C2}]
+
+
+@pytest.mark.asyncio
+async def test_prepare_ontology_filter_keeps_only_indexed_descendants(service):
+    """C1 and C2 are queried. In DESCENDANT_IDS_BY_CONCEPT_ID, C1 has the
+    descendants C3 and C4, and C2 has C4. Only C3 is indexed.
+
+    C4 is dropped from the filter values because it is not indexed. C1 and C2
+    are kept since only descendants are filtered.
+    """
+    term_cache = MockTermCache(indexed_concept_ids={CONCEPT_ID_C3})
+    result = await service.prepare_ontology_filter(
+        filter([CONCEPT_ID_C1, CONCEPT_ID_C2], include_descendants=True),
+        [term()],
+        term_cache,
+    )
+    assert set(result.value) == {CONCEPT_ID_C1, CONCEPT_ID_C2, CONCEPT_ID_C3}
+    assert term_cache.indexed_calls == [term().id]
 
 
 @pytest.mark.asyncio

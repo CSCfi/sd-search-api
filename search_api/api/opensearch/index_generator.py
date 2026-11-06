@@ -38,7 +38,8 @@ class OpenSearchIndexGeneratorService:
         for field in self._fields:
             for path, mapping in self._field_mappings(field):
                 self._insert(properties, path, mapping)
-        return {"mappings": {"properties": properties}}
+        # Reject documents with unmapped fields instead of guessing their type.
+        return {"mappings": {"dynamic": "strict", "properties": properties}}
 
     @staticmethod
     def _field_mappings(field: OpenSearchField) -> list[tuple[str, dict[str, Any]]]:

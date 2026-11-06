@@ -102,3 +102,8 @@ def test_generate_non_filtering_field_nested():
 def test_generate_no_settings():
     body = OpenSearchIndexGeneratorService([]).generate()
     assert "settings" not in body
+
+
+def test_generate_strict():
+    body = OpenSearchIndexGeneratorService([]).generate()
+    assert body["mappings"]["dynamic"] == "strict"

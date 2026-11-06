@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Any
 
 from psycopg import AsyncCursor
+from psycopg.rows import tuple_row
 from psycopg.types.json import Json
 
 from search_api.database.models import UnsyncedDocument
@@ -81,9 +82,15 @@ async def iter_unsynced(
     if doc_id is not None:
         query += " AND id = %s"
         params.append(doc_id)
-    await cur.execute(query, params)
-    async for row in cur:
-        yield UnsyncedDocument(id=row[0], payload=row[1], version=row[2])
+    # Many documents may be pending. A normal cursor would load all their
+    # payloads into memory at once. A server-side cursor reads them in batches
+    # instead. It needs WITH HOLD because the connection auto-commits.
+    async with cur.connection.cursor(
+        name="unsynced_documents", row_factory=tuple_row, withhold=True
+    ) as server_cur:
+        await server_cur.execute(query, params)
+        async for row in server_cur:
+            yield UnsyncedDocument(id=row[0], payload=row[1], version=row[2])
 
 
 async def mark_synced(cur: AsyncCursor, documents: Sequence[UnsyncedDocument]) -> int:

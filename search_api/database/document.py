@@ -4,7 +4,7 @@ Functions that participate in a transaction require a cursor, the
 others do not.
 """
 
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncGenerator, Sequence
 from datetime import datetime
 from typing import Any
 
@@ -70,7 +70,7 @@ async def max_synced_at() -> datetime | None:
 
 async def iter_unsynced(
     cur: AsyncCursor, doc_id: str | None = None
-) -> AsyncIterator[UnsyncedDocument]:
+) -> AsyncGenerator[UnsyncedDocument]:
     """Yield the unsynced documents, optionally filtered to one id.
 
     Includes row version for optimistic locking in mark_synced.

@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from contextlib import aclosing
 
 from opensearchpy import AsyncOpenSearch
 from psycopg import AsyncCursor
@@ -138,12 +139,15 @@ class SyncService:
                 # Clear the OpenSearch batch.
                 batch.clear()
 
-            async for doc in iter_unsynced(cur, doc_id):
-                batch.append(doc)
+            # Closed even if a flush fails, so its server-side cursor does not
+            # stay open on the connection.
+            async with aclosing(iter_unsynced(cur, doc_id)) as docs:
+                async for doc in docs:
+                    batch.append(doc)
 
-                if len(batch) >= BATCH_SIZE:
-                    # Flush batch.
-                    await flush_batch()
+                    if len(batch) >= BATCH_SIZE:
+                        # Flush batch.
+                        await flush_batch()
 
             if batch:
                 # Flush final batch.

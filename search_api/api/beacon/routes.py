@@ -1,9 +1,14 @@
 """Generic Beacon V2 API router, built per deployment domain."""
 
 import asyncio
+import math
 import os
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
+from limits import RateLimitItemPerMinute
+from limits.storage import MemoryStorage
+from limits.strategies import MovingWindowRateLimiter
 
 from search_api.ai.models import AIInterpretation
 from search_api.ai.services import AIService
@@ -40,7 +45,7 @@ from search_api.api.models import (
     FieldValue,
     ScopedCounts,
 )
-from search_api.conf import feature_config
+from search_api.conf import ai_config, feature_config
 from search_api.database.document import max_synced_at, pending_by_scope
 from search_api.database.repository import is_healthy as is_database_healthy
 from search_api.exceptions import SystemException, UserException
@@ -55,6 +60,11 @@ from search_api.services.ontology.term_cache import OntologyTermCache
 # Dependency providers are module-level so tests can override them by identity
 # via app.dependency_overrides. They resolve the active domain and shared
 # services from app.state, which the lifespan populates.
+def get_user_id(request: Request) -> str:
+    """The id of the logged-in user, which AuthMiddleware sets."""
+    return request.state.user_id
+
+
 def get_beacon_service(request: Request) -> BeaconService:
     """Return the BeaconService created in the service lifecycle.
 
@@ -273,15 +283,30 @@ def make_beacon_router(domain: Domain) -> APIRouter:
             domain.ai_assistant_description,
             ontology_id_by_field,
         )
+        # Rate limit LLM calls.
+        rate_limiter = MovingWindowRateLimiter(MemoryStorage())
+        rate_limit = RateLimitItemPerMinute(ai_config().LLM_REQUESTS_PER_MINUTE)
 
         @router.post("/ai/filters", response_model=AIInterpretation)
         async def ai_filters(
             request: AIQueryRequest,
+            user_id: str = Depends(get_user_id),
             beacon_service: BeaconService = Depends(get_beacon_service),
             ontology_term_services: dict[str, OntologyTermCache] = Depends(
                 get_ontology_term_services
             ),
         ) -> AIInterpretation:
+            if not rate_limiter.hit(rate_limit, user_id):
+                reset_time = rate_limiter.get_window_stats(
+                    rate_limit, user_id
+                ).reset_time
+                raise HTTPException(
+                    status_code=429,
+                    detail="Too many AI queries. Try again later.",
+                    headers={
+                        "Retry-After": str(max(1, math.ceil(reset_time - time.time())))
+                    },
+                )
             return await ai_service.interpret(
                 request.query,
                 beacon_service,

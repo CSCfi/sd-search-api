@@ -36,6 +36,7 @@ dependencies = [
     "idpyoidc>=5.0.0",
     "python-stdnum>=2.2",
     "async-lru>=2.4.0",
+    "limits>=5.8.0",
 ]
 
 [dependency-groups]

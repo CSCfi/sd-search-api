@@ -100,6 +100,25 @@ async def refresh(
     return response
 
 
+@router.delete("/refresh", status_code=204, response_class=Response)
+async def revoke(
+    request: Request,
+    auth_service: AuthServiceHandler = Depends(get_auth_service),
+) -> Response:
+    """Revoke the refresh token at the identity provider and clear both cookies.
+
+    Called by the UI before `/logout`, the only path the refresh cookie reaches. Always
+    `204`: a failed revocation is logged, and the session still ends in the browser.
+    """
+    refresh_token = request.cookies.get(REFRESH_COOKIE)
+    if refresh_token:
+        await auth_service.revoke(refresh_token)
+
+    response = Response(status_code=204)
+    auth_service.clear_session_cookies(response)
+    return response
+
+
 @router.get("/logout")
 async def logout(
     auth_service: AuthServiceHandler = Depends(get_auth_service),

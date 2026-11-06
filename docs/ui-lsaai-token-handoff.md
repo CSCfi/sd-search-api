@@ -28,6 +28,7 @@ The cookies are host-only.
 | `access_token` cookie | The LS AAI access token. `HttpOnly`, `SameSite=Strict`, `Path=/`, `Max-Age` 1 hour. Set by `/callback` and `/refresh`. |
 | `refresh_token` cookie | The LS AAI refresh token. `HttpOnly`, `SameSite=Strict`, `Path=/refresh`, so the browser sends it only to `/refresh`. |
 | `POST /refresh` | Needs no request body; it reads the refresh cookie. **`204`**: both cookies replaced. **`401`**: this refresh token is no good: there is no refresh cookie, or LS AAI rejected it. The cookies are left alone, because another tab may just have refreshed and been given new ones (see change 3). **`503`**: LS AAI unreachable, or refusing the API itself (a configuration fault on the server); cookies unchanged, so this is not a logout. |
+| `DELETE /refresh` | Revokes the refresh token at LS AAI and clears both cookies. Always **`204`**, with or without a refresh cookie; a failed revocation is only logged on the server. Call it before navigating to `/logout` (see change 3), which cannot revoke the token: the refresh cookie never reaches it. |
 | Any protected API path | **`401`** when the access token is missing, invalid or expired. **`503`** when the API cannot fetch or use LS AAI's signing keys, or has not yet fetched a key LS AAI has just rotated in. A `503` is not a logout: show an error; a later retry can succeed. |
 | `/login`, `/callback`, `/logout` | Unchanged for the UI. `/logout` now clears both cookies. `/callback` answers `503` when LS AAI is unreachable or issues a token the API rejects; the browser navigates to it, so there is nothing for the UI to handle. |
 
@@ -95,6 +96,10 @@ Replace the `401` handling in the response interceptor. Today it sends the brows
      `window.location.href = '/logout'`.
   6. If it returns `503` or a network error, reject with an `ApiError` (status `503`) and do
      **not** log the user out.
+- **Before every navigation to `/logout`**, the refresh `401` above and the user's own logout
+  alike, call `DELETE /refresh` with plain axios and `withCredentials: true`, and navigate whatever
+  it answers. Hold the `session-refresh` lock while calling it, so that no other tab's
+  `POST /refresh` finishes afterwards and sets a fresh, unrevoked refresh token.
 - **Without Web Locks** (`navigator.locks` undefined), fall back to the in-tab promise alone.
   Steps 2 and 5 still keep the losing tab from logging the user out.
 - **Put the refresh logic in its own module**, for example `src/services/sessionRefresh.ts`. The

@@ -196,26 +196,28 @@ class LoadService:
                     skipped += 1
                     continue
 
-                # A document loaded again replaces its log rows.
-                await delete_document_logs(cur, [doc.id])
+                # Write document's log rows and the document in one transaction.
+                async with cur.connection.transaction():
+                    # A document loaded again replaces its log rows.
+                    await delete_document_logs(cur, [doc.id])
 
-                # Write log messages from document extraction.
-                for log in extraction_logs(doc):
-                    await write_document_log(cur, log)
+                    # Write log messages from document extraction.
+                    for log in extraction_logs(doc):
+                        await write_document_log(cur, log)
 
-                # Drop keyword values OpenSearch would reject because they are too long.
-                for log in drop_too_long_keywords(doc):
-                    await write_document_log(cur, log)
+                    # Drop keyword values OpenSearch would reject because they are too long.
+                    for log in drop_too_long_keywords(doc):
+                        await write_document_log(cur, log)
 
-                # The document's ontology values are resolved to concept
-                # ids before the document is stored. Values that could not
-                # be resolved are logged.
-                await resolve_concepts(
-                    cur, doc, self._ontology_bindings, self._replace_concepts
-                )
-                await cache_concept_terms(doc, self._ontology_bindings)
-                # The document must be stored last, because retry skips stored documents.
-                await self.store_document(cur, doc, modified_at, document_set_id)
+                    # The document's ontology values are resolved to concept
+                    # ids before the document is stored. Values that could not
+                    # be resolved are logged.
+                    await resolve_concepts(
+                        cur, doc, self._ontology_bindings, self._replace_concepts
+                    )
+                    await cache_concept_terms(doc, self._ontology_bindings)
+                    # The document must be stored last, because retry skips stored documents.
+                    await self.store_document(cur, doc, modified_at, document_set_id)
                 loaded += 1
                 logger.debug("Loaded document %s.", doc.id)
 

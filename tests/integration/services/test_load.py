@@ -2,7 +2,7 @@ import os
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
@@ -545,6 +545,36 @@ async def test_load_writes_extraction_logs(single_concept_ontology_id, document_
     assert [(log.severity, log.message, log.field_id) for log in logs] == [
         ("WARNING", "Something looked odd.", None),
         ("ERROR", "Something was ignored.", _FIELD_ID),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_load_transaction(single_concept_ontology_id, document_id, monkeypatch):
+    """A document's log rows and the document are written in one transaction."""
+    field = _ontology_field(single_concept_ontology_id)
+    service = LoadService(create_term_caches({single_concept_ontology_id}), [field])
+
+    def _document(message: str) -> ExtractedDocument:
+        return ExtractedDocument(
+            id=document_id,
+            values=[OpenSearchFieldValue(field=field, value=(_CONCEPT_ID, None))],
+            logs=[ExtractLog(severity="WARNING", message=message)],
+        )
+
+    await service.store_documents(iter([_document("First load.")]), _MODIFIED_AT, None)
+
+    # A newer version fails after replacing the logs, before storing the document.
+    _store_document = AsyncMock(side_effect=SystemException("store_failure"))
+    monkeypatch.setattr(service, "store_document", _store_document)
+    with pytest.raises(SystemException, match="store_failure"):
+        await service.store_documents(
+            iter([_document("Second load.")]), _MODIFIED_AT + timedelta(days=1), None
+        )
+
+    async with get_cursor() as cur:
+        logs = await read_document_logs(cur, document_id)
+    assert [(log.severity, log.message, log.field_id) for log in logs] == [
+        ("WARNING", "First load.", None)
     ]
 
 

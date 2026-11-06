@@ -158,6 +158,12 @@ class AIConfiguration(_SecretSettings):
         description="Maximum amount of seconds the model may take to answer one query, all "
         "tool calls and corrections included.",
     )
+    LLM_REQUESTS_PER_MINUTE: int = Field(
+        default=10,
+        gt=0,
+        description="The number of queries each user may send to /ai/filters in a minute. "
+        "Counted per server replica.",
+    )
 
     @model_validator(mode="after")
     def validate_openai_settings(self) -> AIConfiguration:

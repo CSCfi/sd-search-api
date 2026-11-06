@@ -12,10 +12,12 @@ from search_api.api.beacon.models import BeaconQueryFilter
 from search_api.api.beacon.routes import (
     get_beacon_service,
     get_ontology_term_services,
+    get_user_id,
     make_beacon_router,
 )
 from search_api.api.bigpicture.domain import BP_DOMAIN
 from search_api.api.exception_handlers import register_exception_handlers
+from search_api.conf import ai_config
 from search_api.exceptions import SystemException
 
 QUERY = "images of females"
@@ -49,6 +51,7 @@ def client(monkeypatch, interpret) -> TestClient:
     # or term cache should not be used, and this is checked by using sentinels.
     app.dependency_overrides[get_beacon_service] = lambda: sentinel.beacon_service
     app.dependency_overrides[get_ontology_term_services] = lambda: sentinel.term_caches
+    app.dependency_overrides[get_user_id] = lambda: "user"
     return TestClient(app)
 
 
@@ -101,3 +104,16 @@ def test_ai_filters_system_exception(client, interpret):
     interpret.side_effect = SystemException("AI service error.")
     resp = client.post("/ai/filters", json={"query": QUERY})
     assert resp.status_code == 503
+
+
+def test_ai_filters_rate_limit(client, interpret):
+    for _ in range(ai_config().LLM_REQUESTS_PER_MINUTE):
+        assert client.post("/ai/filters", json={"query": QUERY}).status_code == 200
+    resp = client.post("/ai/filters", json={"query": QUERY})
+    assert resp.status_code == 429
+    assert int(resp.headers["Retry-After"]) > 0
+    # The limited query does not reach the model.
+    assert interpret.await_count == ai_config().LLM_REQUESTS_PER_MINUTE
+    # Each user has their own limit.
+    client.app.dependency_overrides[get_user_id] = lambda: "other user"
+    assert client.post("/ai/filters", json={"query": QUERY}).status_code == 200

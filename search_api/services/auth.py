@@ -55,6 +55,24 @@ class RefreshRejected(Exception):
     """The identity provider refused the refresh token: the session is over."""
 
 
+def _drop_default_consent(request: Any, **_: Any) -> Any:
+    """Undo idpyoidc's `prompt=consent`, which it adds whenever `offline_access` is
+    asked for: forced on every login, it denies the user the provider's option to
+    remember their consent."""
+    if request.get("prompt") == ["consent"]:
+        del request["prompt"]
+    return request
+
+
+def add_no_forced_consent(services: dict[str, Any]) -> None:
+    """idpyoidc add-on: never send `prompt=consent`, so the identity provider decides
+    when to ask for consent. Any other `prompt` asked for is sent as it is.
+
+    An add-on, not a hook on a client, since RPHandler builds a new client on every
+    login from its configuration."""
+    services["authorization"].post_construct.append(_drop_default_consent)
+
+
 class AuthServiceHandler:
     """OIDC Authorization Code + PKCE relying party, backed by idpyoidc's `RPHandler`."""
 
@@ -107,6 +125,10 @@ class AuthServiceHandler:
                             "code_challenge_length": 64,
                             "code_challenge_method": "S256",
                         },
+                    },
+                    "no_forced_consent": {
+                        "function": "search_api.services.auth.add_no_forced_consent",
+                        "kwargs": {},
                     },
                 },
             },

@@ -4,7 +4,7 @@ import base64
 import os
 import time
 from unittest.mock import MagicMock
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlparse
 
 os.environ["BASE_URL"] = "http://localhost:8000"
 os.environ["OIDC_URL"] = "http://localhost:9999"
@@ -15,8 +15,10 @@ os.environ["OIDC_SECURE_COOKIE"] = "true"
 import httpx
 import jwt
 import pytest
+from cryptojwt import KeyJar
 from fastapi import HTTPException
 from idpyoidc.client.exception import OidcServiceError
+from idpyoidc.client.rp_handler import RPHandler
 from requests.exceptions import ConnectionError as RequestsConnectionError
 from starlette.responses import Response
 
@@ -109,6 +111,38 @@ async def test_get_oidc_auth_url_returns_begin_result():
 
     assert url == "http://localhost:9999/auth?state=abc"
     mock_rph.begin.assert_called_once_with("aai")
+
+
+def _authorization_request(req_args: dict | None = None) -> dict[str, list[str]]:
+    """The query of an authorization URL built by a real RPHandler from our config,
+    the provider's metadata given up front so that nothing is fetched."""
+    handler = AuthServiceHandler(FakeMetadata(), FakeValidator())  # type: ignore[arg-type]
+    configs = handler.get_client_configs()
+    configs["aai"]["provider_info"] = {
+        "issuer": "http://localhost:9999",
+        "authorization_endpoint": "http://localhost:9999/authorize",
+        "token_endpoint": TOKEN_ENDPOINT,
+    }
+    rph = RPHandler(
+        "http://localhost:9999/.well-known/openid-configuration",
+        client_configs=configs,
+        keyjar=KeyJar(),
+    )
+    return parse_qs(urlparse(rph.begin("aai", req_args=req_args)).query)
+
+
+def test_authorization_request_leaves_consent_to_the_provider():
+    query = _authorization_request()
+
+    # idpyoidc would add prompt=consent for offline_access; the provider decides instead.
+    assert "prompt" not in query
+    assert "offline_access" in query["scope"][0].split()
+    assert query["code_challenge_method"] == ["S256"]
+    assert "nonce" in query
+
+
+def test_authorization_request_keeps_a_prompt_asked_for():
+    assert _authorization_request({"prompt": "login"})["prompt"] == ["login"]
 
 
 @pytest.mark.asyncio

@@ -195,6 +195,9 @@ rotates the refresh token**. A spent or expired one is `invalid_grant` (LS AAI s
 **leaving the cookies alone**: they are shared by every tab, and the tab that lost a refresh race would otherwise
 delete the ones the winner was just given. **Any other refusal from the token endpoint** — the client's credentials
 or permissions — **is logged and a `503`**, so a misconfiguration cannot pass for every session expiring.
+`/logout` never sees the refresh cookie, so **`DELETE /refresh` revokes it** at the discovered `revocation_endpoint`
+(RFC 7009) and clears both cookies; the UI calls it before `/logout`. It is always a `204`: a failed revocation is
+only logged, since the session must still end in the browser.
 
 Refresh is client-driven: a `401`, one `POST /refresh` at a time across tabs, a retry, and a retry again before a
 refresh `401` counts as logged out. LS AAI issues no refresh token unless `offline_access` is requested, hence its

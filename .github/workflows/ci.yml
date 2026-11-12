@@ -26,6 +26,14 @@ jobs:
       - name: Run ${{ matrix.tox-env }}
         run: tox -e ${{ matrix.tox-env }}
 
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Scan tracked files for secrets
+        run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 dir /repo --config /repo/.gitleaks.toml --redact --no-banner
+
   integration:
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest

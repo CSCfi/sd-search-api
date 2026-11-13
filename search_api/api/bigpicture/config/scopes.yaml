@@ -1,7 +1,7 @@
 filtering_scopes:
   - id: clinical
-    label: "Clinical (human pathology samples)"
+    label: "Clinical (human pathology images)"
     description: ""
   - id: non_clinical
-    label: "Non-clinical (non-human pathology samples)"
+    label: "Non-clinical (non-human pathology images)"
     description: ""

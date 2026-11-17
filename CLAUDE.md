@@ -280,7 +280,7 @@ and nothing else does** (`database/repository.py`): with no pool open, `get_conn
 ## Tests
 
 `tests/` mirrors the package. `tests/unit/` is what `tox` runs and needs nothing external; `tests/integration/`
-needs Postgres and OpenSearch (`tests/integration/.env` is a working config set); `tests/performance/` is Locust.
+needs Postgres and OpenSearch (`tests/integration/.env` is a working config set).
 The Bigpicture XML fixtures sit under `tests/files/bigpicture/xml/<version>/<dataset>/`, one directory per metadata
 standard version beside the schemas, and `tests/utils/bigpicture.py` is the one place their paths and accessions are
 written down; `tests/integration/bigpicture.py` checks and deletes what loading them stores. **A read takes one

@@ -131,6 +131,27 @@ async def test_dataset_pages(
 
 
 @pytest.mark.asyncio
+async def test_dataset_fields(bp_opensearch_index, dataset_service):
+    """The fields are read from one image of each dataset."""
+    result = await dataset_service.query(filters=[], granularity="record")
+    datasets = [
+        (
+            d.datasetId,
+            d.datasetTitle,
+            d.datasetDescription,
+            d.totalImageCount,
+            d.matchingImageCount,
+        )
+        for rs in result.result_sets.resultSet
+        for d in rs.results
+    ]
+    assert datasets == [
+        (d, d, d, len(image_ids), len(image_ids))
+        for d, image_ids in _IMAGES_BY_DATASET.items()
+    ]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("skip", "expected"),
     [(0, [("ds_1", ["image_1"])]), (1, [("ds_2", ["image_3"])]), (2, [])],

@@ -41,7 +41,6 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "locust>=2.43.4",
     "mypy>=1.19.1",
     "pre-commit>=4.6.0",
     "pynacl>=1.6.2",

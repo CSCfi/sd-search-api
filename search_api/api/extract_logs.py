@@ -1,6 +1,6 @@
 from collections.abc import Sequence
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from search_api.severity import LogSeverity
 
@@ -12,6 +12,8 @@ class ExtractLog(BaseModel):
     information that should not be logged, stored or reported. A concept id, term or
     controlled value confirmed to exist is not sensitive alone, so a message may
     quote one. It must not quote several, since together they may identify a person.
+
+    The value the problem is about can be shown on the console only when requested.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -19,9 +21,10 @@ class ExtractLog(BaseModel):
     severity: LogSeverity
     message: str
     field_id: str | None = None
+    value: str | None = Field(default=None, repr=False, exclude=True)
 
 
-def invalid_scheme_log(field_id: str, ontology_id: str) -> ExtractLog:
+def invalid_scheme_log(field_id: str, ontology_id: str, value: str) -> ExtractLog:
     """Log a code attribute whose scheme is not the field's ontology.
 
     The code, meaning and scheme are not quoted. They are submitter text that is
@@ -32,23 +35,28 @@ def invalid_scheme_log(field_id: str, ontology_id: str) -> ExtractLog:
         field_id=field_id,
         message=f"Value is ignored: its scheme does not match expected ontology "
         f"'{ontology_id}'.",
+        value=value,
     )
 
 
-def invalid_duration_log(field_id: str) -> ExtractLog:
+def invalid_duration_log(field_id: str, value: str) -> ExtractLog:
     return ExtractLog(
         severity="ERROR",
         field_id=field_id,
         message="Value is ignored: not a valid ISO-8601 duration.",
+        value=value,
     )
 
 
-def not_allowed_value_log(field_id: str, allowed: Sequence[str]) -> ExtractLog:
+def not_allowed_value_log(
+    field_id: str, allowed: Sequence[str], value: str
+) -> ExtractLog:
     allowed_values = ", ".join(f"'{allowed_value}'" for allowed_value in allowed)
     return ExtractLog(
         severity="ERROR",
         field_id=field_id,
         message=f"Value is ignored: not one of {allowed_values}.",
+        value=value,
     )
 
 

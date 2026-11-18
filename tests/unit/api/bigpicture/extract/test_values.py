@@ -92,7 +92,13 @@ def test_filter_value_by_scheme_error():
         _filter_value_by_scheme(value, SNOMED_ONTOLOGY_ID, "animal_species", logs)
         is None
     )
-    assert logs == [invalid_scheme_log("animal_species", SNOMED_ONTOLOGY_ID)]
+    assert logs == [
+        invalid_scheme_log(
+            "animal_species",
+            SNOMED_ONTOLOGY_ID,
+            f"code={_CODE!r} meaning={_MEANING!r} scheme='ICDO'",
+        )
+    ]
 
 
 def test_filter_values_by_scheme():
@@ -189,7 +195,13 @@ def test_extract_code_attribute_value_missing_ontology():
     )
 
     assert value is None
-    assert logs == [invalid_scheme_log("specimen_type", SNOMED_ONTOLOGY_ID)]
+    assert logs == [
+        invalid_scheme_log(
+            "specimen_type",
+            SNOMED_ONTOLOGY_ID,
+            "code='5' meaning='Tissue specimen' scheme=None",
+        )
+    ]
 
 
 def test_extract_string_attribute_value():
@@ -311,7 +323,9 @@ def test_extract_age_at_extraction_error(caplog):
     result = _extract_age_at_extraction(elem, logs)
 
     assert result is None
-    assert logs == [invalid_duration_log("age_at_extraction")]
+    assert logs == [
+        invalid_duration_log("age_at_extraction", "start='NOT_VALID' length='P1Y'")
+    ]
     assert logs[0].message == "Value is ignored: not a valid ISO-8601 duration."
 
 
@@ -356,6 +370,7 @@ def test_extract_age_at_extraction_too_long(start: str, length: str):
             severity="ERROR",
             field_id="age_at_extraction",
             message="Value is ignored: not a valid ISO-8601 duration.",
+            value=f"start={start!r} length={length!r}",
         )
     ]
 
@@ -824,7 +839,13 @@ def test_extract_finding_invalid_ontology():
     finding, logs = extract_finding(statement, _OBSERVATION_TYPE)
 
     assert finding is None
-    assert logs == [invalid_scheme_log("finding", SEND_ONTOLOGY_ID)]
+    assert logs == [
+        invalid_scheme_log(
+            "finding",
+            SEND_ONTOLOGY_ID,
+            "code='73211009' meaning='Inflammation' scheme='SNOMED CT'",
+        )
+    ]
 
 
 def test_extract_diagnoses():
@@ -842,7 +863,13 @@ def test_extract_diagnoses():
         "38341003",
     }
     assert all(item.observation_type == _OBSERVATION_TYPE for item in diagnoses)
-    assert logs == [invalid_scheme_log("diagnosis", SNOMED_ONTOLOGY_ID)]
+    assert logs == [
+        invalid_scheme_log(
+            "diagnosis",
+            SNOMED_ONTOLOGY_ID,
+            "code='8500/3' meaning='Duct carcinoma' scheme='ICDO'",
+        )
+    ]
 
 
 def _policy(type_of_dataset: str | None) -> ElementTree:
@@ -1211,6 +1238,10 @@ def _biological_being(tag: str, value: str) -> Element:
     [
         ("sex", "male", "Male"),
         ("sex", "NOT-KNOWN", "Not-known"),
+        ("sex", "Not known", "Not-known"),
+        ("sex", "not_known", "Not-known"),
+        ("sex", "Not known.", "Not-known"),
+        ("sex", "notknown", "Not-known"),
         ("control_terminology", "Treated", "TREATED"),
     ],
 )
@@ -1239,7 +1270,7 @@ def test_extract_sample_biological_being_fields_not_allowed_value(
 ):
     # The schema accepts any string, so this is not caught by validation.
     extracted = extract_sample_biological_being_fields(
-        _biological_being(field_id, "Jane Doe"), is_clinical=False
+        _biological_being(field_id, "Test"), is_clinical=False
     )
 
     assert extracted.fields == BigpictureSampleBiologicalBeingFields()
@@ -1248,6 +1279,7 @@ def test_extract_sample_biological_being_fields_not_allowed_value(
             severity="ERROR",
             field_id=field_id,
             message=f"Value is ignored: not one of {allowed}.",
+            value="Test",
         )
     ]
 

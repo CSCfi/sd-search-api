@@ -346,6 +346,8 @@ Options:
   that `--sync` re-indexes them. A dataset already stored in a newer version is skipped.
 - `--dry-run` — read and validate the datasets, reporting what would be loaded, writing nothing.
 - `--sync` — sync to OpenSearch after loading.
+- `--show-values` — show on the console the submitted value each logged problem is about. Values may be sensitive,
+  so they are never stored in `document_log`.
 
 `.c4gh` XML files are decrypted with the Crypt4GH key set by `C4GH_KEY_FILE`, and `C4GH_PASSPHRASE` if the key is
 protected.

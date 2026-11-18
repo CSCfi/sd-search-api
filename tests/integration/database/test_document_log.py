@@ -1,3 +1,4 @@
+import logging
 import os
 import uuid
 
@@ -8,6 +9,7 @@ from search_api.database.document_log import (
     DOCUMENT_LOG_TABLE,
     delete_document_logs,
     read_document_logs,
+    show_values,
     write_document_log,
 )
 from search_api.database.models import StoredDocumentLog
@@ -17,12 +19,13 @@ os.environ.setdefault("POSTGRES_DB", os.environ["BP_POSTGRES_DB"])
 os.environ.setdefault("POSTGRES_PORT", os.environ["BP_POSTGRES_PORT"])
 
 
-def _log(document_id: str, message: str) -> StoredDocumentLog:
+def _log(document_id: str, message: str, value: str | None = None) -> StoredDocumentLog:
     return StoredDocumentLog(
         document_id=document_id,
         field_id="animal_species",
         severity="ERROR",
         message=message,
+        value=value,
     )
 
 
@@ -55,3 +58,22 @@ async def test_delete_document_logs(document_ids):
         assert [
             log.message for log in await read_document_logs(cur, kept_log_row_id)
         ] == ["test4"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("show", [False, True])
+async def test_show_document_log_value(document_ids, show, caplog, capsys, monkeypatch):
+    """Document log value can only be printed on the console."""
+    monkeypatch.setattr("search_api.database.document_log._show_values", False)
+    show_values(show)
+    log = _log(document_ids[0], "TestMessage", "TestValue")
+
+    async with get_cursor() as cur:
+        with caplog.at_level(logging.ERROR):
+            await write_document_log(cur, log)
+        (stored_log,) = await read_document_logs(cur, document_ids[0])
+
+    assert ("TestValue" in capsys.readouterr().err) == show
+    assert "TestValue" not in caplog.text
+    assert stored_log.value is None
+    assert stored_log.message == "TestMessage"

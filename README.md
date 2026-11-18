@@ -264,7 +264,10 @@ is a single server shared by all of the deployments.
 
 The commands connect directly to Postgres and OpenSearch, so the environment must define
 `POSTGRES_HOST`,`POSTGRES_PORT`,`POSTGRES_DB`,`POSTGRES_USER`,`POSTGRES_PASSWORD` and
-`OPENSEARCH_HOST`,`OPENSEARCH_PORT`,`OPENSEARCH_USER`,and `OPENSEARCH_PASSWORD`. Loading 
+`OPENSEARCH_HOST`,`OPENSEARCH_PORT`,`OPENSEARCH_USER`,and `OPENSEARCH_PASSWORD`.
+`POSTGRES_USER` (default `sd_search_api`) can read and write the tables. `recreate` drops
+and creates them, so it also requires `POSTGRES_ADMIN_PASSWORD` of `POSTGRES_ADMIN_USER`
+(default `sd_search_admin`), who owns the tables. Loading 
 and the ontology commands also resolve preferred terms, that require `SNOWSTORM_URL`.
 
 Running against a deployed environment means logging in to OpenShift, taking the credentials from
@@ -292,6 +295,8 @@ export POSTGRES_PORT=
 export POSTGRES_DB=
 export POSTGRES_USER=
 export POSTGRES_PASSWORD=
+export POSTGRES_ADMIN_USER=
+export POSTGRES_ADMIN_PASSWORD=
 export OPENSEARCH_PORT=
 export OPENSEARCH_USER=
 export OPENSEARCH_PASSWORD=

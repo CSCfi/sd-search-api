@@ -54,7 +54,7 @@ search_api/
 │   └── auth.py access_token.py oidc_metadata.py load.py sync.py poller.py value_counts.py validate.py
 ├── database/           # every line of SQL, one module per table: repository.py models.py document.py
 │   │                   #   document_log.py terms_cache.py ontology_cache.py load.py
-│   └── schema/         # create.sql drop.sql
+│   └── schema/         # create.sql grant.sql drop.sql
 ├── utils/ (crypt dir token xml)  ai/  conf.py  exceptions.py  main.py
 ```
 
@@ -271,6 +271,7 @@ code fields are `keyword`; `age_at_extraction` is an `integer_range` of days. Te
 default would match on one word, far too broad given that results are never ranked.
 
 Settings (`conf.py`) are mostly **required** — no hardcoded host/db/password. Defaults: `POSTGRES_PORT=5432`,
+`POSTGRES_USER=sd_search_api`, `POSTGRES_ADMIN_USER=sd_search_admin` (only `recreate` connects as it),
 `POSTGRES_POOL_{MIN_SIZE=2,MAX_SIZE=10,MAX_LIFETIME=3600,TIMEOUT=5}`, `OPENSEARCH_PORT=9200`, `DEPLOYMENT_ENV=dev`,
 `{TERM,ONTOLOGY,VALUE_COUNT}_CACHE_REFRESH=300`, `FEATURE_AI=false`, `ADMIN_KEY=None`, `OIDC_SECURE_COOKIE=true`,
 `OIDC_SCOPE="openid profile email offline_access"`. There is **one class per source**, since a `BaseSettings` validates every field it declares:

@@ -126,7 +126,10 @@ filtering_terms:
     ontology:
       id: SCTID
     ontologyRestriction:
-      concept_ids: [ "1388477003" ]  # Tissue fixative (product)
+      concept_ids:
+        - "1388477003"  # Tissue fixative (product)
+        - "431510009"  # Formalin (substance)
+        - "434162003"  # Neutral buffered formalin (substance)
       include_descendants: true
 
   - id: staining_target

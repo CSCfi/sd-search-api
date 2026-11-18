@@ -13,7 +13,7 @@ Existing code is presumed reviewed and working. Make the smallest change that co
   2. show the smallest alternative that avoids it;
   3. ask for approval before proceeding.
 - Duplication, unclear code, and unrelated defects outside the task remain unchanged. Mention them in the final summary; do not fix them opportunistically.
-- There is no migration tool. The schema is `database/schema/create.sql` (applied by docker-compose initdb and by `admin.py recreate`, which is refused in prod), with `drop.sql` beside it. Editing `create.sql` never alters a deployed database, so any schema change needs explicit approval and an agreed plan for existing data, deployment order, rollback, and recovery.
+- There is no migration tool. The schema is `database/schema/create.sql` (applied by docker-compose initdb and by `admin.py recreate`, which is refused in prod), with `grant.sql` and `drop.sql` beside it. Editing `create.sql` never alters a deployed database, so any schema change needs explicit approval and an agreed plan for existing data, deployment order, rollback, and recovery.
 - Do not edit generated files by hand. The index mapping `api/bigpicture/index/bp-image-index.json` is generated from `config/fields.yaml` by `index generate`; field or analyzer changes also require `index recreate`, a sync, and a reload.
 
 ## Required investigation before an approved structural refactor

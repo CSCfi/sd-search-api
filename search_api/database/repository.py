@@ -15,23 +15,41 @@ from psycopg import AsyncConnection, AsyncCursor
 from psycopg.rows import tuple_row
 from psycopg_pool import AsyncConnectionPool
 
-from search_api.conf import database_config
+from search_api.conf import database_admin_config, database_config
 
 logger = logging.getLogger(__name__)
 
 _pool: AsyncConnectionPool[AsyncConnection] | None = None
 
 
-def _connect_kwargs() -> dict[str, Any]:
-    """Return the connection argument."""
+def _connect_shared_kwargs() -> dict[str, Any]:
+    """Return the connection arguments shared by both users."""
     cfg = database_config()
     return {
         "host": cfg.POSTGRES_HOST,
         "port": cfg.POSTGRES_PORT,
         "dbname": cfg.POSTGRES_DB,
+        "autocommit": True,
+    }
+
+
+def _connect_kwargs() -> dict[str, Any]:
+    """Return the connection arguments for the user who uses the tables."""
+    cfg = database_config()
+    return {
+        **_connect_shared_kwargs(),
         "user": cfg.POSTGRES_USER,
         "password": cfg.POSTGRES_PASSWORD.get_secret_value(),
-        "autocommit": True,
+    }
+
+
+def _connect_admin_kwargs() -> dict[str, Any]:
+    """Return the connection arguments for the user who owns the tables."""
+    admin = database_admin_config()
+    return {
+        **_connect_shared_kwargs(),
+        "user": admin.POSTGRES_ADMIN_USER,
+        "password": admin.POSTGRES_ADMIN_PASSWORD.get_secret_value(),
     }
 
 
@@ -120,6 +138,23 @@ async def get_cursor() -> AsyncGenerator[AsyncCursor]:
     """
     async with get_connection() as con, con.cursor(row_factory=tuple_row) as cur:
         yield cur
+
+
+@asynccontextmanager
+async def get_admin_cursor() -> AsyncGenerator[AsyncCursor]:
+    """
+    Get a new database cursor that auto-commits for the user that owns the tables.
+
+    The connection is never pooled.
+
+    :return: a new database cursor that auto-commits for the user that owns the tables.
+    """
+    con = await AsyncConnection.connect(**_connect_admin_kwargs())
+    try:
+        async with con.cursor(row_factory=tuple_row) as cur:
+            yield cur
+    finally:
+        await con.close()
 
 
 @asynccontextmanager

@@ -121,6 +121,7 @@ async def _read_documents(
             domain.filtering_terms,
             domain.filtering_scopes,
             domain.replace_concepts,
+            reload=args.full,
         )
     )
 
@@ -472,7 +473,10 @@ if __name__ == "__main__":
                 "--full",
                 action="store_true",
                 default=False,
-                help="Reset the incremental load marker and load all documents.",
+                help=(
+                    "Reset the incremental load marker and load all documents, "
+                    "including those already stored."
+                ),
             )
             source_parser.add_argument(
                 "--dry-run",

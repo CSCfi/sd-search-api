@@ -101,11 +101,23 @@ class LoadService:
         filtering_terms: Sequence[BeaconFilteringTerm],
         filtering_scopes: Sequence[BeaconFilteringScope] = (),
         replace_concepts: bool = True,
+        reload: bool = False,
     ) -> None:
+        """
+        Store extracted documents and cache their ontology preferred terms.
+
+        :param term_caches: The term cache of each ontology.
+        :param filtering_terms: The deployment's filtering terms.
+        :param filtering_scopes: The deployment's filtering scopes.
+        :param replace_concepts: Whether to replace a retired concept.
+        :param reload: Whether to store a document again when the stored one is the same
+            version. A stored newer version is never replaced.
+        """
         self._term_caches = term_caches
         self._ontology_bindings = get_ontology_bindings(filtering_terms, term_caches)
         self._filtering_scopes = filtering_scopes
         self._replace_concepts = replace_concepts
+        self._reload = reload
         self._initialised = False
 
     def validate_document(self, doc: ExtractedDocument) -> None:
@@ -173,7 +185,8 @@ class LoadService:
         Store extracted documents to the database.
 
         The documents are of one document set, and are stored with its modification
-        date. A document whose stored date is not older is skipped. Preferred terms
+        date. A document whose stored date is not older is skipped. On a reload, only
+        a document whose stored date is newer is skipped. Preferred terms
         for ontology concepts are stored in the term cache for the concept's ontology.
 
         :param docs_iter: Iterator of extracted documents.
@@ -189,7 +202,11 @@ class LoadService:
         async with get_cursor() as cur:
             for doc in docs_iter:
                 stored_modified_at = await get_modified_at(cur, doc.id)
-                if stored_modified_at is not None and stored_modified_at >= modified_at:
+                if stored_modified_at is not None and (
+                    stored_modified_at > modified_at
+                    if self._reload
+                    else stored_modified_at >= modified_at
+                ):
                     logger.debug(
                         "Skipping document %s — not newer than stored.", doc.id
                     )

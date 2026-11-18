@@ -342,7 +342,8 @@ The directory is either one dataset directory or a parent of several; which one 
 changed since the previous `load` or `fetch` are loaded: the two commands share one resume point.
 
 Options:
-- `--full` — forget the resume point and load every dataset.
+- `--full` — forget the resume point, and parse and store every dataset again, including those already stored, so
+  that `--sync` re-indexes them. A dataset already stored in a newer version is skipped.
 - `--dry-run` — read and validate the datasets, reporting what would be loaded, writing nothing.
 - `--sync` — sync to OpenSearch after loading.
 

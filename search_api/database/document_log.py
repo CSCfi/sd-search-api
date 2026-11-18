@@ -1,6 +1,7 @@
 """The document_log table."""
 
 import logging
+import sys
 
 from psycopg import AsyncCursor
 
@@ -17,12 +18,31 @@ _LOG_LEVELS: dict[LogSeverity, int] = {
 }
 
 
+# Whether a log entry's value is printed to the console. Values may be sensitive, so
+# this should only be turned on if the console output is not saved.
+_show_values = False
+
+
+def show_values(enabled: bool) -> None:
+    """Set whether a log entry's value is printed to stderr. It is never logged or stored."""
+
+    global _show_values
+    _show_values = enabled
+
+
 def log_document_log(log: StoredDocumentLog) -> None:
     """Log a document log entry."""
 
     source = f"document {log.document_id}"
     if log.field_id is not None:
         source += f", field {log.field_id}"
+    if _show_values and log.value is not None:
+        # Printed rather than logged, so no logging handler receives the value.
+        print(
+            f"{log.severity}: {log.message} ({source}, value {log.value!r})",
+            file=sys.stderr,
+        )
+        return
     logger.log(_LOG_LEVELS[log.severity], "%s (%s)", log.message, source)
 
 

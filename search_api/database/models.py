@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from search_api.severity import LogSeverity
 
@@ -45,3 +45,5 @@ class StoredDocumentLog(BaseModel):
     message: str
     field_id: str | None = None
     created_at: datetime | None = None
+    # A document value relating to the message. Printed only to the console and only when requested.
+    value: str | None = Field(default=None, repr=False, exclude=True)

@@ -578,7 +578,11 @@ def test_extract_does_not_quote_values(
 
 
 def test_extract_invalid_scheme_error():
-    dropped = invalid_scheme_log("diagnosis", SNOMED_ONTOLOGY_ID)
+    dropped = invalid_scheme_log(
+        "diagnosis",
+        SNOMED_ONTOLOGY_ID,
+        "code='8500/3' meaning='Infiltrating duct carcinoma, NOS' scheme='ICDO'",
+    )
 
     clinical = {
         doc.id: doc.logs

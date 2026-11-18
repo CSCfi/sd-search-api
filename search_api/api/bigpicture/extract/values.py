@@ -105,7 +105,13 @@ def _filter_value_by_scheme(
         or _matches_scheme(value.scheme, ontology_id)
     ):
         return value
-    logs.append(invalid_scheme_log(field_id, ontology_id))
+    logs.append(
+        invalid_scheme_log(
+            field_id,
+            ontology_id,
+            f"code={value.code!r} meaning={value.meaning!r} scheme={value.scheme!r}",
+        )
+    )
     return None
 
 
@@ -213,22 +219,28 @@ def _extract_string_attribute_value(
     return values[0]
 
 
+def _normalize_allowed_value(value: str) -> str:
+    """Return the value without case, whitespace and punctuation."""
+    return re.sub(r"[\W_]", "", value.casefold())
+
+
 def _extract_allowed_value(
     elem: Element, tag: str, allowed: tuple[str, ...], logs: list[ExtractLog]
 ) -> str | None:
     """Extract a STRING_ATTRIBUTE value that must be one of the allowed values.
 
-    The value is matched without regard to case, and the allowed spelling is
-    returned, so filters match it. The schema accepts any string, so a value
-    outside them is ignored and logged.
+    The value is matched ignoring case, whitespace and punctuation, so 'Not known'
+    matches 'Not-known'. The allowed spelling is returned, so filters match it.
+    The schema accepts any string, so a value outside them is ignored and logged.
     """
     value = _extract_string_attribute_value(elem, tag, logs=logs)
     if value is None:
         return None
+    normalized = _normalize_allowed_value(value)
     for allowed_value in allowed:
-        if allowed_value.casefold() == value.casefold():
+        if _normalize_allowed_value(allowed_value) == normalized:
             return allowed_value
-    logs.append(not_allowed_value_log(_field_id(tag), allowed))
+    logs.append(not_allowed_value_log(_field_id(tag), allowed, value))
     return None
 
 
@@ -339,7 +351,11 @@ def _extract_age_at_extraction(
     # invalid duration and OverflowError for one too long. iso8601_range_to_days
     # raises only ValueError.
     except ValueError, OverflowError:
-        logs.append(invalid_duration_log("age_at_extraction"))
+        logs.append(
+            invalid_duration_log(
+                "age_at_extraction", f"start={start!r} length={length_value[0]!r}"
+            )
+        )
         return None
 
     return start, end

@@ -47,6 +47,7 @@ def extraction_logs(doc: ExtractedDocument) -> Iterator[StoredDocumentLog]:
             field_id=log.field_id,
             severity=log.severity,
             message=log.message,
+            value=log.value,
         )
 
 

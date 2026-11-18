@@ -25,6 +25,7 @@ from search_api.database.document import (
 )
 from search_api.database.document_log import (
     log_document_log,
+    show_values,
 )
 from search_api.database.load import (
     delete_load_marker,
@@ -112,6 +113,7 @@ async def _read_documents(
             f"The {domain.name} deployment has no source to {args.command}."
         )
 
+    show_values(args.show_values)
     marker = await _load_marker(args)
     load_service = (
         None
@@ -492,6 +494,16 @@ if __name__ == "__main__":
                 action="store_true",
                 default=False,
                 help="Sync loaded data to OpenSearch after loading.",
+            )
+            source_parser.add_argument(
+                "--show-values",
+                action="store_true",
+                default=False,
+                help=(
+                    "Include the submitted value in each problem printed to stderr. "
+                    "Values may be sensitive. Use only in a terminal whose output is "
+                    "not saved."
+                ),
             )
 
         commands.add_parser(

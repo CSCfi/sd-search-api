@@ -9,6 +9,7 @@ import warnings
 from pathlib import Path
 
 from dotenv import load_dotenv
+from psycopg import sql
 
 import search_api
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
@@ -17,6 +18,7 @@ from search_api.api.domain import Domain
 from search_api.api.opensearch.client import create_search
 from search_api.api.opensearch.index import create_index
 from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorService
+from search_api.conf import database_config
 from search_api.database.document import (
     count_documents,
     reset_synced_at,
@@ -30,7 +32,7 @@ from search_api.database.load import (
     read_load_marker,
     write_load_marker,
 )
-from search_api.database.repository import get_cursor
+from search_api.database.repository import get_admin_cursor, get_cursor
 from search_api.database.terms_cache import delete_all_terms
 from search_api.exceptions import SystemException
 from search_api.services.fetch import DocumentSource
@@ -304,9 +306,23 @@ async def _recreate(domain: Domain, args: argparse.Namespace) -> None:
         logger.info("Aborted, nothing was dropped.")
         return
 
-    async with get_cursor() as cur:
+    # Replace the api user's psql variable with a placeholder for sql.SQL.format.
+    grant = _schema_path("grant").read_text()
+    if ':"api_user"' not in grant:
+        raise SystemException('grant.sql does not name the api user as :"api_user".')
+    grant = grant.replace(':"api_user"', "{api_user}")
+
+    # Tables are owned by the admin user.
+    async with get_admin_cursor() as cur:
+        # Drop and create the tables.
         for _name in ("drop", "create"):
             await cur.execute(_schema_path(_name).read_text())  # type: ignore[arg-type]
+        # Grant api user access to the tables.
+        await cur.execute(
+            sql.SQL(grant).format(  # type: ignore[arg-type]
+                api_user=sql.Identifier(database_config().POSTGRES_USER)
+            )
+        )
     logger.info("Recreated the database schema.")
 
     await _replace_index(domain)

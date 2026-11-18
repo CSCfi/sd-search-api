@@ -72,8 +72,22 @@ async def test_show_document_log_value(document_ids, show, caplog, capsys, monke
         with caplog.at_level(logging.ERROR):
             await write_document_log(cur, log)
         (stored_log,) = await read_document_logs(cur, document_ids[0])
+        # Every column of the stored row.
+        await cur.execute(
+            f"SELECT row_to_json(t)::text FROM {DOCUMENT_LOG_TABLE} t "
+            f"WHERE document_id = %s",
+            (document_ids[0],),
+        )
+        ((stored_row,),) = await cur.fetchall()
 
-    assert ("TestValue" in capsys.readouterr().err) == show
+    printed = capsys.readouterr().err
+    if show:
+        assert "TestMessage" in printed
+        assert "TestValue" in printed
+        assert "TestMessage" not in caplog.text
+    else:
+        assert printed == ""
+        assert "TestMessage" in caplog.text
     assert "TestValue" not in caplog.text
-    assert stored_log.value is None
+    assert "TestValue" not in stored_row
     assert stored_log.message == "TestMessage"

@@ -22,8 +22,8 @@ services:
       - POSTGRES_PORT=${BP_POSTGRES_PORT}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - OPENSEARCH_HOST=opensearch
-      - OPENSEARCH_USER=${OPENSEARCH_USER}
       - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD}
+      - OPENSEARCH_VERIFY_CERTS=${OPENSEARCH_VERIFY_CERTS}
       - SNOWSTORM_URL=${SNOWSTORM_URL}
       - SD_SUBMIT_API_URL=${SD_SUBMIT_API_URL}
       - SD_SUBMIT_PRIVATE_KEY=${SD_SUBMIT_PRIVATE_KEY}
@@ -49,6 +49,8 @@ services:
         condition: service_healthy
       opensearch:
         condition: service_healthy
+      opensearch-init:
+        condition: service_completed_successfully
       mockauth:
         condition: service_started
     healthcheck:
@@ -68,13 +70,13 @@ services:
       # name and password from POSTGRES_USER and POSTGRES_PASSWORD.
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=${POSTGRES_ADMIN_PASSWORD}
-      # Passwords for the admin and api users that postgres-initdb.sh creates. Their
+      # Passwords for the admin and api users that postgres-init.sh creates. Their
       # names are search_api/conf.py's defaults, repeated in that script.
       - POSTGRES_ADMIN_PASSWORD=${POSTGRES_ADMIN_PASSWORD}
       - POSTGRES_API_PASSWORD=${POSTGRES_PASSWORD}
       - PGPORT=${BP_POSTGRES_PORT}
     volumes:
-      - ./dockerfiles/postgres-initdb.sh:/docker-entrypoint-initdb.d/10_initdb.sh
+      - ./dockerfiles/postgres-init.sh:/docker-entrypoint-initdb.d/10_initdb.sh
       - ./search_api/database/schema:/schema
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U postgres -p ${BP_POSTGRES_PORT}" ]
@@ -88,18 +90,37 @@ services:
     hostname: opensearch
     environment:
       - discovery.type=single-node
-      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_PASSWORD}
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_ADMIN_PASSWORD}
       - plugins.security.disabled=false
     ulimits:
       memlock:
         soft: -1
         hard: -1
     healthcheck:
-      test: [ "CMD-SHELL", "curl -fks https://localhost:9200/_cluster/health -u admin:${OPENSEARCH_PASSWORD} | grep -qv '\"status\":\"red\"'" ]
+      test: [ "CMD-SHELL", "curl -fks https://localhost:9200/_cluster/health -u admin:${OPENSEARCH_ADMIN_PASSWORD} | grep -qv '\"status\":\"red\"'" ]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 60s
+  # Creates the user the server connects as, once OpenSearch is up, with admin.py.
+  # The image holds the code but not scripts/, which is mounted.
+  opensearch-init:
+    profiles: [ "dev" ]
+    build:
+      dockerfile: ./dockerfiles/Dockerfile
+      context: .
+    image: cscfi/sd-search-api
+    entrypoint: [ "uv", "run", "--no-dev", "python", "scripts/admin.py", "Bigpicture", "index", "user" ]
+    environment:
+      - OPENSEARCH_HOST=opensearch
+      - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD}
+      - OPENSEARCH_ADMIN_PASSWORD=${OPENSEARCH_ADMIN_PASSWORD}
+      - OPENSEARCH_VERIFY_CERTS=${OPENSEARCH_VERIFY_CERTS}
+    volumes:
+      - ./scripts:/app/scripts:ro
+    depends_on:
+      opensearch:
+        condition: service_healthy
   opensearch-dashboards:
     profiles: [ "dev" ]
     image: opensearchproject/opensearch-dashboards:2
@@ -108,7 +129,7 @@ services:
     environment:
       - OPENSEARCH_HOSTS=["https://opensearch:9200"]
       - OPENSEARCH_USERNAME=admin
-      - OPENSEARCH_PASSWORD=${OPENSEARCH_PASSWORD}
+      - OPENSEARCH_PASSWORD=${OPENSEARCH_ADMIN_PASSWORD}
       - OPENSEARCH_SSL_VERIFICATIONMODE=none
     volumes:
       - ./dockerfiles/opensearch-dashboards-entrypoint.sh:/usr/share/opensearch-dashboards/entrypoint.sh

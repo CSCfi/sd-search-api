@@ -267,7 +267,10 @@ The commands connect directly to Postgres and OpenSearch, so the environment mus
 `OPENSEARCH_HOST`,`OPENSEARCH_PORT`,`OPENSEARCH_USER`,and `OPENSEARCH_PASSWORD`.
 `POSTGRES_USER` (default `sd_search_api`) can read and write the tables. `recreate` drops
 and creates them, so it also requires `POSTGRES_ADMIN_PASSWORD` of `POSTGRES_ADMIN_USER`
-(default `sd_search_admin`), who owns the tables. Loading 
+(default `sd_search_admin`), who owns the tables. `OPENSEARCH_USER` (default `sd_search_api`)
+has every right on the deployment's indexes and none elsewhere. The OpenSearch TLS certificate
+is verified unless `OPENSEARCH_VERIFY_CERTS` is `false`; `OPENSEARCH_CA_CERTS` names the CA
+certificates to verify it with. Loading 
 and the ontology commands also resolve preferred terms, that require `SNOWSTORM_URL`.
 
 Running against a deployed environment means logging in to OpenShift, taking the credentials from
@@ -300,10 +303,13 @@ export POSTGRES_ADMIN_PASSWORD=
 export OPENSEARCH_PORT=
 export OPENSEARCH_USER=
 export OPENSEARCH_PASSWORD=
+export OPENSEARCH_VERIFY_CERTS=false
 export SNOWSTORM_URL="https://snowstorm.rahtiapp.fi"
 ```
 
-OpenSearch is reached through a port forward rather than directly, so its host is localhost:
+OpenSearch is reached through a port forward rather than directly, so its host is localhost.
+The OpenSearch certificate does not name localhost, which is why `OPENSEARCH_VERIFY_CERTS` is
+`false` above:
 
 ```bash
 export OPENSEARCH_HOST=localhost
@@ -418,6 +424,21 @@ and commit the file.
 
 ```bash
 uv run python scripts/admin.py Bigpicture index generate
+```
+
+#### Create the OpenSearch user
+
+Create the OpenSearch user `OPENSEARCH_USER` with the password `OPENSEARCH_PASSWORD`. The
+server and the other admin commands connect to OpenSearch as this user. It has full access to
+every index whose name starts with the deployment's index name, and can also check the cluster
+health and send bulk requests.
+
+Run it once for each deployment in every environment, before the server is started. It connects
+as the OpenSearch admin user, `OPENSEARCH_ADMIN_USER` (default `admin`) and also needs
+`OPENSEARCH_ADMIN_PASSWORD`.
+
+```bash
+uv run python scripts/admin.py Bigpicture index user
 ```
 
 #### Create the OpenSearch index

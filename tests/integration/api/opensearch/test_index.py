@@ -34,7 +34,7 @@ async def index(search: AsyncOpenSearch) -> AsyncIterator[str]:
     With set id keyword field. It is not refreshed automatically, so a search
     finds a document only after a refresh.
     """
-    name = f"test-index-{uuid.uuid4().hex}"
+    name = f"bp-image-index-test-{uuid.uuid4().hex}"
     await search.indices.create(
         index=name,
         body={
@@ -124,7 +124,9 @@ async def test_delete_documents_by_ids_without_ids(search, index):
 
 @pytest.mark.asyncio
 async def test_delete_documents_by_ids_no_index(search):
-    assert await delete_documents_by_ids(search, "no-index", ["id_1"]) == 0
+    assert (
+        await delete_documents_by_ids(search, "bp-image-index-no-index", ["id_1"]) == 0
+    )
 
 
 # delete_documents_by_field
@@ -202,7 +204,7 @@ async def test_delete_documents_by_field_without_index(search):
     assert (
         await delete_documents_by_field(
             search,
-            "no-such-index",
+            "bp-image-index-no-such-index",
             _SET_FIELD,
             ["set_1"],
             [],
@@ -342,7 +344,7 @@ async def test_delete_all_deletes_every_document(search, index):
 
 @pytest.mark.asyncio
 async def test_delete_all_no_index(search):
-    assert await delete_all_documents(search, "no-index") == 0
+    assert await delete_all_documents(search, "bp-image-index-no-index") == 0
 
 
 # update_index_mapping

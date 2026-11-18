@@ -15,10 +15,14 @@ import search_api
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
 from search_api.api.deployments import DOMAINS
 from search_api.api.domain import Domain
-from search_api.api.opensearch.client import create_search
+from search_api.api.opensearch.client import create_admin_search, create_search
 from search_api.api.opensearch.index import create_index, update_index_mapping
 from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorService
-from search_api.conf import database_config
+from search_api.conf import (
+    database_config,
+    opensearch_admin_config,
+    opensearch_config,
+)
 from search_api.database.document import (
     count_documents,
     reset_synced_at,
@@ -445,6 +449,55 @@ def _generate_index(domain: Domain) -> None:
     logger.info("Wrote OpenSearch index to %s.", path)
 
 
+async def _create_index_user(domain: Domain) -> None:
+    """Create or update the OpenSearch user for the API and CLI. Runs as the admin user.
+
+    The user gets every right on the deployment's index, and on every index whose name
+    starts with it, such as test indexes. The user can also check cluster health,
+    for /health, and send bulk requests. It cannot use other indexes, change cluster
+    settings, or use the security plugin. The admin user creates it.
+    """
+    cfg = opensearch_config()
+    user = cfg.OPENSEARCH_USER
+    # Replacing the admin user would drop its roles and lock it out.
+    if user == opensearch_admin_config().OPENSEARCH_ADMIN_USER:
+        raise SystemException(
+            f"Cannot create the OpenSearch user '{user}': it is the admin user "
+            "(OPENSEARCH_ADMIN_USER). Set OPENSEARCH_USER to the user the API "
+            "connects."
+        )
+    search = create_admin_search()
+    try:
+        await search.security.create_role(
+            role=user,
+            body={
+                "cluster_permissions": [
+                    "cluster:monitor/health",
+                    "indices:data/write/bulk",
+                ],
+                "index_permissions": [
+                    {
+                        "index_patterns": [f"{domain.opensearch_index}*"],
+                        "allowed_actions": ["indices_all"],
+                    }
+                ],
+            },
+        )
+        await search.security.create_user(
+            username=user,
+            body={"password": cfg.OPENSEARCH_PASSWORD.get_secret_value()},
+        )
+        await search.security.create_role_mapping(role=user, body={"users": [user]})
+        logger.info(
+            "Created or updated OpenSearch user '%s' with full access to indexes "
+            "matching '%s*' only.",
+            user,
+            domain.opensearch_index,
+        )
+    finally:
+        await search.close()
+
+
 async def _create_index(domain: Domain) -> None:
     body = OpenSearchIndexGeneratorService(domain.opensearch_fields).generate()
     search = create_search()
@@ -544,6 +597,17 @@ if __name__ == "__main__":
             help=(
                 "Generate the OpenSearch index mapping from the field definitions "
                 "and write it to the deployment's index file."
+            ),
+        )
+        index_commands.add_parser(
+            "user",
+            help=(
+                "Create the OpenSearch user OPENSEARCH_USER with password "
+                "OPENSEARCH_PASSWORD, or update it, as the admin user "
+                "OPENSEARCH_ADMIN_USER. It gets full access to the indexes whose "
+                "names start with the deployment's index name, and may check "
+                "cluster health and send bulk requests. Required once per "
+                "deployment in each environment, before the server starts."
             ),
         )
         index_commands.add_parser(
@@ -685,6 +749,8 @@ if __name__ == "__main__":
             asyncio.run(_update_index(domain))
         elif args.index_command == "recreate":
             asyncio.run(_recreate_index(domain, args))
+        elif args.index_command == "user":
+            asyncio.run(_create_index_user(domain))
     elif args.command == "refresh":
         asyncio.run(_refresh_ontology(_ONTOLOGY_IDS[args.ontology]))
     elif args.command == "clear":

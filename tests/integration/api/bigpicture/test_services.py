@@ -464,7 +464,7 @@ async def test_image_query_boolean_and_count_granularity(
 
 @pytest.fixture(scope="module")
 def text_index_name() -> str:
-    return f"bp-text-test-{uuid.uuid4().hex}"
+    return f"bp-image-index-text-test-{uuid.uuid4().hex}"
 
 
 @pytest_asyncio.fixture(scope="module")

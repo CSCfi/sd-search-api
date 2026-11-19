@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from search_api.api.opensearch import index as index_module
-from search_api.api.opensearch.index import delete_documents_by_ids
+from search_api.api.opensearch.index import _field_types, delete_documents_by_ids
 from search_api.exceptions import SystemException
 
 
@@ -42,3 +42,33 @@ async def test_delete_documents_by_ids_success(monkeypatch):
     monkeypatch.setattr(index_module.helpers, "async_bulk", bulk)
 
     assert await delete_documents_by_ids(_search(), "index", ["id1", "id2", "id3"]) == 2
+
+
+def test_field_types():
+    """Every field is listed by dotted path, a nested group and each of its fields."""
+    properties = {
+        "scope": {"type": "keyword"},
+        "specimen": {
+            "type": "nested",
+            "properties": {
+                "sex": {"type": "keyword"},
+                "age_at_extraction": {"type": "integer_range"},
+            },
+        },
+        "empty": {"type": "nested", "properties": {}},
+        "object": {"properties": {"name": {"type": "text"}}},
+    }
+
+    assert _field_types(properties) == {
+        "scope": "keyword",
+        "specimen": "nested",
+        "specimen.sex": "keyword",
+        "specimen.age_at_extraction": "integer_range",
+        "empty": "nested",
+        "object": "object",
+        "object.name": "text",
+    }
+
+
+def test_field_types_empty():
+    assert _field_types({}) == {}

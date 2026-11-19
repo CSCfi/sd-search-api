@@ -16,7 +16,6 @@ data:
   POSTGRES_HOST: "postgres.example.com"
   POSTGRES_PORT: "5432"
   POSTGRES_DB: "sd_search_bigpicture"
-  POSTGRES_USER: "postgres"
 
   # Snowstorm SNOMED CT server
   SNOWSTORM_URL: "https://snowstorm.example.com"

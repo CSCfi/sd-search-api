@@ -95,38 +95,11 @@ async def iter_paged_documents(
 _COMPOSITE_AGG_NAME = "pages"
 
 
-def top_hits_sub_agg(source_fields: list[str], size: int = 1) -> dict[str, Any]:
-    """Build a top_hits sub-aggregation, fetching fields from ``size``
-    representative documents within a bucket. A composite aggregation's
-    ``sub_aggs`` value when a bucket's own key does not carry every field a
-    result needs.
-
-    :param source_fields: Fields to fetch from each representative document.
-    :param size: How many representative documents to fetch per bucket.
-    :return: The top_hits sub-aggregation clause.
-    """
-    return {"top_hits": {"size": size, "_source": source_fields}}
-
-
-def top_hits_source(bucket: dict[str, Any], name: str) -> dict[str, Any]:
-    """Return the first representative document's ``_source`` from a
-    bucket's named top_hits sub-aggregation (built by ``top_hits_sub_agg``),
-    or ``{}`` if that bucket has no hits.
-
-    :param bucket: One bucket of a composite aggregation response.
-    :param name: The top_hits sub-aggregation's name within that bucket.
-    :return: The representative document's ``_source``, or ``{}``.
-    """
-    hits = bucket[name]["hits"]["hits"]
-    return hits[0]["_source"] if hits else {}
-
-
 def _paged_buckets_request(
     query_clause: dict[str, Any],
     sources: list[dict[str, Any]],
     page_size: int,
     after_key: dict[str, Any] | None,
-    sub_aggs: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the request body for one page of a composite aggregation.
 
@@ -136,18 +109,17 @@ def _paged_buckets_request(
     :param page_size: How many buckets to request per page.
     :param after_key: The previous page's after_key, to advance to the next
         page, or None for the first page.
-    :param sub_aggs: Extra sub-aggregation(s) to run for every bucket.
     :return: The OpenSearch request body.
     """
     composite: dict[str, Any] = {"size": page_size, "sources": sources}
     if after_key:
         composite["after"] = after_key
 
-    aggs: dict[str, Any] = {"composite": composite}
-    if sub_aggs:
-        aggs["aggs"] = sub_aggs
-
-    return {"size": 0, "query": query_clause, "aggs": {_COMPOSITE_AGG_NAME: aggs}}
+    return {
+        "size": 0,
+        "query": query_clause,
+        "aggs": {_COMPOSITE_AGG_NAME: {"composite": composite}},
+    }
 
 
 async def iter_paged_buckets(
@@ -156,7 +128,6 @@ async def iter_paged_buckets(
     query_clause: dict[str, Any],
     page_size: int,
     sources: list[dict[str, Any]],
-    sub_aggs: dict[str, Any] | None = None,
 ) -> AsyncGenerator[dict[str, Any]]:
     """Yield every bucket of a composite aggregation, paging until exhausted.
     A page shorter than ``page_size`` is the last one.
@@ -167,18 +138,13 @@ async def iter_paged_buckets(
     :param page_size: How many buckets to request per page.
     :param sources: The composite's bucket keys, in order — e.g. one field to
         group by, or several to bucket by their combination.
-    :param sub_aggs: Extra sub-aggregation(s) to run for every bucket —
-        typically ``top_hits_sub_agg``, fetching fields a caller needs but
-        the composite bucket key itself doesn't have.
     :return: An async iterator over every bucket, across every page.
     """
     after_key: dict[str, Any] | None = None
     while True:
         resp = await search.search(
             index=index_name,
-            body=_paged_buckets_request(
-                query_clause, sources, page_size, after_key, sub_aggs
-            ),
+            body=_paged_buckets_request(query_clause, sources, page_size, after_key),
         )
         agg = resp["aggregations"][_COMPOSITE_AGG_NAME]
         buckets = agg["buckets"]

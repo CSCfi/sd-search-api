@@ -1,8 +1,7 @@
--- Drops everything create.sql creates. Kept beside it so the two stay in step.
--- Indexes are dropped with their table.
-DROP TABLE IF EXISTS document;
-DROP TABLE IF EXISTS terms_cache;
-DROP TABLE IF EXISTS ontology_cache;
-DROP TABLE IF EXISTS document_log;
-DROP TABLE IF EXISTS load;
-DROP TABLE IF EXISTS load_history;
+-- Drop tables created by create.sql.
+DROP TABLE IF EXISTS public.document;
+DROP TABLE IF EXISTS public.terms_cache;
+DROP TABLE IF EXISTS public.ontology_cache;
+DROP TABLE IF EXISTS public.document_log;
+DROP TABLE IF EXISTS public.load;
+DROP TABLE IF EXISTS public.load_history;

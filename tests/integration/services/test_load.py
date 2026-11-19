@@ -548,6 +548,65 @@ async def test_load_writes_extraction_logs(single_concept_ontology_id, document_
     ]
 
 
+def _document_with_log(field, document_id: str, message: str) -> ExtractedDocument:
+    """Return a document with a document log row."""
+    return ExtractedDocument(
+        id=document_id,
+        values=[OpenSearchFieldValue(field=field, value=(_CONCEPT_ID, None))],
+        logs=[ExtractLog(severity="WARNING", message=message)],
+    )
+
+
+async def _stored_log_messages(document_id: str) -> list[str]:
+    async with get_cursor() as cur:
+        return [log.message for log in await read_document_logs(cur, document_id)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reload", "expected"), [(False, "First load."), (True, "Second load.")]
+)
+async def test_load_same_version(
+    single_concept_ontology_id, document_id, reload, expected
+):
+    """The same version is skipped, unless reloaded."""
+    field = _ontology_field(single_concept_ontology_id)
+    terms = create_term_caches({single_concept_ontology_id})
+
+    await LoadService(terms, [field]).store_documents(
+        iter([_document_with_log(field, document_id, "First load.")]),
+        _MODIFIED_AT,
+        None,
+    )
+    await LoadService(terms, [field], reload=reload).store_documents(
+        iter([_document_with_log(field, document_id, "Second load.")]),
+        _MODIFIED_AT,
+        None,
+    )
+
+    assert await _stored_log_messages(document_id) == [expected]
+
+
+@pytest.mark.asyncio
+async def test_reload_skips_older_version(single_concept_ontology_id, document_id):
+    """A reload never replaces a stored newer version."""
+    field = _ontology_field(single_concept_ontology_id)
+    terms = create_term_caches({single_concept_ontology_id})
+
+    await LoadService(terms, [field]).store_documents(
+        iter([_document_with_log(field, document_id, "Newer version.")]),
+        _MODIFIED_AT,
+        None,
+    )
+    await LoadService(terms, [field], reload=True).store_documents(
+        iter([_document_with_log(field, document_id, "Older version.")]),
+        _MODIFIED_AT - timedelta(days=1),
+        None,
+    )
+
+    assert await _stored_log_messages(document_id) == ["Newer version."]
+
+
 @pytest.mark.asyncio
 async def test_load_transaction(single_concept_ontology_id, document_id, monkeypatch):
     """A document's log rows and the document are written in one transaction."""

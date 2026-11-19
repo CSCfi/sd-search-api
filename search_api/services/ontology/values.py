@@ -281,6 +281,7 @@ async def _resolve_concept_id(
                 message=f"The provided concept id{quoted_id} is invalid for "
                 f"field '{ontology_value.field_id}' of "
                 f"ontology '{binding.ontology_id}'.",
+                value=provided_concept_id,
             ),
         )
 
@@ -309,6 +310,8 @@ async def _resolve_concept_id(
                     severity="ERROR",
                     message=f"Concept id could not be resolved for ontology field "
                     f"'{ontology_value.field_id}'.",
+                    value=f"code={provided_concept_id!r} "
+                    f"meaning={ontology_value.meaning!r}",
                 ),
             )
         return None

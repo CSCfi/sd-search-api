@@ -447,7 +447,8 @@ def _extract_dataset_documents(
         image_id = image_ids.id
         fields[image_id] = BigpictureFields(
             dataset_id=dataset_id,
-            image_id=image_id,
+            # The document id, which is unique.
+            image_id=map_image_id_to_document_id[image_id],
             dataset_image_cnt=dataset_image_cnt,
             scope=scope,
             dataset_short_name=dataset_short_name if is_clinical else None,

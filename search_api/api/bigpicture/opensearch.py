@@ -1,4 +1,4 @@
-from typing import Any, ClassVar, override
+from typing import Any, override
 from urllib.parse import quote
 
 from search_api.api.beacon.models import BeaconResultSet, BeaconResultSets
@@ -15,8 +15,6 @@ from search_api.api.opensearch.search import (
     iter_paged_buckets,
     iter_paged_documents,
     take_page,
-    top_hits_source,
-    top_hits_sub_agg,
 )
 from search_api.exceptions import SystemException
 
@@ -60,25 +58,19 @@ class BigpictureDatasetBeaconService(
 ):
     """OpenSearch beacon service grouping Bigpicture images into datasets."""
 
-    # Get dataset metadata from one document per composite bucket.
-    _SUB_AGGS: ClassVar[dict[str, Any]] = {
-        "dataset_info": top_hits_sub_agg(list(_DATASET_OTHER_FIELDS))
-    }
-
     @staticmethod
     def _build_dataset(
-        dataset_id: str, bucket: dict[str, Any]
+        dataset_id: str, fields: dict[str, Any]
     ) -> BigpictureBeaconDatasetResult:
-        source = top_hits_source(bucket, "dataset_info")
         for f in _DATASET_OTHER_FIELDS:
-            if f not in source:
+            if f not in fields:
                 raise SystemException(f"Dataset '{dataset_id}' is missing field: {f}")
         return BigpictureBeaconDatasetResult(
             datasetId=dataset_id,
-            datasetTitle=source["dataset_title"],
-            datasetDescription=source["dataset_description"],
+            datasetTitle=fields["dataset_title"],
+            datasetDescription=fields["dataset_description"],
             datasetUrl=f"https://datasets.bigpicture.eu/datasets/{quote(dataset_id.lower(), safe='')}.html",
-            totalImageCount=source["dataset_image_cnt"],
+            totalImageCount=fields["dataset_image_cnt"],
             matchingImageCount=0,
             imageIds=[],
         )
@@ -132,34 +124,66 @@ class BigpictureDatasetBeaconService(
                 }
             }
 
-        datasets: dict[str, BigpictureBeaconDatasetResult] = {}
+        # The bucket keys give each dataset's matching images.
+        image_ids_by_dataset: dict[str, list[str]] = {}
         async for bucket in iter_paged_buckets(
             self.client,
             self.index_name,
             page_clause,
             _FETCH_SIZE,
             sources=_DATASET_RECORD_SOURCES,
-            # Fetches dataset title, description, and image count from one
-            # representative document per bucket. The composite key alone
-            # only has dataset_id and image_id, not these fields.
-            sub_aggs=BigpictureDatasetBeaconService._SUB_AGGS,
         ):
-            dataset_id = bucket["key"][BP_DATASET_ID_FIELD]
-            if dataset_id not in datasets:
-                datasets[dataset_id] = BigpictureDatasetBeaconService._build_dataset(
-                    dataset_id, bucket
-                )
-            datasets[dataset_id].imageIds.append(bucket["key"][_IMAGE_ID_FIELD])
-            datasets[dataset_id].matchingImageCount += 1
+            image_ids_by_dataset.setdefault(
+                bucket["key"][BP_DATASET_ID_FIELD], []
+            ).append(bucket["key"][_IMAGE_ID_FIELD])
+
+        dataset_fields = await self._get_dataset_fields(
+            [image_ids[0] for image_ids in image_ids_by_dataset.values()]
+        )
 
         results: BeaconResultSets[BigpictureBeaconDatasetResult] = BeaconResultSets()
-        for dataset_id, result in datasets.items():
+        for dataset_id, image_ids in image_ids_by_dataset.items():
+            if dataset_id not in dataset_fields:
+                # A sync deleted the dataset's first image after its images were read.
+                continue
+            result = BigpictureDatasetBeaconService._build_dataset(
+                dataset_id, dataset_fields[dataset_id]
+            )
+            result.imageIds = image_ids
+            result.matchingImageCount = len(image_ids)
             results.resultSet.append(
                 BeaconResultSet[BigpictureBeaconDatasetResult](
                     id=dataset_id, results=[result]
                 )
             )
         return results
+
+    async def _get_dataset_fields(
+        self, image_ids: list[str]
+    ) -> dict[str, dict[str, Any]]:
+        """Read the dataset fields from the image documents.
+
+        Every image document of a dataset has the same dataset fields, so one
+        image per dataset is enough.
+
+        :param image_ids: One image of each dataset to read.
+        :return: The dataset fields by dataset id.
+        """
+        dataset_fields: dict[str, dict[str, Any]] = {}
+        for i in range(0, len(image_ids), _FETCH_SIZE):
+            batch = image_ids[i : i + _FETCH_SIZE]
+            resp = await self.client.search(
+                index=self.index_name,
+                body={
+                    "size": len(batch),
+                    "query": build_terms_clause(_IMAGE_ID_FIELD, batch),
+                    "_source": [BP_DATASET_ID_FIELD, *_DATASET_OTHER_FIELDS],
+                },
+            )
+            for hit in resp["hits"]["hits"]:
+                source = hit["_source"]
+                dataset_fields[source[BP_DATASET_ID_FIELD]] = source
+        return dataset_fields
 
 
 class BigpictureImageBeaconService(

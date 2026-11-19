@@ -265,10 +265,10 @@ def test_extract_image_id_with_accession_and_alias(tmp_path):
     docs = {doc.id: doc for doc in extract_dataset_documents(str(root))}
 
     # Only the first image has an accession. The second document id becomes
-    # dataset accession followed by image alias.
+    # dataset accession followed by image alias, and so does its image id.
     assert set(docs) == {CLINICAL_2_0_IMAGE_1_ID, f"{CLINICAL_2_0_DATASET_ID}-2"}
     opensearch_doc = build_document(docs[f"{CLINICAL_2_0_DATASET_ID}-2"])
-    assert opensearch_doc["image_id"] == "2"
+    assert opensearch_doc["image_id"] == f"{CLINICAL_2_0_DATASET_ID}-2"
     assert opensearch_doc["dataset_id"] == CLINICAL_2_0_DATASET_ID
 
 
@@ -578,7 +578,11 @@ def test_extract_does_not_quote_values(
 
 
 def test_extract_invalid_scheme_error():
-    dropped = invalid_scheme_log("diagnosis", SNOMED_ONTOLOGY_ID)
+    dropped = invalid_scheme_log(
+        "diagnosis",
+        SNOMED_ONTOLOGY_ID,
+        "code='8500/3' meaning='Infiltrating duct carcinoma, NOS' scheme='ICDO'",
+    )
 
     clinical = {
         doc.id: doc.logs

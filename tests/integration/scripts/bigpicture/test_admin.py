@@ -105,6 +105,7 @@ def _args(**kwargs) -> argparse.Namespace:
         "full": False,
         "dry_run": False,
         "sync": False,
+        "show_values": False,
     }
     return argparse.Namespace(**{**defaults, **kwargs})
 

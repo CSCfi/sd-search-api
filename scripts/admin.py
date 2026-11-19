@@ -9,6 +9,7 @@ import warnings
 from pathlib import Path
 
 from dotenv import load_dotenv
+from psycopg import sql
 
 import search_api
 from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
@@ -17,12 +18,14 @@ from search_api.api.domain import Domain
 from search_api.api.opensearch.client import create_search
 from search_api.api.opensearch.index import create_index
 from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorService
+from search_api.conf import database_config
 from search_api.database.document import (
     count_documents,
     reset_synced_at,
 )
 from search_api.database.document_log import (
     log_document_log,
+    show_values,
 )
 from search_api.database.load import (
     delete_load_marker,
@@ -30,7 +33,7 @@ from search_api.database.load import (
     read_load_marker,
     write_load_marker,
 )
-from search_api.database.repository import get_cursor
+from search_api.database.repository import get_admin_cursor, get_cursor
 from search_api.database.terms_cache import delete_all_terms
 from search_api.exceptions import SystemException
 from search_api.services.fetch import DocumentSource
@@ -110,6 +113,7 @@ async def _read_documents(
             f"The {domain.name} deployment has no source to {args.command}."
         )
 
+    show_values(args.show_values)
     marker = await _load_marker(args)
     load_service = (
         None
@@ -119,6 +123,7 @@ async def _read_documents(
             domain.filtering_terms,
             domain.filtering_scopes,
             domain.replace_concepts,
+            reload=args.full,
         )
     )
 
@@ -304,9 +309,23 @@ async def _recreate(domain: Domain, args: argparse.Namespace) -> None:
         logger.info("Aborted, nothing was dropped.")
         return
 
-    async with get_cursor() as cur:
+    # Replace the api user's psql variable with a placeholder for sql.SQL.format.
+    grant = _schema_path("grant").read_text()
+    if ':"api_user"' not in grant:
+        raise SystemException('grant.sql does not name the api user as :"api_user".')
+    grant = grant.replace(':"api_user"', "{api_user}")
+
+    # Tables are owned by the admin user.
+    async with get_admin_cursor() as cur:
+        # Drop and create the tables.
         for _name in ("drop", "create"):
             await cur.execute(_schema_path(_name).read_text())  # type: ignore[arg-type]
+        # Grant api user access to the tables.
+        await cur.execute(
+            sql.SQL(grant).format(  # type: ignore[arg-type]
+                api_user=sql.Identifier(database_config().POSTGRES_USER)
+            )
+        )
     logger.info("Recreated the database schema.")
 
     await _replace_index(domain)
@@ -456,7 +475,10 @@ if __name__ == "__main__":
                 "--full",
                 action="store_true",
                 default=False,
-                help="Reset the incremental load marker and load all documents.",
+                help=(
+                    "Reset the incremental load marker and load all documents, "
+                    "including those already stored."
+                ),
             )
             source_parser.add_argument(
                 "--dry-run",
@@ -472,6 +494,16 @@ if __name__ == "__main__":
                 action="store_true",
                 default=False,
                 help="Sync loaded data to OpenSearch after loading.",
+            )
+            source_parser.add_argument(
+                "--show-values",
+                action="store_true",
+                default=False,
+                help=(
+                    "Include the submitted value in each problem printed to stderr. "
+                    "Values may be sensitive. Use only in a terminal whose output is "
+                    "not saved."
+                ),
             )
 
         commands.add_parser(

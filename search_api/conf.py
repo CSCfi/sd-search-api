@@ -42,13 +42,19 @@ class DeploymentConfiguration(BaseSettings):
 
 
 class DatabaseConfiguration(_SecretSettings):
-    """PostgreSQL connection configuration."""
+    """PostgreSQL user who uses, but does not own, the tables."""
 
     POSTGRES_HOST: str = Field(description="PostgreSQL host.")
     POSTGRES_PORT: int = Field(default=5432, description="PostgreSQL port.")
     POSTGRES_DB: str = Field(description="PostgreSQL database name.")
-    POSTGRES_USER: str = Field(description="PostgreSQL user.")
-    POSTGRES_PASSWORD: SecretStr = Field(description="PostgreSQL password.")
+    POSTGRES_USER: str = Field(
+        default="sd_search_api",
+        description="PostgreSQL user that uses, but does not own, the tables.",
+    )
+    POSTGRES_PASSWORD: SecretStr = Field(
+        description="Password of the PostgreSQL user who uses, but does not own, "
+        "the tables."
+    )
 
     POSTGRES_POOL_MIN_SIZE: int = Field(
         default=2, description="Connections the pool keeps open."
@@ -65,6 +71,18 @@ class DatabaseConfiguration(_SecretSettings):
         description=(
             "Seconds a caller waits for a connection from the pool before failing."
         ),
+    )
+
+
+class DatabaseAdminConfiguration(_SecretSettings):
+    """PostgreSQL user who owns, but does not use, the tables."""
+
+    POSTGRES_ADMIN_USER: str = Field(
+        default="sd_search_admin",
+        description="PostgreSQL user who owns, but does not use, the tables.",
+    )
+    POSTGRES_ADMIN_PASSWORD: SecretStr = Field(
+        description="Password of the PostgreSQL user who owns, but does not use, the tables."
     )
 
 
@@ -297,8 +315,13 @@ def deployment_config() -> DeploymentConfiguration:
 
 
 def database_config() -> DatabaseConfiguration:
-    """Get database configuration."""
+    """Get database configuration for the user who uses, but does not own, the tables."""
     return DatabaseConfiguration()
+
+
+def database_admin_config() -> DatabaseAdminConfiguration:
+    """Get database configuration for the user who owns, but does not use, the tables."""
+    return DatabaseAdminConfiguration()
 
 
 def opensearch_config() -> OpenSearchConfiguration:

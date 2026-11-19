@@ -264,7 +264,10 @@ is a single server shared by all of the deployments.
 
 The commands connect directly to Postgres and OpenSearch, so the environment must define
 `POSTGRES_HOST`,`POSTGRES_PORT`,`POSTGRES_DB`,`POSTGRES_USER`,`POSTGRES_PASSWORD` and
-`OPENSEARCH_HOST`,`OPENSEARCH_PORT`,`OPENSEARCH_USER`,and `OPENSEARCH_PASSWORD`. Loading 
+`OPENSEARCH_HOST`,`OPENSEARCH_PORT`,`OPENSEARCH_USER`,and `OPENSEARCH_PASSWORD`.
+`POSTGRES_USER` (default `sd_search_api`) can read and write the tables. `recreate` drops
+and creates them, so it also requires `POSTGRES_ADMIN_PASSWORD` of `POSTGRES_ADMIN_USER`
+(default `sd_search_admin`), who owns the tables. Loading 
 and the ontology commands also resolve preferred terms, that require `SNOWSTORM_URL`.
 
 Running against a deployed environment means logging in to OpenShift, taking the credentials from
@@ -292,6 +295,8 @@ export POSTGRES_PORT=
 export POSTGRES_DB=
 export POSTGRES_USER=
 export POSTGRES_PASSWORD=
+export POSTGRES_ADMIN_USER=
+export POSTGRES_ADMIN_PASSWORD=
 export OPENSEARCH_PORT=
 export OPENSEARCH_USER=
 export OPENSEARCH_PASSWORD=
@@ -337,9 +342,12 @@ The directory is either one dataset directory or a parent of several; which one 
 changed since the previous `load` or `fetch` are loaded: the two commands share one resume point.
 
 Options:
-- `--full` — forget the resume point and load every dataset.
+- `--full` — forget the resume point, and parse and store every dataset again, including those already stored, so
+  that `--sync` re-indexes them. A dataset already stored in a newer version is skipped.
 - `--dry-run` — read and validate the datasets, reporting what would be loaded, writing nothing.
 - `--sync` — sync to OpenSearch after loading.
+- `--show-values` — show on the console the submitted value each logged problem is about. Values may be sensitive,
+  so they are never stored in `document_log`.
 
 `.c4gh` XML files are decrypted with the Crypt4GH key set by `C4GH_KEY_FILE`, and `C4GH_PASSPHRASE` if the key is
 protected.

@@ -6,6 +6,7 @@ and spends the refresh token.
 
 import os
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -39,6 +40,21 @@ def _status_with(headers: dict[str, str]) -> int:
 
 def _bearer_status(token: str) -> int:
     return _status_with({"Authorization": f"Bearer {token}"})
+
+
+def _get_with_cookie(cookie: str) -> httpx.Response:
+    """A protected path, from a client holding only the cookies in `cookie`."""
+    with httpx.Client(base_url=API_URL, timeout=30.0) as anonymous:
+        return anonymous.get(PROTECTED_PATH, headers={"Cookie": cookie})
+
+
+def _set_cookie_paths(response: httpx.Response, name: str) -> dict[str, str]:
+    """The response's Set-Cookie headers for `name`, keyed by path."""
+    return {
+        header.split("Path=", 1)[1].split(";", 1)[0]: header
+        for header in response.headers.get_list("set-cookie")
+        if header.startswith(f"{name}=")
+    }
 
 
 def _tokens_from_mock(issuer_host: str, client_id: str | None = None) -> dict:
@@ -85,7 +101,7 @@ def test_login_sets_the_providers_access_and_refresh_tokens(client):
     )
 
     refresh_token, refresh_path = _cookie(client, "refresh_token")
-    assert refresh_path == "/refresh"
+    assert refresh_path == "/"
     assert jwt.get_unverified_header(refresh_token)["typ"] == "JWT"
 
     # The same token authenticates by cookie and as a bearer token, and a cookie of
@@ -108,28 +124,98 @@ def test_refresh_replaces_both_cookies(client):
     new_refresh, refresh_path = _cookie(client, "refresh_token")
     assert new_access != old_access
     assert new_refresh != old_refresh
-    assert refresh_path == "/refresh"
+    assert refresh_path == "/"
     assert client.get(PROTECTED_PATH).status_code == 200
 
 
-def test_tab_losing_a_refresh_race_does_not_end_the_winners_session(client):
+def test_tab_losing_a_refresh_race_gets_the_winners_cookies(client):
     login(client)
     spent, _ = _cookie(client, "refresh_token")
 
     # Tab A refreshes first; LS AAI replaces the refresh token.
     assert client.post("/refresh").status_code == 204
+    winners, _ = _cookie(client, "refresh_token")
 
-    # Tab B sent the replaced token at the same moment.
+    # Tab B sent the replaced token at the same moment: it is not redeemed again,
+    # which the provider would refuse, but given tab A's result.
     with httpx.Client(base_url=API_URL, timeout=30.0) as other_tab:
         response = other_tab.post(
             "/refresh", headers={"Cookie": f"refresh_token={spent}"}
         )
 
-    assert response.status_code == 401
-    assert "set-cookie" not in response.headers
+    assert response.status_code == 204
+    assert response.cookies.get("refresh_token") == winners
     # Tab A's new cookies, shared by every tab, still work.
     assert client.get(PROTECTED_PATH).status_code == 200
     assert client.post("/refresh").status_code == 204
+
+
+@pytest.mark.parametrize(
+    "access_cookie",
+    ["", "access_token=expired-or-forged; "],
+    ids=["no-access-token", "invalid-access-token"],
+)
+def test_session_is_renewed_inline_from_the_refresh_cookie(client, access_cookie):
+    # The browser dropped the access cookie when it expired; the refresh cookie lasts.
+    login(client)
+    refresh_token, _ = _cookie(client, "refresh_token")
+
+    response = _get_with_cookie(f"{access_cookie}refresh_token={refresh_token}")
+
+    assert response.status_code == 200
+    new_access = response.cookies.get("access_token")
+    new_refresh = response.cookies.get("refresh_token")
+    assert new_access is not None
+    assert new_refresh not in (None, refresh_token)
+    assert set(_set_cookie_paths(response, "refresh_token")) == {"/"}
+    assert _bearer_status(new_access) == 200
+
+
+def test_parallel_requests_renew_the_session_once(client):
+    # The provider refuses a spent refresh token, so a second redemption would be a 401.
+    login(client)
+    refresh_token, _ = _cookie(client, "refresh_token")
+
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        responses = list(
+            pool.map(
+                lambda _: _get_with_cookie(f"refresh_token={refresh_token}"), range(10)
+            )
+        )
+
+    assert [r.status_code for r in responses] == [200] * 10
+    renewed = {r.cookies.get("refresh_token") for r in responses}
+    assert len(renewed) == 1
+    assert renewed != {refresh_token}
+
+
+def test_rejected_refresh_token_is_401_leaving_the_cookies_alone(client):
+    login(client)
+    refresh_token, _ = _cookie(client, "refresh_token")
+    assert client.delete("/refresh").status_code == 204  # revoked at the provider
+
+    response = _get_with_cookie(f"refresh_token={refresh_token}")
+
+    assert response.status_code == 401
+    assert "set-cookie" not in response.headers
+
+
+def test_newest_of_two_refresh_cookies_is_redeemed(client):
+    login(client)
+    spent, _ = _cookie(client, "refresh_token")
+    assert client.post("/refresh").status_code == 204
+    current, _ = _cookie(client, "refresh_token")
+
+    # A browser holding both lists the one at the longer path, `/refresh`, first.
+    with httpx.Client(base_url=API_URL, timeout=30.0) as browser:
+        response = browser.post(
+            "/refresh",
+            headers={"Cookie": f"refresh_token={spent}; refresh_token={current}"},
+        )
+
+    assert response.status_code == 204
+    # The current token was redeemed: the spent one would have given it back.
+    assert response.cookies.get("refresh_token") not in (spent, current)
 
 
 def test_only_access_tokens_are_accepted(client):
@@ -163,8 +249,10 @@ def test_delete_refresh_revokes_the_refresh_token(client):
     login(client)
     refresh_token, _ = _cookie(client, "refresh_token")
 
-    assert client.delete("/refresh").status_code == 204
+    response = client.delete("/refresh")
 
+    assert response.status_code == 204
+    assert set(_set_cookie_paths(response, "refresh_token")) == {"/"}
     assert {c.name for c in client.cookies.jar} & {"access_token", "refresh_token"} == (
         set()
     )

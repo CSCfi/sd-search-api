@@ -46,7 +46,9 @@ app = FastAPI(
 _provider_metadata = ProviderMetadata()
 _validator = AccessTokenValidator(_provider_metadata)
 app.state.auth_service = AuthServiceHandler(_provider_metadata, _validator)
-app.add_middleware(AuthMiddleware, validator=_validator)
+app.add_middleware(
+    AuthMiddleware, validator=_validator, auth_service=app.state.auth_service
+)
 
 app.include_router(make_beacon_router(_domain))
 app.include_router(auth_router)

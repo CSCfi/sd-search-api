@@ -464,7 +464,7 @@ async def _create_index_user(domain: Domain) -> None:
         raise SystemException(
             f"Cannot create the OpenSearch user '{user}': it is the admin user "
             "(OPENSEARCH_ADMIN_USER). Set OPENSEARCH_USER to the user the API "
-            "connects."
+            "connects as."
         )
     search = create_admin_search()
     try:
@@ -604,7 +604,8 @@ if __name__ == "__main__":
             help=(
                 "Create the OpenSearch user OPENSEARCH_USER with password "
                 "OPENSEARCH_PASSWORD, or update it, as the admin user "
-                "OPENSEARCH_ADMIN_USER. It gets full access to the indexes whose "
+                "OPENSEARCH_ADMIN_USER with password OPENSEARCH_ADMIN_PASSWORD. It "
+                "gets full access to the indexes whose "
                 "names start with the deployment's index name, and may check "
                 "cluster health and send bulk requests. Required once per "
                 "deployment in each environment, before the server starts."

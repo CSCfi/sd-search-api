@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import override
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -24,6 +25,7 @@ from scripts.admin import (
     _read_documents,
     _recreate,
     _recreate_index,
+    _reset,
     _sync,
     _update_index,
 )
@@ -38,7 +40,12 @@ from search_api.database.document_log import (
     read_document_logs,
     write_document_log,
 )
-from search_api.database.load import delete_load_marker
+from search_api.database.load import (
+    LOAD_HISTORY_TABLE,
+    delete_load_marker,
+    read_load_marker,
+    write_load_marker,
+)
 from search_api.database.models import StoredDocumentLog, StoredTerm
 from search_api.database.repository import get_connection
 from search_api.database.terms_cache import (
@@ -355,6 +362,29 @@ async def test_index_recreate_rebuilds_the_mapping_and_sync_refills_it(monkeypat
         await search.indices.refresh(index=BP_DOMAIN.opensearch_index)
         assert await search.exists(index=BP_DOMAIN.opensearch_index, id=_DOCUMENT_ID)
     finally:
+        await search.close()
+
+
+@pytest.mark.asyncio
+async def test_create_index_refuses_existing_index(bp_opensearch_index_name):
+    domain = replace(BP_DOMAIN, opensearch_index=bp_opensearch_index_name)
+    index = domain.opensearch_index
+    search = create_search()
+    try:
+        await _create_index(domain)
+        await search.index(
+            index=index,
+            id=_DOCUMENT_ID,
+            body={BP_DATASET_ID_FIELD: _DATASET_ID},
+            refresh=True,
+        )
+
+        with pytest.raises(SystemException, match=f"^Index '{index}' already exists"):
+            await _create_index(domain)
+
+        assert await search.exists(index=index, id=_DOCUMENT_ID)
+    finally:
+        await search.indices.delete(index=index, ignore=[404])
         await search.close()
 
 
@@ -827,3 +857,169 @@ async def test_same_version_drops_nothing(first_version):
 
     assert await _stored(_VERSIONED_EXCLUDED_DOCUMENT_ID)
     assert await _indexed(_VERSIONED_EXCLUDED_DOCUMENT_ID)
+
+
+# Incremental load marker
+#
+
+_STORED_MARKER = "test-marker-0"
+_FIRST_MARKER = "test-marker-1"
+_SECOND_MARKER = "test-marker-2"
+
+
+class _MarkerSource(DocumentSource):
+    """Reads one set per marker, and records the marker it started reading from.
+
+    Each set holds one document of the versioned dataset. With fail, it raises
+    after yielding every set.
+    """
+
+    def __init__(self, sets: list[tuple[str, str]], fail: bool = False) -> None:
+        self._sets = sets
+        self._fail = fail
+        self.marker: str | None = "not read"
+
+    @override
+    async def read(
+        self, root: str | None = None, marker: str | None = None
+    ) -> AsyncIterator[DocumentSet]:
+        self.marker = marker
+        for doc_id, set_marker in self._sets:
+            yield DocumentSet(
+                id=_VERSIONED_DATASET_ID,
+                marker=set_marker,
+                modified_at=_FIRST_VERSION,
+                documents=[_versioned_document(doc_id)],
+            )
+        if self._fail:
+            raise SystemException("read_fails")
+
+
+async def _load_history() -> list[str]:
+    """Return the markers of the test load history rows."""
+    async with get_connection() as conn, conn.cursor() as cur:
+        await cur.execute(
+            f"SELECT marker FROM {LOAD_HISTORY_TABLE} WHERE marker LIKE 'test-marker-%'"
+        )
+        return [row[0] for row in await cur.fetchall()]
+
+
+@pytest_asyncio.fixture
+async def no_load_marker():
+    """Delete the load marker and the test load history, before and after the test."""
+
+    async def _delete() -> None:
+        await delete_load_marker()
+        async with get_connection() as conn, conn.cursor() as cur:
+            await cur.execute(
+                f"DELETE FROM {LOAD_HISTORY_TABLE} WHERE marker LIKE 'test-marker-%'"
+            )
+
+    await _delete()
+    yield
+    await _delete()
+
+
+@pytest.mark.asyncio
+async def test_load_without_marker_reads_everything(no_load_marker):
+    """The marker of the last set is stored, and recorded in the load history."""
+    source = _MarkerSource(
+        [
+            (_VERSIONED_INCLUDED_DOCUMENT_ID, _FIRST_MARKER),
+            (_VERSIONED_EXCLUDED_DOCUMENT_ID, _SECOND_MARKER),
+        ]
+    )
+
+    await _read_documents(BP_DOMAIN, source, _args())
+
+    assert source.marker is None
+    assert await read_load_marker() == _SECOND_MARKER
+    assert await _load_history() == [_SECOND_MARKER]
+    assert await _stored(_VERSIONED_INCLUDED_DOCUMENT_ID)
+    assert await _stored(_VERSIONED_EXCLUDED_DOCUMENT_ID)
+
+
+@pytest.mark.asyncio
+async def test_load_resumes_from_stored_marker(no_load_marker):
+    await write_load_marker(_STORED_MARKER)
+    source = _MarkerSource([(_VERSIONED_INCLUDED_DOCUMENT_ID, _FIRST_MARKER)])
+
+    await _read_documents(BP_DOMAIN, source, _args())
+
+    assert source.marker == _STORED_MARKER
+    assert await read_load_marker() == _FIRST_MARKER
+
+
+@pytest.mark.asyncio
+async def test_load_full_deletes_marker_before_reading(no_load_marker):
+    """A full load that fails leaves no marker, so the next load is a full one too."""
+    await write_load_marker(_STORED_MARKER)
+    source = _MarkerSource([], fail=True)
+
+    with pytest.raises(SystemException, match="read_fails"):
+        await _read_documents(BP_DOMAIN, source, _args(full=True))
+
+    assert source.marker is None
+    assert await read_load_marker() is None
+
+
+@pytest.mark.asyncio
+async def test_load_full_dry_run_keeps_marker(no_load_marker):
+    await write_load_marker(_STORED_MARKER)
+    source = _MarkerSource([(_VERSIONED_INCLUDED_DOCUMENT_ID, _FIRST_MARKER)])
+
+    await _read_documents(BP_DOMAIN, source, _args(full=True, dry_run=True))
+
+    assert source.marker is None
+    assert await read_load_marker() == _STORED_MARKER
+    assert await _load_history() == []
+    assert not await _stored(_VERSIONED_INCLUDED_DOCUMENT_ID)
+
+
+@pytest.mark.asyncio
+async def test_load_failure_keeps_marker(no_load_marker):
+    """The marker is written only after the whole run, so a failed run is repeated."""
+    await write_load_marker(_STORED_MARKER)
+    source = _MarkerSource(
+        [(_VERSIONED_INCLUDED_DOCUMENT_ID, _FIRST_MARKER)], fail=True
+    )
+
+    with pytest.raises(SystemException, match="read_fails"):
+        await _read_documents(BP_DOMAIN, source, _args())
+
+    assert await read_load_marker() == _STORED_MARKER
+    assert await _load_history() == []
+    assert await _stored(_VERSIONED_INCLUDED_DOCUMENT_ID)
+
+
+@pytest.mark.asyncio
+async def test_load_reading_nothing_keeps_marker(no_load_marker):
+    await write_load_marker(_STORED_MARKER)
+
+    await _read_documents(BP_DOMAIN, _MarkerSource([]), _args())
+
+    assert await read_load_marker() == _STORED_MARKER
+    assert await _load_history() == []
+
+
+@pytest.mark.asyncio
+async def test_load_without_source_raises_before_deleting_marker(no_load_marker):
+    """A full load without a source raises before it deletes the marker."""
+    await write_load_marker(_STORED_MARKER)
+
+    with pytest.raises(
+        SystemException,
+        match=f"^The {BP_DOMAIN.name} deployment has no source to fetch\\.$",
+    ):
+        await _read_documents(BP_DOMAIN, None, _args(command="fetch", full=True))
+
+    assert await read_load_marker() == _STORED_MARKER
+
+
+@pytest.mark.asyncio
+async def test_reset_deletes_marker(no_load_marker):
+    await write_load_marker(_STORED_MARKER)
+
+    await _reset(BP_DOMAIN)
+
+    assert await read_load_marker() is None

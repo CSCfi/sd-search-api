@@ -26,6 +26,65 @@ async def create_index(
     await search.indices.create(index=index, body=body)
 
 
+def _field_types(properties: dict[str, Any], prefix: str = "") -> dict[str, str]:
+    """Return the type of every field in the mapping properties, by dotted path.
+
+    An object field has no type in a mapping, so it is given "object".
+    """
+    types: dict[str, str] = {}
+    for name, mapping in properties.items():
+        path = f"{prefix}{name}"
+        types[path] = mapping.get("type", "object")
+        types |= _field_types(mapping.get("properties", {}), f"{path}.")
+    return types
+
+
+async def update_index_mapping(
+    search: AsyncOpenSearch, index: str, body: dict[str, Any]
+) -> list[str]:
+    """Add new fields in the generated mapping to an existing OpenSearch index.
+
+    Only additive changes are supported. OpenSearch refuses a changed field
+    type or analyzer, and does not support field removal. Both require the
+    index to be recreated.
+
+    :param search: The OpenSearch client.
+    :param index: The OpenSearch index name.
+    :param body: The new index body, containing mappings.
+    :return: The paths of the added fields, sorted.
+    :raises SystemException: If the index does not exist, or a field is removed or
+        its type changed.
+    :raises RequestError: If OpenSearch refuses the mapping, e.g. a changed
+        analyzer.
+    """
+    if not await search.indices.exists(index=index):
+        raise SystemException(f"Index '{index}' does not exist.")
+
+    response = await search.indices.get_mapping(index=index)
+    current = _field_types(response[index]["mappings"].get("properties", {}))
+    mappings = body["mappings"]
+    new = _field_types(mappings.get("properties", {}))
+
+    removed = sorted(current.keys() - new.keys())
+    if removed:
+        raise SystemException(
+            f"Fields can't be removed from an existing index: {', '.join(removed)}. "
+            "A removed field needs the index recreated."
+        )
+
+    # Only the type is compared. Other parameters may change in place, and
+    # OpenSearch refuses those that cannot with its own error.
+    changed = sorted(path for path in current if current[path] != new[path])
+    if changed:
+        raise SystemException(
+            f"Fields can't be changed in an existing index: {', '.join(changed)}. "
+            "A changed field needs the index recreated."
+        )
+
+    await search.indices.put_mapping(index=index, body=mappings)
+    return sorted(new.keys() - current.keys())
+
+
 async def _delete_by_query(
     search: AsyncOpenSearch, index: str, query: dict[str, Any]
 ) -> int:

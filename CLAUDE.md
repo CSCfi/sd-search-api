@@ -23,6 +23,7 @@ uv run python scripts/admin.py Bigpicture fetch --sync          # the submit API
 uv run python scripts/admin.py Bigpicture sync                  # only documents pending sync
 uv run python scripts/admin.py Bigpicture index generate        # writes the mapping file only
 uv run python scripts/admin.py Bigpicture index create|recreate # recreate marks docs pending: sync after
+uv run python scripts/admin.py Bigpicture index update          # adds new fields in place; refuses others
 uv run python scripts/admin.py Bigpicture clear|recreate        # docs+terms+logs+marker / both stores
 uv run python scripts/admin.py Bigpicture delete <document>     # one doc+logs, e.g. an image
 uv run python scripts/admin.py Bigpicture delete-set <set>      # one document set's docs+logs, e.g. withdrawn

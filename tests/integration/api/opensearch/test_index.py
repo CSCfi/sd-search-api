@@ -413,8 +413,9 @@ async def test_update_index_mapping_refuses_changed_type(search, index):
 
 
 @pytest.mark.asyncio
-async def test_update_index_mapping_raises_opensearch_refusal(search, index):
-    """A parameter OpenSearch cannot change in place raises its own error."""
+async def test_update_index_mapping_opensearch_refuses_changed_doc_values(
+    search, index
+):
     body = _mapping({_SET_FIELD: {"type": "keyword", "doc_values": False}})
 
     with pytest.raises(RequestError, match="doc_values"):
@@ -425,3 +426,39 @@ async def test_update_index_mapping_raises_opensearch_refusal(search, index):
 async def test_update_index_mapping_no_index(search):
     with pytest.raises(SystemException, match="does not exist"):
         await update_index_mapping(search, "no-index", _mapping({}))
+
+
+@pytest.mark.asyncio
+async def test_update_index_mapping_opensearch_refuses_changed_analyzer(search, index):
+    await search.indices.put_mapping(
+        index=index,
+        body={"properties": {"text_field": {"type": "text", "analyzer": "english"}}},
+    )
+    body = _mapping(
+        {
+            _SET_FIELD: {"type": "keyword"},
+            "text_field": {"type": "text", "analyzer": "standard"},
+        }
+    )
+
+    with pytest.raises(RequestError, match="analyzer"):
+        await update_index_mapping(search, index, body)
+
+
+@pytest.mark.asyncio
+async def test_update_index_mapping_refuses_changed_object_type(search, index):
+    await search.indices.put_mapping(
+        index=index,
+        body={"properties": {"object": {"properties": {"name": {"type": "keyword"}}}}},
+    )
+    body = _mapping(
+        {
+            _SET_FIELD: {"type": "keyword"},
+            "object": {"type": "nested", "properties": {"name": {"type": "keyword"}}},
+        }
+    )
+
+    with pytest.raises(
+        SystemException, match=r"changed in an existing index: object\."
+    ):
+        await update_index_mapping(search, index, body)

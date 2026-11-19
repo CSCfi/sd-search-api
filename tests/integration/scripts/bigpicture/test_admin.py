@@ -3,6 +3,7 @@ import io
 import json
 import os
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -24,10 +25,12 @@ from scripts.admin import (
     _recreate,
     _recreate_index,
     _sync,
+    _update_index,
 )
 from search_api.api.bigpicture.domain import BP_DOMAIN
 from search_api.api.bigpicture.models import BP_DATASET_ID_FIELD, BP_DOCUMENT_FIELDS
 from search_api.api.opensearch.client import create_search
+from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorService
 from search_api.api.opensearch.models import ExtractedDocument, OpenSearchFieldValue
 from search_api.database.document import DOCUMENT_TABLE, get_document
 from search_api.database.document_log import (
@@ -352,6 +355,52 @@ async def test_index_recreate_rebuilds_the_mapping_and_sync_refills_it(monkeypat
         await search.indices.refresh(index=BP_DOMAIN.opensearch_index)
         assert await search.exists(index=BP_DOMAIN.opensearch_index, id=_DOCUMENT_ID)
     finally:
+        await search.close()
+
+
+@pytest.mark.asyncio
+async def test_index_update_adds_the_missing_fields(caplog, bp_opensearch_index_name):
+    domain = replace(BP_DOMAIN, opensearch_index=bp_opensearch_index_name)
+    index = domain.opensearch_index
+    body = OpenSearchIndexGeneratorService(domain.opensearch_fields).generate()
+    properties = body["mappings"]["properties"]
+    # An index created before adding wo fields.
+    old = json.loads(json.dumps(body))
+    del old["mappings"]["properties"]["dataset_title"]
+    del old["mappings"]["properties"]["specimen"]["properties"]["sex"]
+    search = create_search()
+    try:
+        await search.indices.create(index=index, body=old)
+        await search.index(
+            index=index,
+            id=_DOCUMENT_ID,
+            body={BP_DATASET_ID_FIELD: _DATASET_ID},
+            refresh=True,
+        )
+
+        with caplog.at_level("INFO"):
+            await _update_index(domain)
+
+        mapping = await search.indices.get_mapping(index=index)
+        updated = mapping[index]["mappings"]["properties"]
+        assert updated["dataset_title"] == properties["dataset_title"]
+        assert (
+            updated["specimen"]["properties"]["sex"]
+            == properties["specimen"]["properties"]["sex"]
+        )
+        assert (
+            f"Added field(s) to OpenSearch index {index}: dataset_title, specimen.sex."
+            in caplog.messages
+        )
+        assert await search.exists(index=index, id=_DOCUMENT_ID)
+
+        # Run again, there is nothing left to add.
+        caplog.clear()
+        with caplog.at_level("INFO"):
+            await _update_index(domain)
+        assert f"OpenSearch index {index} is up to date." in caplog.messages
+    finally:
+        await search.indices.delete(index=index, ignore=[404])
         await search.close()
 
 

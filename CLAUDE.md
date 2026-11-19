@@ -188,19 +188,30 @@ through `/refresh` and `/login`. `/callback` and `/refresh` run **the middleware
 cookie**, so a provider issuing tokens this API rejects (audience, `typ`, issuer) is a logged `503` at login, not a
 login whose every call is a `401`.
 
-**The refresh token rides only to `/refresh`** (cookie `Path=/refresh`, `Max-Age` from its unverified `exp`, about a
-month): `POST /refresh` redeems it at the token endpoint directly with httpx, not through `RPHandler`, whose login
-state is in-process memory and gone after a restart or on another replica, and **resets both cookies, since LS AAI
-rotates the refresh token**. A spent or expired one is `invalid_grant` (LS AAI says `invalid_token`), answered `401`
-**leaving the cookies alone**: they are shared by every tab, and the tab that lost a refresh race would otherwise
-delete the ones the winner was just given. **Any other refusal from the token endpoint** — the client's credentials
-or permissions — **is logged and a `503`**, so a misconfiguration cannot pass for every session expiring.
-`/logout` never sees the refresh cookie, so **`DELETE /refresh` revokes it** at the discovered `revocation_endpoint`
-(RFC 7009) and clears both cookies; the UI calls it before `/logout`. It is always a `204`: a failed revocation is
-only logged, since the session must still end in the browser.
+**The refresh token rides to every path** (cookie `Path=/`, `Max-Age` from its unverified `exp`, about a month), so
+**`AuthMiddleware` renews a session inline**: a protected request whose access token is missing or invalid but which
+carries the refresh cookie is redeemed, served as the renewed token's user, and its response, whatever its status,
+sets both new cookies (rendered by `set_session_cookies`, its no-cache headers replacing the response's own). A
+returning user is answered in one round trip, not after a `401` and a `/refresh`. A redemption goes to the token
+endpoint directly with httpx, not through `RPHandler`, whose login state is in-process memory and gone after a
+restart or on another replica, and **resets both cookies, since LS AAI rotates the refresh token**. A spent or
+expired one is `invalid_grant` (LS AAI says `invalid_token`), answered `401` **leaving the cookies alone**: they are
+shared by every tab, and the tab that lost a refresh race would otherwise delete the ones the winner was just given.
+**Any other refusal from the token endpoint** — the client's credentials or permissions — **is logged and a `503`**,
+so a misconfiguration cannot pass for every session expiring.
 
-Refresh is client-driven: a `401`, one `POST /refresh` at a time across tabs, a retry, and a retry again before a
-refresh `401` counts as logged out. LS AAI issues no refresh token unless `offline_access` is requested, hence its
+**A refresh token is redeemed once** (`AuthServiceHandler.refresh_shared`, used by the middleware and `POST
+/refresh` alike): the requests a page sends at once, from every tab, carry the same one, so they await one task, and
+its result is handed to any request presenting that token for 30 s after (`REFRESH_REUSE_WINDOW`); a failure is not
+kept. **That is in-process only**, which holds while the deployment is one replica of one uvicorn process; with more,
+a request losing the race gets a `401` and the client falls back to `/refresh`. The cookie used to be scoped to
+`/refresh`, so a browser may send two: `refresh_token_from_cookies` takes the one expiring latest, the last on a tie
+(the `Path=/` one, browsers listing longer paths first); nothing deletes the old cookie, which is left to expire. **`DELETE /refresh` revokes the refresh token** at the discovered `revocation_endpoint` (RFC
+7009) and clears both cookies; the UI calls it before `/logout`. It is always a `204`: a failed revocation is only
+logged, since the session must still end in the browser.
+
+`POST /refresh` stays as the client's fallback: a `401`, one `POST /refresh` at a time across tabs, a retry, and a
+retry again before a refresh `401` counts as logged out. LS AAI issues no refresh token unless `offline_access` is requested, hence its
 place in the default `OIDC_SCOPE`. `tests/integration/mockauth.py` issues tokens shaped like LS AAI's: an `at+jwt`
 access token, and a JWT refresh token that is replaced on every use and refused once spent, without revoking the one
 that replaced it.

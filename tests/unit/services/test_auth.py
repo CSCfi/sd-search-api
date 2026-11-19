@@ -1,5 +1,6 @@
 """Unit tests for search_api.services.auth.AuthServiceHandler."""
 
+import asyncio
 import base64
 import os
 import time
@@ -25,7 +26,12 @@ from starlette.responses import Response
 from search_api.exceptions import SystemException
 from search_api.services import auth as auth_module
 from search_api.services.access_token import InvalidAccessToken
-from search_api.services.auth import AuthServiceHandler, RefreshRejected, TokenSet
+from search_api.services.auth import (
+    AuthServiceHandler,
+    RefreshRejected,
+    TokenSet,
+    refresh_token_from_cookies,
+)
 
 TOKEN_ENDPOINT = "http://localhost:9999/token"
 REVOCATION_ENDPOINT = "http://localhost:9999/revoke"
@@ -538,6 +544,131 @@ async def test_revoke_with_discovery_unreachable_logs_and_returns(
     assert record.levelname == "ERROR"
 
 
+def _refresh_succeeds(token_endpoint: dict, times: int = 1) -> None:
+    """Have the token endpoint answer `times` refresh grants, each with new tokens."""
+    token_endpoint["responses"] = [
+        httpx.Response(
+            200,
+            json={
+                "access_token": f"new-at-{i}",
+                "expires_in": 3599,
+                "refresh_token": f"new-rt-{i}",
+            },
+        )
+        for i in range(times)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_refreshes_of_one_token_reach_the_provider_once(
+    token_endpoint,
+):
+    # LS AAI spends the token on its first use: a second redemption would be refused.
+    _refresh_succeeds(token_endpoint)
+    handler, _ = _handler_with_mock_rph()
+
+    results = await asyncio.gather(
+        *(handler.refresh_shared("old-rt") for _ in range(10))
+    )
+
+    assert len(token_endpoint["requests"]) == 1
+    assert set(results) == {TokenSet("new-at-0", 3599, "new-rt-0")}
+
+
+@pytest.mark.asyncio
+async def test_refresh_shared_reuses_a_result_within_the_window(token_endpoint):
+    _refresh_succeeds(token_endpoint)
+    handler, _ = _handler_with_mock_rph()
+
+    first = await handler.refresh_shared("old-rt")
+    second = await handler.refresh_shared("old-rt")
+
+    assert first == second
+    assert len(token_endpoint["requests"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_refresh_shared_redeems_again_after_the_window(
+    token_endpoint, monkeypatch
+):
+    _refresh_succeeds(token_endpoint, times=2)
+    handler, _ = _handler_with_mock_rph()
+    now = time.monotonic()
+    monkeypatch.setattr(auth_module.time, "monotonic", lambda: now)
+    await handler.refresh_shared("old-rt")
+
+    monkeypatch.setattr(
+        auth_module.time,
+        "monotonic",
+        lambda: now + auth_module.REFRESH_REUSE_WINDOW,
+    )
+    tokens = await handler.refresh_shared("old-rt")
+
+    assert tokens.access_token == "new-at-1"
+    assert len(token_endpoint["requests"]) == 2
+    assert len(handler._refreshes) == 1  # the expired result was dropped
+
+
+@pytest.mark.asyncio
+async def test_refresh_shared_keeps_distinct_tokens_apart(token_endpoint):
+    _refresh_succeeds(token_endpoint, times=2)
+    handler, _ = _handler_with_mock_rph()
+
+    first = await handler.refresh_shared("rt-a")
+    second = await handler.refresh_shared("rt-b")
+
+    assert first != second
+    assert len(token_endpoint["requests"]) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    [
+        httpx.Response(400, json={"error": "invalid_grant"}),
+        httpx.ConnectError("unreachable"),
+    ],
+    ids=["rejected", "unreachable"],
+)
+async def test_refresh_shared_does_not_keep_a_failure(token_endpoint, failure):
+    token_endpoint["responses"] = [
+        failure,
+        httpx.Response(200, json={"access_token": "new-at", "expires_in": 3599}),
+    ]
+    handler, _ = _handler_with_mock_rph()
+
+    with pytest.raises((RefreshRejected, SystemException)):
+        await handler.refresh_shared("old-rt")
+    tokens = await handler.refresh_shared("old-rt")
+
+    assert tokens.access_token == "new-at"
+    assert len(token_endpoint["requests"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_refresh_shared_survives_a_waiter_hanging_up():
+    handler, _ = _handler_with_mock_rph()
+    release = asyncio.Event()
+    calls: list[str] = []
+
+    async def refresh(refresh_token: str) -> TokenSet:
+        calls.append(refresh_token)
+        await release.wait()
+        return TokenSet("new-at", 3599, "new-rt")
+
+    handler.refresh = refresh  # type: ignore[method-assign]
+    hung_up = asyncio.create_task(handler.refresh_shared("old-rt"))
+    waiting = asyncio.create_task(handler.refresh_shared("old-rt"))
+    await asyncio.sleep(0)
+
+    hung_up.cancel()
+    release.set()
+
+    assert (await waiting).access_token == "new-at"
+    assert hung_up.cancelled()
+    assert calls == ["old-rt"]
+
+
 def test_initiate_web_session_sets_both_cookies_and_redirects():
     handler, _ = _handler_with_mock_rph()
     refresh_token = _refresh_token()
@@ -563,7 +694,7 @@ def test_initiate_web_session_sets_both_cookies_and_redirects():
     assert "HttpOnly" in refresh
     assert "Secure" in refresh
     assert "SameSite=strict" in refresh
-    assert "Path=/refresh" in refresh
+    assert "Path=/;" in refresh
     max_age = int(refresh.split("Max-Age=")[1].split(";")[0])
     assert 30 * 24 * 3600 - 5 <= max_age <= 30 * 24 * 3600
 
@@ -636,8 +767,49 @@ def test_logout_clears_both_cookies_and_redirects():
     assert "Max-Age=0" in cookies["access_token"]
     assert "Path=/;" in cookies["access_token"]
     assert "Max-Age=0" in cookies["refresh_token"]
-    assert "Path=/refresh" in cookies["refresh_token"]
+    assert "Path=/;" in cookies["refresh_token"]
     for cookie in cookies.values():
         assert "HttpOnly" in cookie
         assert "Secure" in cookie
         assert "SameSite=strict" in cookie
+
+
+def test_refresh_token_from_cookies_finds_the_one_refresh_token():
+    assert refresh_token_from_cookies("theme=dark; refresh_token=rt; a=b") == "rt"
+
+
+@pytest.mark.parametrize("header", [None, "", "theme=dark", "refresh_token="])
+def test_refresh_token_from_cookies_without_one_is_none(header):
+    assert refresh_token_from_cookies(header) is None
+
+
+@pytest.mark.parametrize("newest_first", [True, False])
+def test_refresh_token_from_cookies_takes_the_newest_of_several(newest_first):
+    # A browser still holding the cookie at its old path sends both.
+    older, newer = _refresh_token(exp_in=3600), _refresh_token(exp_in=7200)
+    pair = [newer, older] if newest_first else [older, newer]
+
+    header = f"refresh_token={pair[0]}; refresh_token={pair[1]}"
+
+    assert refresh_token_from_cookies(header) == newer
+
+
+@pytest.mark.parametrize(
+    ("first", "last"),
+    [
+        ("opaque-a", "opaque-b"),
+        (_refresh_token(exp_in=None), _refresh_token(exp_in=None)),
+    ],
+    ids=["opaque", "without-exp"],
+)
+def test_refresh_token_from_cookies_without_an_order_takes_the_last(first, last):
+    # Browsers list the longer path first, so the last is the one at `/`.
+    header = f"refresh_token={first}; refresh_token={last}"
+
+    assert refresh_token_from_cookies(header) == last
+
+
+def test_refresh_token_from_cookies_reads_past_a_malformed_cookie():
+    header = 'x="unterminated; cc_cookie={"a":["b"]}; refresh_token=rt'
+
+    assert refresh_token_from_cookies(header) == "rt"

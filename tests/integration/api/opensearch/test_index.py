@@ -427,7 +427,7 @@ async def test_update_index_mapping_opensearch_refuses_changed_doc_values(
 @pytest.mark.asyncio
 async def test_update_index_mapping_no_index(search):
     with pytest.raises(SystemException, match="does not exist"):
-        await update_index_mapping(search, "no-index", _mapping({}))
+        await update_index_mapping(search, "bp-image-index-no-index", _mapping({}))
 
 
 @pytest.mark.asyncio

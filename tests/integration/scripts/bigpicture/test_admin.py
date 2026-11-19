@@ -19,6 +19,7 @@ from nacl.public import PrivateKey
 from scripts.admin import (
     _clear,
     _create_index,
+    _create_index_user,
     _delete,
     _delete_set,
     _load,
@@ -31,9 +32,10 @@ from scripts.admin import (
 )
 from search_api.api.bigpicture.domain import BP_DOMAIN
 from search_api.api.bigpicture.models import BP_DATASET_ID_FIELD, BP_DOCUMENT_FIELDS
-from search_api.api.opensearch.client import create_search
+from search_api.api.opensearch.client import create_admin_search, create_search
 from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorService
 from search_api.api.opensearch.models import ExtractedDocument, OpenSearchFieldValue
+from search_api.conf import opensearch_config
 from search_api.database.document import DOCUMENT_TABLE, get_document
 from search_api.database.document_log import (
     DOCUMENT_LOG_TABLE,
@@ -431,6 +433,52 @@ async def test_index_update_adds_the_missing_fields(caplog, bp_opensearch_index_
         assert f"OpenSearch index {index} is up to date." in caplog.messages
     finally:
         await search.indices.delete(index=index, ignore=[404])
+        await search.close()
+
+
+# index user
+#
+
+
+@pytest.mark.asyncio
+async def test_index_user_refuses_the_admin_user(monkeypatch):
+    monkeypatch.setenv("OPENSEARCH_USER", "admin")
+    monkeypatch.setenv("OPENSEARCH_ADMIN_USER", "admin")
+
+    with pytest.raises(SystemException, match="it is the admin user"):
+        await _create_index_user(BP_DOMAIN)
+
+
+@pytest.mark.asyncio
+async def test_index_user_permissions():
+    await _create_index_user(BP_DOMAIN)
+
+    user = opensearch_config().OPENSEARCH_USER
+    search = create_admin_search()
+    try:
+        role = (await search.security.get_role(role=user))[user]
+        mapping = (await search.security.get_role_mapping(role=user))[user]
+    finally:
+        await search.close()
+    assert role["index_permissions"] == [
+        {
+            "index_patterns": [f"{BP_DOMAIN.opensearch_index}*"],
+            "allowed_actions": ["indices_all"],
+            "fls": [],
+            "masked_fields": [],
+        }
+    ]
+    assert role["cluster_permissions"] == [
+        "cluster:monitor/health",
+        "indices:data/write/bulk",
+    ]
+    assert mapping["users"] == [user]
+
+    # The user can still connect.
+    search = create_search()
+    try:
+        assert (await search.cluster.health())["status"] in {"green", "yellow"}
+    finally:
         await search.close()
 
 

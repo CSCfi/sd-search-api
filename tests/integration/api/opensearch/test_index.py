@@ -6,13 +6,16 @@ from collections.abc import AsyncIterator
 import pytest
 import pytest_asyncio
 from opensearchpy import AsyncOpenSearch
+from opensearchpy.exceptions import RequestError
 
 from search_api.api.opensearch.client import create_search
 from search_api.api.opensearch.index import (
     delete_all_documents,
     delete_documents_by_field,
     delete_documents_by_ids,
+    update_index_mapping,
 )
+from search_api.exceptions import SystemException
 
 _SET_FIELD = "set_id"
 
@@ -340,3 +343,85 @@ async def test_delete_all_deletes_every_document(search, index):
 @pytest.mark.asyncio
 async def test_delete_all_no_index(search):
     assert await delete_all_documents(search, "no-index") == 0
+
+
+# update_index_mapping
+#
+
+
+def _mapping(properties: dict) -> dict:
+    return {"mappings": {"dynamic": "strict", "properties": properties}}
+
+
+@pytest.mark.asyncio
+async def test_update_index_mapping_add_fields(search, index):
+    await search.indices.put_mapping(
+        index=index,
+        body={"properties": {"group": {"type": "nested", "properties": {}}}},
+    )
+    body = _mapping(
+        {
+            _SET_FIELD: {"type": "keyword"},  # Existing field
+            "new_field": {"type": "keyword"},
+            "group": {
+                "type": "nested",
+                "properties": {"new_nested_field": {"type": "keyword"}},
+            },
+        }
+    )
+
+    assert await update_index_mapping(search, index, body) == [
+        "group.new_nested_field",
+        "new_field",
+    ]
+
+    mapping = (await search.indices.get_mapping(index=index))[index]["mappings"]
+    assert mapping["dynamic"] == "strict"
+    assert mapping["properties"]["new_field"] == {"type": "keyword"}
+    assert mapping["properties"]["group"]["properties"]["new_nested_field"] == {
+        "type": "keyword"
+    }
+    await search.index(index=index, id="id_1", body={"new_field": "x"}, refresh=True)
+
+
+@pytest.mark.asyncio
+async def test_update_index_mapping_unchanged(search, index):
+    body = _mapping({_SET_FIELD: {"type": "keyword"}})
+
+    assert await update_index_mapping(search, index, body) == []
+
+
+@pytest.mark.asyncio
+async def test_update_index_mapping_refuses_removed_field(search, index):
+    with pytest.raises(
+        SystemException, match=rf"removed from an existing index: {_SET_FIELD}\."
+    ):
+        await update_index_mapping(search, index, _mapping({}))
+
+
+@pytest.mark.asyncio
+async def test_update_index_mapping_refuses_changed_type(search, index):
+    body = _mapping({_SET_FIELD: {"type": "text"}})
+
+    with pytest.raises(
+        SystemException, match=rf"changed in an existing index: {_SET_FIELD}\."
+    ):
+        await update_index_mapping(search, index, body)
+
+    mapping = (await search.indices.get_mapping(index=index))[index]["mappings"]
+    assert mapping["properties"][_SET_FIELD] == {"type": "keyword"}
+
+
+@pytest.mark.asyncio
+async def test_update_index_mapping_raises_opensearch_refusal(search, index):
+    """A parameter OpenSearch cannot change in place raises its own error."""
+    body = _mapping({_SET_FIELD: {"type": "keyword", "doc_values": False}})
+
+    with pytest.raises(RequestError, match="doc_values"):
+        await update_index_mapping(search, index, body)
+
+
+@pytest.mark.asyncio
+async def test_update_index_mapping_no_index(search):
+    with pytest.raises(SystemException, match="does not exist"):
+        await update_index_mapping(search, "no-index", _mapping({}))

@@ -16,7 +16,7 @@ from search_api.api.beacon.models import SNOMED_ONTOLOGY_ID
 from search_api.api.deployments import DOMAINS
 from search_api.api.domain import Domain
 from search_api.api.opensearch.client import create_search
-from search_api.api.opensearch.index import create_index
+from search_api.api.opensearch.index import create_index, update_index_mapping
 from search_api.api.opensearch.index_generator import OpenSearchIndexGeneratorService
 from search_api.conf import database_config
 from search_api.database.document import (
@@ -345,6 +345,23 @@ async def _replace_index(domain: Domain) -> None:
         await search.close()
 
 
+async def _update_index(domain: Domain) -> None:
+    body = OpenSearchIndexGeneratorService(domain.opensearch_fields).generate()
+    search = create_search()
+    try:
+        added = await update_index_mapping(search, domain.opensearch_index, body)
+    finally:
+        await search.close()
+    if added:
+        logger.info(
+            "Added field(s) to OpenSearch index %s: %s.",
+            domain.opensearch_index,
+            ", ".join(added),
+        )
+    else:
+        logger.info("OpenSearch index %s is up to date.", domain.opensearch_index)
+
+
 async def _recreate_index(domain: Domain, args: argparse.Namespace) -> None:
     """Recreate the OpenSearch index and mark every document as pending sync."""
     _require_non_production()
@@ -538,6 +555,15 @@ if __name__ == "__main__":
             ),
         )
         index_commands.add_parser(
+            "update",
+            help=(
+                "Add new fields in the generated mapping to the existing "
+                "OpenSearch index. Removed or changed fields are not allowed "
+                "and require 'recreate', which is not available in production. "
+                "Existing documents must be reloaded, e.g. 'load --full --sync'."
+            ),
+        )
+        index_commands.add_parser(
             "recreate",
             help=(
                 "Drop the OpenSearch index and create it from the generated "
@@ -655,6 +681,8 @@ if __name__ == "__main__":
             _generate_index(domain)
         elif args.index_command == "create":
             asyncio.run(_create_index(domain))
+        elif args.index_command == "update":
+            asyncio.run(_update_index(domain))
         elif args.index_command == "recreate":
             asyncio.run(_recreate_index(domain, args))
     elif args.command == "refresh":

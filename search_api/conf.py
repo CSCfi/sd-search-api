@@ -91,8 +91,34 @@ class OpenSearchConfiguration(_SecretSettings):
 
     OPENSEARCH_HOST: str = Field(description="OpenSearch host.")
     OPENSEARCH_PORT: int = Field(default=9200, description="OpenSearch port.")
-    OPENSEARCH_USER: str = Field(description="OpenSearch user.")
+    OPENSEARCH_USER: str = Field(
+        default="sd_search_api",
+        description="OpenSearch user of the application, with rights on its own "
+        "indexes only.",
+    )
     OPENSEARCH_PASSWORD: SecretStr = Field(description="OpenSearch password.")
+    OPENSEARCH_VERIFY_CERTS: bool = Field(
+        default=True,
+        description="Verify the OpenSearch TLS certificate. Set to false only for "
+        "a development OpenSearch with its demo certificates.",
+    )
+    OPENSEARCH_CA_CERTS: str | None = Field(
+        default=None,
+        description="Path to the CA certificates that verify the OpenSearch TLS "
+        "certificate. If not set, the system CA certificates are used.",
+    )
+
+
+class OpenSearchAdminConfiguration(_SecretSettings):
+    """OpenSearch admin user, who creates the application's user."""
+
+    OPENSEARCH_ADMIN_USER: str = Field(
+        default="admin",
+        description="OpenSearch admin user, who creates the application's user.",
+    )
+    OPENSEARCH_ADMIN_PASSWORD: SecretStr = Field(
+        description="Password of the OpenSearch admin user."
+    )
 
 
 class SnowstormConfiguration(BaseSettings):
@@ -327,6 +353,11 @@ def database_admin_config() -> DatabaseAdminConfiguration:
 def opensearch_config() -> OpenSearchConfiguration:
     """Get OpenSearch configuration."""
     return OpenSearchConfiguration()
+
+
+def opensearch_admin_config() -> OpenSearchAdminConfiguration:
+    """Get OpenSearch configuration for the admin user."""
+    return OpenSearchAdminConfiguration()
 
 
 def snowstorm_config() -> SnowstormConfiguration:

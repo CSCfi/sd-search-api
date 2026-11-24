@@ -281,7 +281,7 @@ class AuthServiceHandler:
         the requests a page sends at once, from every tab, carry the same one. They all
         get the first redemption's result, as does any request presenting the token
         within `REFRESH_REUSE_WINDOW` of it. A failure is not kept, so the next request
-        tries again. Shared within this process only.
+        tries again. Coordination is intentionally process-local, not distributed.
         """
         now = time.monotonic()
         for key, (started, _) in list(self._refreshes.items()):

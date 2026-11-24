@@ -1,13 +1,16 @@
 """Unit tests for search_api.api.middlewares."""
 
 import pytest
+from starlette.responses import Response
 
 from search_api.api.middlewares import AuthMiddleware
 from search_api.exceptions import SystemException
 from search_api.services.access_token import InvalidAccessToken, SigningKeysUnavailable
+from search_api.services.auth import RefreshRejected, TokenSet
 
 PROTECTED_PATH = "/protected"
 VALID_TOKEN = "valid-access-token"
+RENEWED = TokenSet(access_token=VALID_TOKEN, expires_in=3599, refresh_token="new-rt")
 
 
 class FakeValidator:
@@ -26,17 +29,61 @@ class FakeValidator:
         return "user-1"
 
 
+class FakeAuthService:
+    """Renews any refresh token into `renewed`, or raises `error`; records each one."""
+
+    def __init__(
+        self, error: Exception | None = None, renewed: TokenSet = RENEWED
+    ) -> None:
+        self.error = error
+        self.renewed = renewed
+        self.refreshed: list[str] = []
+
+    async def refresh_shared(self, refresh_token: str) -> TokenSet:
+        self.refreshed.append(refresh_token)
+        if self.error:
+            raise self.error
+        return self.renewed
+
+    def set_session_cookies(self, response: Response, tokens: TokenSet) -> None:
+        response.set_cookie("access_token", tokens.access_token)
+        response.set_cookie("refresh_token", tokens.refresh_token or "")
+        response.headers["Cache-Control"] = "no-store"
+
+
 async def _run(
     path: str,
     headers: list[tuple[bytes, bytes]] | None = None,
     validator: FakeValidator | None = None,
+    auth_service: FakeAuthService | None = None,
 ) -> tuple[int, bytes, dict, bool]:
     """Send one request through the middleware: status, body, scope, downstream ran."""
+    status, body, scope, called, _ = await _run_with_headers(
+        path, headers, validator, auth_service
+    )
+    return status, body, scope, called
+
+
+async def _run_with_headers(
+    path: str,
+    headers: list[tuple[bytes, bytes]] | None = None,
+    validator: FakeValidator | None = None,
+    auth_service: FakeAuthService | None = None,
+    downstream_status: int = 200,
+    downstream_headers: list[tuple[bytes, bytes]] | None = None,
+) -> tuple[int, bytes, dict, bool, list[tuple[bytes, bytes]]]:
+    """`_run`, also giving the response headers; the downstream answers as told."""
     called = {"value": False}
 
     async def app(scope, receive, send):
         called["value"] = True
-        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send(
+            {
+                "type": "http.response.start",
+                "status": downstream_status,
+                "headers": list(downstream_headers or []),
+            }
+        )
         await send({"type": "http.response.body", "body": b"ok", "more_body": False})
 
     async def receive() -> dict:
@@ -48,11 +95,16 @@ async def _run(
         sent.append(message)
 
     scope = {"type": "http", "method": "POST", "path": path, "headers": headers or []}
-    await AuthMiddleware(app, validator or FakeValidator())(scope, receive, send)
+    middleware = AuthMiddleware(
+        app,
+        validator or FakeValidator(),  # type: ignore[arg-type]
+        auth_service or FakeAuthService(),  # type: ignore[arg-type]
+    )
+    await middleware(scope, receive, send)
 
-    status = next(m["status"] for m in sent if m["type"] == "http.response.start")
+    start = next(m for m in sent if m["type"] == "http.response.start")
     body = b"".join(m["body"] for m in sent if m["type"] == "http.response.body")
-    return status, body, scope, called["value"]
+    return start["status"], body, scope, called["value"], start["headers"]
 
 
 def _cookie(token: str, others: str = "") -> list[tuple[bytes, bytes]]:
@@ -217,7 +269,126 @@ async def test_non_http_scope_passes_through():
         called["value"] = True
 
     validator = FakeValidator()
-    await AuthMiddleware(app, validator)({"type": "lifespan"}, None, None)  # type: ignore[arg-type]
+    auth_service = FakeAuthService()
+    await AuthMiddleware(app, validator, auth_service)({"type": "lifespan"}, None, None)  # type: ignore[arg-type]
 
     assert called["value"]
     assert validator.seen == []
+    assert auth_service.refreshed == []
+
+
+def _set_cookies(headers: list[tuple[bytes, bytes]]) -> list[str]:
+    return [value.decode() for name, value in headers if name == b"set-cookie"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "cookie",
+    ["refresh_token=old-rt", "access_token=expired; refresh_token=old-rt"],
+    ids=["no-access-token", "invalid-access-token"],
+)
+async def test_session_is_renewed_inline_from_the_refresh_cookie(cookie):
+    validator = FakeValidator()
+    auth_service = FakeAuthService()
+
+    status, _, scope, called, headers = await _run_with_headers(
+        PROTECTED_PATH, [(b"cookie", cookie.encode())], validator, auth_service
+    )
+
+    assert called
+    assert status == 200
+    assert scope["state"]["user_id"] == "user-1"
+    assert auth_service.refreshed == ["old-rt"]
+    assert validator.seen[-1] == VALID_TOKEN  # the renewed token, validated
+    cookies = _set_cookies(headers)
+    assert any(c.startswith(f"access_token={VALID_TOKEN};") for c in cookies)
+    assert any(c.startswith("refresh_token=new-rt;") for c in cookies)
+    assert (b"cache-control", b"no-store") in headers
+
+
+@pytest.mark.asyncio
+async def test_renewed_cookies_are_set_whatever_the_response():
+    # The refresh token the request came with is spent: the new one must reach the
+    # browser even on an error, beside the response's own cookies.
+    _, _, _, _, headers = await _run_with_headers(
+        PROTECTED_PATH,
+        [(b"cookie", b"refresh_token=old-rt")],
+        downstream_status=404,
+        downstream_headers=[
+            (b"cache-control", b"max-age=60"),
+            (b"set-cookie", b"theme=dark"),
+        ],
+    )
+
+    cookies = _set_cookies(headers)
+    assert "theme=dark" in cookies
+    assert any(c.startswith("refresh_token=new-rt;") for c in cookies)
+    assert [v for k, v in headers if k == b"cache-control"] == [b"no-store"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "headers",
+    [[], _cookie("expired"), _authorization("Bearer expired")],
+    ids=["no-token", "invalid-cookie", "invalid-bearer"],
+)
+async def test_without_a_refresh_cookie_there_is_no_renewal(headers):
+    auth_service = FakeAuthService()
+
+    status, _, _, called = await _run(PROTECTED_PATH, headers, None, auth_service)
+
+    assert not called
+    assert status == 401
+    assert auth_service.refreshed == []
+
+
+@pytest.mark.asyncio
+async def test_valid_access_token_is_not_renewed():
+    auth_service = FakeAuthService()
+    cookie = [(b"cookie", f"access_token={VALID_TOKEN}; refresh_token=rt".encode())]
+
+    status, _, _, _, headers = await _run_with_headers(
+        PROTECTED_PATH, cookie, None, auth_service
+    )
+
+    assert status == 200
+    assert auth_service.refreshed == []
+    assert _set_cookies(headers) == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("auth_service", "expected"),
+    [
+        (FakeAuthService(RefreshRejected("invalid_grant")), 401),
+        (FakeAuthService(renewed=TokenSet("not-accepted", 60, "new-rt")), 401),
+        (FakeAuthService(SystemException("unreachable")), 503),
+    ],
+    ids=["refresh-rejected", "renewed-token-rejected", "provider-unreachable"],
+)
+async def test_failed_renewal_leaves_the_cookies_alone(auth_service, expected):
+    # Another tab may just have been given new cookies: none are set or cleared.
+    status, _, _, called, headers = await _run_with_headers(
+        PROTECTED_PATH, [(b"cookie", b"refresh_token=rt")], None, auth_service
+    )
+
+    assert not called
+    assert status == expected
+    assert _set_cookies(headers) == []
+
+
+@pytest.mark.asyncio
+async def test_issuer_unreachable_is_503_without_renewal():
+    # A renewed token could not be validated either.
+    auth_service = FakeAuthService()
+    cookie = [(b"cookie", b"access_token=some-token; refresh_token=rt")]
+
+    status, _, _, _ = await _run(
+        PROTECTED_PATH,
+        cookie,
+        FakeValidator(SigningKeysUnavailable("unreachable")),
+        auth_service,
+    )
+
+    assert status == 503
+    assert auth_service.refreshed == []

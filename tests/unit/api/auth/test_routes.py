@@ -1,6 +1,7 @@
 """Unit tests for auth API routes."""
 
 import os
+import time
 from unittest.mock import AsyncMock, MagicMock
 
 os.environ["BASE_URL"] = "http://localhost:8000"
@@ -8,6 +9,7 @@ os.environ["OIDC_URL"] = "http://localhost:9999"
 os.environ["OIDC_CLIENT_ID"] = "test-client-id"
 os.environ["OIDC_CLIENT_SECRET"] = "test-client-secret"
 
+import jwt
 import pytest
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
@@ -133,6 +135,34 @@ def test_refresh_replaces_both_cookies(refreshing_service, client):
     assert resp.headers["cache-control"] == "no-cache, no-store, must-revalidate"
 
 
+def test_refresh_uses_the_newest_of_two_refresh_cookies(refreshing_service, client):
+    # A browser holding the cookie at its old path sends that one first (RFC 6265).
+    now = int(time.time())
+    older, newer = (
+        jwt.encode({"exp": now + lifetime}, "k" * 32, algorithm="HS256")
+        for lifetime in (3600, 7200)
+    )
+
+    resp = client.post(
+        "/refresh", headers={"Cookie": f"refresh_token={older}; refresh_token={newer}"}
+    )
+
+    assert resp.status_code == 204
+    refreshing_service.refresh.assert_awaited_once_with(newer)
+    assert resp.cookies.get("refresh_token") == "new-rt"
+
+
+def test_tab_losing_a_refresh_race_gets_the_winners_cookies(refreshing_service, client):
+    client.cookies.set("refresh_token", "old-rt", path="/refresh")
+    winner = client.post("/refresh")
+
+    loser = client.post("/refresh", headers={"Cookie": "refresh_token=old-rt"})
+
+    assert loser.status_code == 204
+    assert loser.cookies.get("refresh_token") == winner.cookies.get("refresh_token")
+    refreshing_service.refresh.assert_awaited_once_with("old-rt")
+
+
 def test_refresh_without_cookie_returns_401_and_skips_provider(
     refreshing_service, client
 ):
@@ -171,10 +201,14 @@ def test_refresh_only_accepts_post(refreshing_service, client):
     assert client.get("/refresh").status_code == 405
 
 
-def _deleted_cookies(resp) -> dict[str, str]:
-    """Each Set-Cookie header, keyed by cookie name."""
+def _path(set_cookie: str) -> str:
+    return set_cookie.split("Path=", 1)[1].split(";", 1)[0]
+
+
+def _deleted_cookies(resp) -> dict[tuple[str, str], str]:
+    """Each Set-Cookie header, keyed by cookie name and path."""
     headers = resp.headers.get_list("set-cookie")
-    return {header.split("=", 1)[0]: header for header in headers}
+    return {(header.split("=", 1)[0], _path(header)): header for header in headers}
 
 
 def test_delete_refresh_revokes_and_clears_both_cookies(refreshing_service, client):
@@ -186,10 +220,12 @@ def test_delete_refresh_revokes_and_clears_both_cookies(refreshing_service, clie
     assert resp.status_code == 204
     refreshing_service.revoke.assert_awaited_once_with("rt")
     cookies = _deleted_cookies(resp)
-    assert "Max-Age=0" in cookies["access_token"]
-    assert "Path=/;" in cookies["access_token"]
-    assert "Max-Age=0" in cookies["refresh_token"]
-    assert "Path=/refresh" in cookies["refresh_token"]
+    assert set(cookies) == {
+        ("access_token", "/"),
+        ("refresh_token", "/"),
+    }
+    for cookie in cookies.values():
+        assert "Max-Age=0" in cookie
 
 
 def test_delete_refresh_without_cookie_skips_revocation_and_clears_cookies(
@@ -201,4 +237,7 @@ def test_delete_refresh_without_cookie_skips_revocation_and_clears_cookies(
 
     assert resp.status_code == 204
     refreshing_service.revoke.assert_not_awaited()
-    assert set(_deleted_cookies(resp)) == {"access_token", "refresh_token"}
+    assert set(_deleted_cookies(resp)) == {
+        ("access_token", "/"),
+        ("refresh_token", "/"),
+    }

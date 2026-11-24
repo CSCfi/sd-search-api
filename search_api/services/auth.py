@@ -1,6 +1,8 @@
 """OIDC relying party service."""
 
 import asyncio
+import functools
+import hashlib
 import logging
 import time
 from dataclasses import dataclass
@@ -14,6 +16,7 @@ from idpyoidc.client.exception import OidcServiceError  # type: ignore[import-un
 from idpyoidc.client.rp_handler import RPHandler  # type: ignore[import-untyped]
 from idpyoidc.exception import OidcMsgError  # type: ignore[import-untyped]
 from requests.exceptions import RequestException
+from starlette.requests import cookie_parser
 from starlette.responses import RedirectResponse, Response
 
 from search_api.conf import oidc_config
@@ -22,12 +25,15 @@ from search_api.services.access_token import AccessTokenValidator, InvalidAccess
 from search_api.services.oidc_metadata import ProviderMetadata
 
 SESSION_COOKIE = "access_token"
-# Scoped to the one path that redeems it, so the long-lived token rides on no other
-# request.
+# Sent with every request, so that the middleware can renew an expired session inline
+# rather than leave the client to find out from a 401.
 REFRESH_COOKIE = "refresh_token"
-REFRESH_COOKIE_PATH = "/refresh"
+REFRESH_COOKIE_PATH = "/"
 
 REFRESH_TIMEOUT = 10.0
+# How long the result of redeeming a refresh token is handed to every other request
+# presenting the same one: LS AAI refuses it once spent.
+REFRESH_REUSE_WINDOW = 30.0
 
 # The refresh token itself is dead: expired, revoked or spent. RFC 6749 says
 # invalid_grant; LS AAI answers a spent one with invalid_token. Every other error from
@@ -90,6 +96,9 @@ class AuthServiceHandler:
         # thread via asyncio.to_thread; the lock keeps concurrent logins from racing on the
         # shared RPHandler's internal session/state dict once that introduces real threading.
         self._rph_lock = asyncio.Lock()
+        # Redemptions under way or just done, by the SHA-256 of the refresh token: when
+        # each started, and the task giving its result.
+        self._refreshes: dict[str, tuple[float, asyncio.Task[TokenSet]]] = {}
 
     @property
     def rph(self) -> RPHandler:
@@ -265,6 +274,39 @@ class AuthServiceHandler:
         # The refresh token is kept when the provider does not rotate it.
         return await self._token_set(body, refresh_token)
 
+    async def refresh_shared(self, refresh_token: str) -> TokenSet:
+        """`refresh`, redeeming each refresh token once however many requests send it.
+
+        LS AAI replaces the refresh token on its first use and refuses it afterwards, and
+        the requests a page sends at once, from every tab, carry the same one. They all
+        get the first redemption's result, as does any request presenting the token
+        within `REFRESH_REUSE_WINDOW` of it. A failure is not kept, so the next request
+        tries again. Coordination is intentionally process-local, not distributed.
+        """
+        now = time.monotonic()
+        for key, (started, _) in list(self._refreshes.items()):
+            if now - started >= REFRESH_REUSE_WINDOW:
+                del self._refreshes[key]
+
+        key = hashlib.sha256(refresh_token.encode()).hexdigest()
+        entry = self._refreshes.get(key)
+        if entry is None:
+            task = asyncio.create_task(self.refresh(refresh_token))
+            self._refreshes[key] = (now, task)
+            task.add_done_callback(functools.partial(self._forget_failed_refresh, key))
+        else:
+            task = entry[1]
+        # Shielded: a client hanging up must not cancel a refresh others are awaiting.
+        return await asyncio.shield(task)
+
+    def _forget_failed_refresh(self, key: str, task: asyncio.Task[TokenSet]) -> None:
+        """Drop a redemption that failed, so that it is not handed on as a result."""
+        # Reading the exception also keeps asyncio from reporting it as never retrieved.
+        if task.cancelled() or task.exception() is not None:
+            entry = self._refreshes.get(key)
+            if entry is not None and entry[1] is task:
+                del self._refreshes[key]
+
     async def revoke(self, refresh_token: str) -> None:
         """Revoke a refresh token at the provider (RFC 7009), as far as it can be.
 
@@ -392,6 +434,25 @@ class AuthServiceHandler:
         )
         self.clear_session_cookies(response)
         return response
+
+
+def refresh_token_from_cookies(cookie_header: str | None) -> str | None:
+    """The refresh token in a `Cookie` header; the newest one when it holds several."""
+    if not cookie_header:
+        return None
+    tokens = [
+        value
+        for pair in cookie_header.split(";")
+        if (value := cookie_parser(pair).get(REFRESH_COOKIE))
+    ]
+    if not tokens:
+        return None
+    return max(reversed(tokens), key=_expiry_rank)
+
+
+def _expiry_rank(token: str) -> int:
+    seconds = _seconds_until_expiry(token)
+    return -1 if seconds is None else seconds
 
 
 def _seconds_until_expiry(token: str) -> int | None:

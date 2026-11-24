@@ -6,7 +6,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, Response
 
 from search_api.conf import oidc_config
-from search_api.services.auth import REFRESH_COOKIE, AuthServiceHandler, RefreshRejected
+from search_api.services.auth import (
+    AuthServiceHandler,
+    RefreshRejected,
+    refresh_token_from_cookies,
+)
 
 # Binds the login attempt to the browser that started it: /login sets this to the
 # OIDC `state` value and /callback requires it to match the `state` query param.
@@ -83,15 +87,17 @@ async def refresh(
     `401` means this refresh token is no good. The cookies are left alone, because
     LS AAI replaces the refresh token on each use: when two tabs refresh at once, the
     one that loses presents a spent token, and clearing the cookies would delete the
-    ones the winning tab has just been given. `503` means the identity provider could
-    not be reached; the cookies are left as they were, so a later retry can work.
+    ones the winning tab has just been given. A token redeemed within the last few
+    seconds is not sent again: its result is returned, so a tab that lost the race gets
+    the winner's cookies. `503` means the identity provider could not be reached; the
+    cookies are left as they were, so a later retry can work.
     """
-    refresh_token = request.cookies.get(REFRESH_COOKIE)
+    refresh_token = refresh_token_from_cookies(request.headers.get("cookie"))
     if not refresh_token:
         raise HTTPException(status_code=401, detail="No refresh token.")
 
     try:
-        tokens = await auth_service.refresh(refresh_token)
+        tokens = await auth_service.refresh_shared(refresh_token)
     except RefreshRejected as exc:
         raise HTTPException(status_code=401, detail="Refresh token rejected.") from exc
 
@@ -107,10 +113,10 @@ async def revoke(
 ) -> Response:
     """Revoke the refresh token at the identity provider and clear both cookies.
 
-    Called by the UI before `/logout`, the only path the refresh cookie reaches. Always
+    Called by the UI before `/logout`, which does not revoke the refresh token. Always
     `204`: a failed revocation is logged, and the session still ends in the browser.
     """
-    refresh_token = request.cookies.get(REFRESH_COOKIE)
+    refresh_token = refresh_token_from_cookies(request.headers.get("cookie"))
     if refresh_token:
         await auth_service.revoke(refresh_token)
 

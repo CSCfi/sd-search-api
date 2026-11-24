@@ -24,6 +24,7 @@ uv run python scripts/admin.py Bigpicture sync                  # only documents
 uv run python scripts/admin.py Bigpicture index generate        # writes the mapping file only
 uv run python scripts/admin.py Bigpicture index create|recreate # recreate marks docs pending: sync after
 uv run python scripts/admin.py Bigpicture index update          # adds new fields in place; refuses others
+uv run python scripts/admin.py Bigpicture index user            # OPENSEARCH_USER, as OPENSEARCH_ADMIN_USER
 uv run python scripts/admin.py Bigpicture clear|recreate        # docs+terms+logs+marker / both stores
 uv run python scripts/admin.py Bigpicture delete <document>     # one doc+logs, e.g. an image
 uv run python scripts/admin.py Bigpicture delete-set <set>      # one document set's docs+logs, e.g. withdrawn
@@ -284,7 +285,10 @@ default would match on one word, far too broad given that results are never rank
 
 Settings (`conf.py`) are mostly **required** — no hardcoded host/db/password. Defaults: `POSTGRES_PORT=5432`,
 `POSTGRES_USER=sd_search_api`, `POSTGRES_ADMIN_USER=sd_search_admin` (only `recreate` connects as it),
-`POSTGRES_POOL_{MIN_SIZE=2,MAX_SIZE=10,MAX_LIFETIME=3600,TIMEOUT=5}`, `OPENSEARCH_PORT=9200`, `DEPLOYMENT_ENV=dev`,
+`POSTGRES_POOL_{MIN_SIZE=2,MAX_SIZE=10,MAX_LIFETIME=3600,TIMEOUT=5}`, `OPENSEARCH_PORT=9200`,
+`OPENSEARCH_USER=sd_search_api` (server and admin CLI alike; every right on `<Domain.opensearch_index>*`, plus
+cluster health and bulk, given by `index user`), `OPENSEARCH_ADMIN_USER=admin` (only `index user` connects as it),
+`OPENSEARCH_VERIFY_CERTS=true`, `OPENSEARCH_CA_CERTS=None`, `DEPLOYMENT_ENV=dev`,
 `{TERM,ONTOLOGY,VALUE_COUNT}_CACHE_REFRESH=300`, `FEATURE_AI=false`, `ADMIN_KEY=None`, `OIDC_SECURE_COOKIE=true`,
 `OIDC_SCOPE="openid profile email offline_access"`. There is **one class per source**, since a `BaseSettings` validates every field it declares:
 bundled, a `load <dir>` would demand submit API settings it never uses. **The server pools its Postgres connections

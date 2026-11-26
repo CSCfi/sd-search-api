@@ -236,7 +236,7 @@ filtering_terms:
     type: controlledValue
     nested_group: specimen
     scopes: [ non_clinical ]
-    label: "Control terminology"
+    label: "Control / Treated"
     description: "Used to identify if the biological being is a control animal or treated animal."
     controlledValues: [ "CONTROL", "TREATED" ]
 

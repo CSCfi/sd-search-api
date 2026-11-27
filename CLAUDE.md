@@ -132,7 +132,8 @@ by `delete-set <document_set>`, one document by `delete <document>`.
 `ExtractedDocument` separates **`values`** (top level) from **`groups`** (one `OpenSearchGroup` per nested-group
 item, which rejects a value belonging to another group). A field's indexed path is exactly `<nested_group>.<id>`,
 and a dot in either part is rejected. **Scope** partitions documents rather than filtering them, so it is indexed
-at the root under `SCOPE_FIELD`. **Extraction reaches no database** — what a load could not make sense of rides
+at the root under `SCOPE_FIELD`; a load drops a value of a field not declaring the document's scope, with a
+`WARNING`, before resolving any concept. **Extraction reaches no database** — what a load could not make sense of rides
 out on `logs` and becomes `document_log` rows, replaced on every reload.
 
 ### Bigpicture extraction (`api/bigpicture/extract/`)

@@ -15,7 +15,11 @@ from search_api.api.opensearch.models import (
 )
 from search_api.database.models import StoredDocumentLog
 from search_api.exceptions import SystemException, UserException
-from search_api.services.load import LoadService, drop_too_long_keywords
+from search_api.services.load import (
+    LoadService,
+    drop_out_of_scope_values,
+    drop_too_long_keywords,
+)
 from search_api.services.ontology.term_cache import create_term_caches
 
 
@@ -130,6 +134,46 @@ def test_drop_too_long_keywords():
         )
         for field_id in ("dataset_id", "staining_target")
     ]
+
+
+@pytest.mark.parametrize(
+    ("document_scope", "diagnosis_scopes", "kept"),
+    [
+        ("non_clinical", {"clinical", "non_clinical"}, True),
+        ("non_clinical", {"clinical"}, False),
+        ("non_clinical", None, True),
+        (None, {"clinical"}, True),
+    ],
+)
+def test_drop_out_of_scope_values(document_scope, diagnosis_scopes, kept):
+    """A field declaring scopes is indexed only in those scopes."""
+    diagnosis = _keyword("diagnosis", "73211009", "observation")
+    doc = ExtractedDocument(
+        id="img-1",
+        scope=document_scope,
+        groups=[OpenSearchGroup(group="observation", values=[diagnosis])],
+    )
+    # A field declaring no scopes has no entry.
+    scopes_by_field = (
+        {} if diagnosis_scopes is None else {"diagnosis": diagnosis_scopes}
+    )
+
+    logs = drop_out_of_scope_values(doc, scopes_by_field)
+
+    assert doc.groups[0].values == ([diagnosis] if kept else [])
+    assert logs == (
+        []
+        if kept
+        else [
+            StoredDocumentLog(
+                document_id="img-1",
+                field_id="diagnosis",
+                severity="WARNING",
+                message="Value is ignored: the field is not indexed for scope "
+                "'non_clinical'.",
+            )
+        ]
+    )
 
 
 @pytest.mark.asyncio

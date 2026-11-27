@@ -1,12 +1,23 @@
+import pytest
+
+from search_api.api.bigpicture.domain import BP_DOMAIN
 from search_api.api.bigpicture.extract.document import to_opensearch_values
 from search_api.api.bigpicture.extract.models import (
     BigpictureCodeAttributeValue,
     BigpictureFields,
+    BigpictureObservationFields,
     BigpictureSpecimenFields,
     BigpictureStainingFields,
 )
 from search_api.api.opensearch.document import build_document
 from search_api.api.opensearch.models import ExtractedDocument
+from search_api.database.models import StoredDocumentLog
+from search_api.services.load import (
+    LoadService,
+    drop_out_of_scope_values,
+    drop_values_without_required,
+)
+from search_api.services.ontology.term_cache import create_term_caches
 
 # A concept id and the preferred term SNOMED CT gives it, since an extracted value
 # carries both.
@@ -16,6 +27,9 @@ _UPPER_ARM_CODE, _UPPER_ARM_MEANING = "368209003", "Right upper arm structure"
 _FIXATIVE_CODE, _FIXATIVE_MEANING = "1388477003", "Tissue fixative"
 _PARAFFIN_CODE, _PARAFFIN_MEANING = "311731000", "Paraffin wax"
 _HE_CODE, _HE_MEANING = "104210008", "Hematoxylin and eosin stain method"
+_MELANOMA_CODE, _MELANOMA_MEANING = "93655004", "Malignant melanoma of skin"
+# Not looked up, so any code will do.
+_FINDING_CODE, _FINDING_MEANING = "C1", "A finding"
 
 
 def _fields(*, scope: str = "clinical", **kwargs) -> BigpictureFields:
@@ -131,3 +145,95 @@ def test_ontology_values_of_multiple_specimens():
 
     assert pairs["animal_species"] == {(_SPECIES_CODE, _SPECIES_MEANING)}
     assert pairs["block_preparation"] == {(_PARAFFIN_CODE, _PARAFFIN_MEANING)}
+
+
+def _drop_values(
+    scope: str, observation: BigpictureObservationFields
+) -> tuple[ExtractedDocument, list[StoredDocumentLog]]:
+    """Drop the values a load drops for scope and requires.
+
+    :param scope: The document's scope.
+    :param observation: The document's one observation.
+    :return: The document, with the values dropped, and a log entry for each.
+    """
+    values, groups = to_opensearch_values(
+        _fields(scope=scope, observation={observation})
+    )
+    doc = ExtractedDocument(id="img", scope=scope, values=values, groups=groups)
+    service = LoadService(
+        create_term_caches(BP_DOMAIN.ontology_ids), BP_DOMAIN.filtering_terms
+    )
+    logs = drop_out_of_scope_values(doc, service._field_scopes)
+    logs += drop_values_without_required(doc, service._required_fields)
+    return doc, logs
+
+
+@pytest.mark.parametrize(
+    ("scope", "observation"),
+    [
+        (
+            "clinical",
+            BigpictureObservationFields(
+                diagnosis=_code(_MELANOMA_CODE, _MELANOMA_MEANING),
+                observation_type="distinct",
+            ),
+        ),
+        # Any one of the finding fields is enough.
+        (
+            "non_clinical",
+            BigpictureObservationFields(
+                finding_severity=_code(_FINDING_CODE, _FINDING_MEANING),
+                observation_type="distinct",
+            ),
+        ),
+    ],
+)
+def test_observation_in_scope_is_indexed(scope, observation):
+    """With the Bigpicture fields, a diagnosis in a clinical document, or a
+    finding field in a non-clinical one, has observation_type."""
+    doc, logs = _drop_values(scope, observation)
+
+    assert build_document(doc)["observation"][0]["observation_type"] == "distinct"
+    assert logs == []
+
+
+@pytest.mark.parametrize(
+    ("scope", "field_id", "observation"),
+    [
+        (
+            "non_clinical",
+            "diagnosis",
+            BigpictureObservationFields(
+                diagnosis=_code(_MELANOMA_CODE, _MELANOMA_MEANING),
+                observation_type="distinct",
+            ),
+        ),
+        (
+            "clinical",
+            "finding",
+            BigpictureObservationFields(
+                finding=_code(_FINDING_CODE, _FINDING_MEANING),
+                observation_type="distinct",
+            ),
+        ),
+    ],
+)
+def test_observation_outside_scope_is_not_indexed(scope, field_id, observation):
+    """With the Bigpicture fields, a diagnosis in a non-clinical document, or a
+    finding in a clinical one, leaves no observation. The scope drop removes the
+    diagnosis or finding. The requires drop then removes the observation_type."""
+    doc, logs = _drop_values(scope, observation)
+
+    assert "observation" not in build_document(doc)
+    assert [(log.field_id, log.severity, log.message) for log in logs] == [
+        (
+            field_id,
+            "WARNING",
+            f"Value is ignored: the field is not indexed for scope '{scope}'.",
+        ),
+        (
+            "observation_type",
+            "WARNING",
+            "Value is ignored: none of the fields it requires has a value.",
+        ),
+    ]

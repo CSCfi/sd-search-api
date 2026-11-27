@@ -95,6 +95,22 @@ class OpenSearchBeaconFilteringTerm(BeaconFilteringTerm, OpenSearchField):
             )
         return self
 
+    @model_validator(mode="after")
+    def _validate_requires(self) -> OpenSearchBeaconFilteringTerm:
+        """Check that a field with requires has a nested group, and that requires
+        is not empty and does not list the field itself."""
+        if self.requires is None:
+            return self
+        if self.nested_group is None:
+            raise ValueError(
+                f"Field '{self.id}' declares requires but has no nested_group."
+            )
+        if not self.requires:
+            raise ValueError(f"Field '{self.id}' declares an empty requires.")
+        if self.id in self.requires:
+            raise ValueError(f"Field '{self.id}' requires itself.")
+        return self
+
 
 # Python value type expected for each semantic field type.
 _VALUE_TYPES: dict[str, type | tuple[type, ...]] = {

@@ -2,6 +2,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+import yaml
 
 from search_api.api.fields import load_fields_config
 from search_api.exceptions import ConfigurationException
@@ -185,3 +186,80 @@ def test_field_nested_group_cannot_contain_dot(tmp_path):
         ConfigurationException, match="nested_group 'blocks.tissue' contains a dot"
     ):
         load_fields_config(path)
+
+
+def _keyword_term(field_id, nested_group=None, requires=None):
+    """A keyword filtering term in fields.yaml."""
+    term = {
+        "id": field_id,
+        "type": "keyword",
+        # Required, but not what these tests are about.
+        "scopes": [],
+        "label": field_id,
+        "description": field_id,
+    }
+    if nested_group is not None:
+        term["nested_group"] = nested_group
+    if requires is not None:
+        term["requires"] = requires
+    return term
+
+
+def _load_fields_config(tmp_path: Path, terms: list[dict]):
+    path = tmp_path / "fields.yaml"
+    path.write_text(yaml.safe_dump({"filtering_terms": terms}))
+    return load_fields_config(path)
+
+
+def test_requires(tmp_path):
+    config = _load_fields_config(
+        tmp_path,
+        [
+            _keyword_term("required_field", "nested_group"),
+            _keyword_term("requires_field", "nested_group", ["required_field"]),
+        ],
+    )
+    assert config.filtering_terms[1].requires == ["required_field"]
+
+
+@pytest.mark.parametrize(
+    ("terms", "error"),
+    [
+        (
+            [_keyword_term("requires_field", None, ["required_field"])],
+            "has no nested_group",
+        ),
+        ([_keyword_term("requires_field", "nested_group", [])], "empty requires"),
+        (
+            [_keyword_term("requires_field", "nested_group", ["requires_field"])],
+            "requires itself",
+        ),
+        (
+            [_keyword_term("requires_field", "nested_group", ["unknown_field"])],
+            "requires 'unknown_field', which is not a filtering term",
+        ),
+        (
+            [_keyword_term("requires_field", "nested_group", ["other_group_field"])],
+            "'other_group_field', which is not a filtering term in nested_group",
+        ),
+        (
+            [
+                _keyword_term("requires_field", "nested_group", ["required_field"]),
+                _keyword_term(
+                    "requires_requires_field", "nested_group", ["requires_field"]
+                ),
+            ],
+            "which requires fields itself",
+        ),
+    ],
+)
+def test_requires_rejected(tmp_path, terms, error):
+    with pytest.raises(ConfigurationException, match=error):
+        _load_fields_config(
+            tmp_path,
+            [
+                _keyword_term("required_field", "nested_group"),
+                _keyword_term("other_group_field", "other_nested_group"),
+                *terms,
+            ],
+        )

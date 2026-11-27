@@ -342,6 +342,17 @@ def test_filtering_terms(client: TestClient):
     )
 
 
+def test_filtering_terms_leave_out_deployment_configuration(client: TestClient):
+    """Fields that only configure the deployment are not part of the API."""
+    excluded = {"nested_group", "multivalued", "ontologyRestriction", "requires"}
+    for field in excluded:
+        assert any(getattr(term, field) for term in BP_FILTERING_TERMS), field
+
+    terms = client.get("/filtering_terms").json()["response"]["filteringTerms"]
+    for term in terms:
+        assert not excluded & term.keys(), term["id"]
+
+
 def test_filtering_scopes(client: TestClient):
     response = client.get("/filtering_scopes")
     assert response.status_code == 200

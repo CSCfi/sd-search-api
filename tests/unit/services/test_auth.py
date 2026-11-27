@@ -593,7 +593,9 @@ async def test_refresh_shared_redeems_again_after_the_window(
 ):
     _refresh_succeeds(token_endpoint, times=2)
     handler, _ = _handler_with_mock_rph()
-    now = time.monotonic()
+    # A fixed clock, so that now + REFRESH_REUSE_WINDOW - now is exact. A float
+    # near a real clock reading can round it just below the window.
+    now = 1000.0
     monkeypatch.setattr(auth_module.time, "monotonic", lambda: now)
     await handler.refresh_shared("old-rt")
 

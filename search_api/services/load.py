@@ -1,7 +1,8 @@
 """Generic load service: store extracted documents and cache ontology preferred terms."""
 
 import logging
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from datetime import datetime
 
 from psycopg import AsyncCursor
@@ -93,6 +94,49 @@ def drop_too_long_keywords(doc: ExtractedDocument) -> list[StoredDocumentLog]:
     ]
 
 
+def drop_out_of_scope_values(
+    doc: ExtractedDocument, field_scopes: Mapping[str, AbstractSet[str]]
+) -> list[StoredDocumentLog]:
+    """
+    Drop the values of fields that are not indexed for the document's scope.
+
+    A field declaring scopes is indexed only in those scopes. A field declaring none,
+    or a document without a scope, keeps every value.
+
+    :param doc: The document, changed in place.
+    :param field_scopes: The scopes each field declares, by field id.
+    :return: A warning log entry for each dropped value.
+    """
+    if doc.scope is None:
+        return []
+    scope = doc.scope
+    dropped: list[OpenSearchFieldValue] = []
+
+    def kept(values: list[OpenSearchFieldValue]) -> list[OpenSearchFieldValue]:
+        """Return the values to keep. The others are added to dropped."""
+        result = []
+        for value in values:
+            scopes = field_scopes.get(value.field.id)
+            if scopes and scope not in scopes:
+                dropped.append(value)
+            else:
+                result.append(value)
+        return result
+
+    doc.values = kept(doc.values)
+    for group in doc.groups:
+        group.values = kept(group.values)
+    return [
+        StoredDocumentLog(
+            document_id=doc.id,
+            field_id=value.field.id,
+            severity="WARNING",
+            message=f"Value is ignored: the field is not indexed for scope '{scope}'.",
+        )
+        for value in dropped
+    ]
+
+
 class LoadService:
     """Store extracted documents and cache their ontology preferred terms."""
 
@@ -117,6 +161,7 @@ class LoadService:
         self._term_caches = term_caches
         self._ontology_bindings = get_ontology_bindings(filtering_terms, term_caches)
         self._filtering_scopes = filtering_scopes
+        self._field_scopes = {term.id: set(term.scopes) for term in filtering_terms}
         self._replace_concepts = replace_concepts
         self._reload = reload
         self._initialised = False
@@ -225,6 +270,12 @@ class LoadService:
 
                     # Drop keyword values OpenSearch would reject because they are too long.
                     for log in drop_too_long_keywords(doc):
+                        await write_document_log(cur, log)
+
+                    # Drop values of fields not indexed for the document's scope.
+                    # This must be done before ontology values are resolved, so their
+                    # preferred terms are not cached.
+                    for log in drop_out_of_scope_values(doc, self._field_scopes):
                         await write_document_log(cur, log)
 
                     # The document's ontology values are resolved to concept

@@ -1,12 +1,14 @@
 import os
 import uuid
-from collections.abc import AsyncIterator
+from abc import abstractmethod
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
+from pydantic import BaseModel, ConfigDict, Field
 
 from search_api.api.beacon.models import BeaconFilteringOntology, OntologyRestriction
 from search_api.api.extract_logs import ExtractLog
@@ -46,154 +48,160 @@ from search_api.services.ontology.term_cache import create_term_caches
 os.environ.setdefault("POSTGRES_DB", os.environ["BP_POSTGRES_DB"])
 os.environ.setdefault("POSTGRES_PORT", os.environ["BP_POSTGRES_PORT"])
 
-# The one ontology field these tests load a document for.
+# The id of the test field.
 _FIELD_ID = "test_field"
 _CONCEPT_ID_PATTERN = r"C\d+"
 _CONCEPT_ID_PREFIX_PATTERN = r"C\d+"
 
-# The `single_concept_ontology_id` contains _CONCEPT_ID.
-_CONCEPT_ID = "C1"
-_PREFERRED_TERM = "P1"
-
-# The `replacement_ontology_id` replaces _REPLACED_CONCEPT_ID
-# with _CONCEPT_ID.
-_REPLACED_CONCEPT_ID = "C2"
-_REPLACED_PREFERRED_TERM = "P2"
-_REPLACEMENT_CONCEPT_ID = _CONCEPT_ID
-
-# The `shared_term_and_parent_ontology_id` has three concepts. The
-# _CHILD_CONCEPT_ID is under the _PARENT_CONCEPT_ID, while the
-# _ORPHAN_CONCEPT_ID is not.
-_PARENT_CONCEPT_ID = "C3"
-_CHILD_CONCEPT_ID = "C4"
-_ORPHAN_CONCEPT_ID = "C5"
-_SHARED_PREFERRED_TERM = (
-    "P100"  # shared by the _CHILD_CONCEPT_ID and _ORPHAN_CONCEPT_ID
-)
-
-_PARENT_RESTRICTION = OntologyRestriction(
-    concept_ids=[_PARENT_CONCEPT_ID], include_descendants=True
-)
-
-# Shaped like a concept id, but in none of the ontologies above.
+# Shaped like a concept id, but in none of the test ontologies.
 _UNKNOWN_CONCEPT_ID = "C404"
 
 # The date of the document set the test documents are stored as.
 _MODIFIED_AT = datetime(2026, 1, 1, tzinfo=UTC)
 
 
-class OntologySourceWithOneConcept(OntologySource):
+class _TestOntology(OntologySource, BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    # A new ontology id for each test.
+    id: str = Field(default_factory=lambda: f"TEST-{uuid.uuid4()}")
+
+    @abstractmethod
+    def concepts(self) -> list[CachedOntologyConcept]:
+        """Return every concept in the ontology."""
+
+    def replacements(self) -> dict[str, str]:
+        """Return the concept that replaces each retired concept."""
+        return {}
+
     async def fetch(self) -> CachedOntology:
         return CachedOntology(
-            version="2026-01-01",
-            sha256="test",
-            concepts=[
-                CachedOntologyConcept(
-                    concept_id=_CONCEPT_ID, preferred_term=_PREFERRED_TERM
-                )
-            ],
+            version="2026-01-01", sha256="test", concepts=self.concepts()
         )
 
     def is_newer(self, version: str, other: str) -> bool:
         return version > other
 
 
-class OntologySourceWithReplacedConcept(OntologySource):
-    async def fetch(self) -> CachedOntology:
-        return CachedOntology(
-            version="2026-01-01",
-            sha256="test",
-            concepts=[
-                CachedOntologyConcept(
-                    concept_id=_CONCEPT_ID, preferred_term=_PREFERRED_TERM
-                ),
-                CachedOntologyConcept(
-                    concept_id=_REPLACED_CONCEPT_ID,
-                    preferred_term=_REPLACED_PREFERRED_TERM,
-                ),
-            ],
+class SingleConceptOntology(_TestOntology):
+    """A test ontology with one concept."""
+
+    concept_id: str = "C1"
+    preferred_term: str = "P1"
+
+    def concepts(self) -> list[CachedOntologyConcept]:
+        return [
+            CachedOntologyConcept(
+                concept_id=self.concept_id, preferred_term=self.preferred_term
+            )
+        ]
+
+
+class ReplacementOntology(_TestOntology):
+    """A test ontology with a retired concept and the concept that replaces it."""
+
+    replaced_concept_id: str = "C2"
+    replaced_preferred_term: str = "P2"
+    replacement_concept_id: str = "C1"
+    replacement_preferred_term: str = "P1"
+
+    def concepts(self) -> list[CachedOntologyConcept]:
+        return [
+            CachedOntologyConcept(
+                concept_id=self.replaced_concept_id,
+                preferred_term=self.replaced_preferred_term,
+            ),
+            CachedOntologyConcept(
+                concept_id=self.replacement_concept_id,
+                preferred_term=self.replacement_preferred_term,
+            ),
+        ]
+
+    def replacements(self) -> dict[str, str]:
+        return {self.replaced_concept_id: self.replacement_concept_id}
+
+
+class SharedTermAndParentOntology(_TestOntology):
+    """A test ontology with two concepts sharing one preferred term.
+
+    The child concept is under the parent concept. The orphan concept is not.
+    """
+
+    parent_concept_id: str = "C3"
+    child_concept_id: str = "C4"
+    orphan_concept_id: str = "C5"
+    shared_preferred_term: str = "P100"
+
+    @property
+    def parent_restriction(self) -> OntologyRestriction:
+        return OntologyRestriction(
+            concept_ids=[self.parent_concept_id], include_descendants=True
         )
 
-    def is_newer(self, version: str, other: str) -> bool:
-        return version > other
+    def concepts(self) -> list[CachedOntologyConcept]:
+        return [
+            CachedOntologyConcept(
+                concept_id=self.parent_concept_id, preferred_term="Parent"
+            ),
+            CachedOntologyConcept(
+                concept_id=self.child_concept_id,
+                preferred_term=self.shared_preferred_term,
+                parent_ids=frozenset({self.parent_concept_id}),
+            ),
+            CachedOntologyConcept(
+                concept_id=self.orphan_concept_id,
+                preferred_term=self.shared_preferred_term,
+            ),
+        ]
 
 
-class OntologySourceWithSharedTermAndParent(OntologySource):
-    async def fetch(self) -> CachedOntology:
-        return CachedOntology(
-            version="2026-01-01",
-            sha256="test",
-            concepts=[
-                CachedOntologyConcept(
-                    concept_id=_PARENT_CONCEPT_ID, preferred_term="Parent"
-                ),
-                CachedOntologyConcept(
-                    concept_id=_CHILD_CONCEPT_ID,
-                    preferred_term=_SHARED_PREFERRED_TERM,
-                    parent_ids=frozenset({_PARENT_CONCEPT_ID}),
-                ),
-                CachedOntologyConcept(
-                    concept_id=_ORPHAN_CONCEPT_ID,
-                    preferred_term=_SHARED_PREFERRED_TERM,
-                ),
-            ],
+class _TestOntologyService(CachedOntologyService):
+    def __init__(self, ontology: _TestOntology) -> None:
+        super().__init__(
+            OntologyCacheStore(ontology.id),
+            ontology,
+            _CONCEPT_ID_PATTERN,
+            _CONCEPT_ID_PREFIX_PATTERN,
         )
+        self._replacements = ontology.replacements()
 
-    def is_newer(self, version: str, other: str) -> bool:
-        return version > other
-
-
-class OntologyServiceReplacingRetiredConcept(CachedOntologyService):
     async def replacement_concept_id(self, concept_id: str) -> str | None:
-        return _REPLACEMENT_CONCEPT_ID if concept_id == _REPLACED_CONCEPT_ID else None
+        return self._replacements.get(concept_id)
 
 
 @asynccontextmanager
-async def _registered_ontology(
-    source: OntologySource,
-    service_type: type[CachedOntologyService] = CachedOntologyService,
-) -> AsyncIterator[str]:
+async def _registered_ontology(ontology: _TestOntology) -> AsyncIterator[None]:
     """Register an ontology and delete it and its terms afterwards from the database."""
-    ontology_id = f"TEST-{uuid.uuid4()}"
-    register_ontology_service(
-        ontology_id,
-        service_type(
-            OntologyCacheStore(ontology_id),
-            source,
-            _CONCEPT_ID_PATTERN,
-            _CONCEPT_ID_PREFIX_PATTERN,
-        ),
-    )
+    register_ontology_service(ontology.id, _TestOntologyService(ontology))
     try:
-        yield ontology_id
+        yield
     finally:
         async with get_cursor() as cur:
             for table in (ONTOLOGY_CACHE_TABLE, TERMS_CACHE_TABLE):
                 await cur.execute(
-                    f"DELETE FROM {table} WHERE ontology_id = %s", (ontology_id,)
+                    f"DELETE FROM {table} WHERE ontology_id = %s", (ontology.id,)
                 )
 
 
 @pytest_asyncio.fixture
-async def single_concept_ontology_id():
-    async with _registered_ontology(OntologySourceWithOneConcept()) as ontology_id:
-        yield ontology_id
+async def single_concept_ontology():
+    ontology = SingleConceptOntology()
+    async with _registered_ontology(ontology):
+        yield ontology
 
 
 @pytest_asyncio.fixture
-async def replacement_ontology_id():
-    async with _registered_ontology(
-        OntologySourceWithReplacedConcept(), OntologyServiceReplacingRetiredConcept
-    ) as ontology_id:
-        yield ontology_id
+async def replacement_ontology():
+    ontology = ReplacementOntology()
+    async with _registered_ontology(ontology):
+        yield ontology
 
 
 @pytest_asyncio.fixture
-async def shared_term_and_parent_ontology_id():
-    async with _registered_ontology(
-        OntologySourceWithSharedTermAndParent()
-    ) as ontology_id:
-        yield ontology_id
+async def shared_term_and_parent_ontology():
+    ontology = SharedTermAndParentOntology()
+    async with _registered_ontology(ontology):
+        yield ontology
 
 
 async def _delete_documents(document_ids: list[str]) -> None:
@@ -216,28 +224,18 @@ async def document_id():
     await _delete_documents([document_id])
 
 
-@pytest_asyncio.fixture
-async def document_ids():
-    """Creates document ids and deletes them afterwards from the database."""
-    created: list[str] = []
-
-    def next_document_id() -> str:
-        created.append(f"image-{uuid.uuid4()}")
-        return created[-1]
-
-    yield next_document_id
-    await _delete_documents(created)
-
-
 def _ontology_field(
+    field_id: str,
     ontology_id: str,
     field_type: OpenSearchFieldType = "ontology",
     restriction: OntologyRestriction | None = None,
+    *,
+    scopes: Sequence[str] = (),
 ) -> OpenSearchBeaconFilteringTerm:
     return OpenSearchBeaconFilteringTerm(
-        id=_FIELD_ID,
+        id=field_id,
         type=field_type,
-        scopes=[],
+        scopes=list(scopes),
         label="Test field",
         description="A field resolving against the test ontology.",
         ontology=BeaconFilteringOntology(id=ontology_id),
@@ -256,7 +254,7 @@ async def _load_document_with_ontology_value(
     replace_concepts: bool = True,
 ) -> None:
     """Load a document whose one ontology field has the concept id and meaning."""
-    field = _ontology_field(ontology_id, field_type, restriction)
+    field = _ontology_field(_FIELD_ID, ontology_id, field_type, restriction)
     document = ExtractedDocument(
         id=document_id,
         values=[OpenSearchFieldValue(field=field, value=(concept_id, meaning))],
@@ -269,7 +267,7 @@ async def _load_document_with_ontology_value(
 
 
 @pytest.mark.asyncio
-async def test_load_valid_concept_id(single_concept_ontology_id, document_id):
+async def test_load_valid_concept_id(single_concept_ontology, document_id):
     """The concept's preferred term is cached, and nothing is logged against it.
 
     The document gives the concept id only, so the term comes from the ontology
@@ -277,20 +275,75 @@ async def test_load_valid_concept_id(single_concept_ontology_id, document_id):
     ``/values`` later labels the concept.
     """
     await _load_document_with_ontology_value(
-        single_concept_ontology_id, document_id, _CONCEPT_ID
+        single_concept_ontology.id, document_id, single_concept_ontology.concept_id
     )
 
     assert {
         (term.field_id, term.concept_id, term.preferred_term)
-        for term in await read_terms(single_concept_ontology_id)
-    } == {(_FIELD_ID, _CONCEPT_ID, _PREFERRED_TERM)}
+        for term in await read_terms(single_concept_ontology.id)
+    } == {
+        (
+            _FIELD_ID,
+            single_concept_ontology.concept_id,
+            single_concept_ontology.preferred_term,
+        )
+    }
     async with get_cursor() as cur:
         assert await read_document_logs(cur, document_id) == []
 
 
 @pytest.mark.asyncio
+async def test_load_drops_value_outside_scope(single_concept_ontology, document_id):
+    clinical_field = _ontology_field(
+        "clinical_field", single_concept_ontology.id, scopes=["clinical"]
+    )
+    non_clinical_field = _ontology_field(
+        "non_clinical_field", single_concept_ontology.id, scopes=["non_clinical"]
+    )
+    document = ExtractedDocument(
+        id=document_id,
+        scope="non_clinical",
+        values=[
+            OpenSearchFieldValue(
+                field=field, value=(single_concept_ontology.concept_id, None)
+            )
+            for field in (clinical_field, non_clinical_field)
+        ],
+    )
+
+    await LoadService(
+        create_term_caches({single_concept_ontology.id}),
+        [clinical_field, non_clinical_field],
+    ).store_documents(iter([document]), _MODIFIED_AT, None)
+
+    async with get_cursor() as cur:
+        assert await get_document(cur, document_id) == {
+            "scope": "non_clinical",
+            "non_clinical_field": single_concept_ontology.concept_id,
+        }
+        logs = await read_document_logs(cur, document_id)
+    assert [(log.severity, log.message, log.field_id) for log in logs] == [
+        (
+            "WARNING",
+            "Value is ignored: the field is not indexed for scope 'non_clinical'.",
+            "clinical_field",
+        )
+    ]
+    assert {
+        (term.field_id, term.concept_id, term.preferred_term)
+        for term in await read_terms(single_concept_ontology.id)
+    } == {
+        (
+            "non_clinical_field",
+            single_concept_ontology.concept_id,
+            single_concept_ontology.preferred_term,
+        )
+    }
+
+
+@pytest.mark.asyncio
 async def test_term_caching_failure_does_not_store_the_document(
-    single_concept_ontology_id, document_id, monkeypatch
+    single_concept_ontology, document_id, monkeypatch
 ):
     """A retry skips stored documents, so documents are stored after terms are cached."""
     cache_terms = AsyncMock(side_effect=SystemException("term_caching_failure"))
@@ -298,7 +351,7 @@ async def test_term_caching_failure_does_not_store_the_document(
 
     with pytest.raises(SystemException, match="term_caching_failure"):
         await _load_document_with_ontology_value(
-            single_concept_ontology_id, document_id, _CONCEPT_ID
+            single_concept_ontology.id, document_id, single_concept_ontology.concept_id
         )
 
     cache_terms.assert_awaited_once()
@@ -317,7 +370,7 @@ async def test_term_caching_failure_does_not_store_the_document(
     ],
 )
 async def test_load_invalid_concept_id(
-    single_concept_ontology_id, document_id, provided_concept_id, quoted_id
+    single_concept_ontology, document_id, provided_concept_id, quoted_id
 ):
     """Storing a document with invalid concepts does not cache the preferred term.
 
@@ -325,7 +378,7 @@ async def test_load_invalid_concept_id(
     preferred terms cache by calling read_terms.
     """
     await _load_document_with_ontology_value(
-        single_concept_ontology_id, document_id, provided_concept_id
+        single_concept_ontology.id, document_id, provided_concept_id
     )
 
     async with get_cursor() as cur:
@@ -336,7 +389,7 @@ async def test_load_invalid_concept_id(
             "WARNING",
             (
                 f"The provided concept id{quoted_id} is invalid for "
-                f"field '{_FIELD_ID}' of ontology '{single_concept_ontology_id}'."
+                f"field '{_FIELD_ID}' of ontology '{single_concept_ontology.id}'."
             ),
         ),
         (
@@ -347,107 +400,120 @@ async def test_load_invalid_concept_id(
     assert all(log.field_id == _FIELD_ID for log in logs)
     assert all(log.created_at is not None for log in logs)
     # Empty terms cache.
-    assert await read_terms(single_concept_ontology_id) == []
+    assert await read_terms(single_concept_ontology.id) == []
 
 
 @pytest.mark.asyncio
-async def test_replace_concept_true(replacement_ontology_id, document_id):
+async def test_replace_concept_true(replacement_ontology, document_id):
     """Test replace_concepts=True."""
 
     await _load_document_with_ontology_value(
-        replacement_ontology_id, document_id, _REPLACED_CONCEPT_ID
+        replacement_ontology.id, document_id, replacement_ontology.replaced_concept_id
     )
 
     async with get_cursor() as cur:
         document = await get_document(cur, document_id)
         logs = await read_document_logs(cur, document_id)
-    assert document[_FIELD_ID] == _REPLACEMENT_CONCEPT_ID
+    assert document[_FIELD_ID] == replacement_ontology.replacement_concept_id
     assert [(log.severity, log.message) for log in logs] == [
         (
             "WARNING",
             (
-                f"Provided concept id '{_REPLACED_CONCEPT_ID}' was replaced by "
-                f"'{_REPLACEMENT_CONCEPT_ID}' for field '{_FIELD_ID}'."
+                f"Provided concept id '{replacement_ontology.replaced_concept_id}' "
+                f"was replaced by '{replacement_ontology.replacement_concept_id}' "
+                f"for field '{_FIELD_ID}'."
             ),
         )
     ]
     # The replacement is cached.
     assert {
         (term.concept_id, term.preferred_term)
-        for term in await read_terms(replacement_ontology_id)
-    } == {(_REPLACEMENT_CONCEPT_ID, _PREFERRED_TERM)}
+        for term in await read_terms(replacement_ontology.id)
+    } == {
+        (
+            replacement_ontology.replacement_concept_id,
+            replacement_ontology.replacement_preferred_term,
+        )
+    }
 
 
 @pytest.mark.asyncio
-async def test_replace_concept_false(replacement_ontology_id, document_id):
+async def test_replace_concept_false(replacement_ontology, document_id):
     """Test replace_concepts=False."""
 
     await _load_document_with_ontology_value(
-        replacement_ontology_id,
+        replacement_ontology.id,
         document_id,
-        _REPLACED_CONCEPT_ID,
+        replacement_ontology.replaced_concept_id,
         replace_concepts=False,
     )
 
     async with get_cursor() as cur:
         document = await get_document(cur, document_id)
         logs = await read_document_logs(cur, document_id)
-    assert document[_FIELD_ID] == _REPLACED_CONCEPT_ID
+    assert document[_FIELD_ID] == replacement_ontology.replaced_concept_id
     assert logs == []
     # The replacement is not cached.
     assert {
         (term.concept_id, term.preferred_term)
-        for term in await read_terms(replacement_ontology_id)
-    } == {(_REPLACED_CONCEPT_ID, _REPLACED_PREFERRED_TERM)}
+        for term in await read_terms(replacement_ontology.id)
+    } == {
+        (
+            replacement_ontology.replaced_concept_id,
+            replacement_ontology.replaced_preferred_term,
+        )
+    }
 
 
 @pytest.mark.asyncio
-async def test_resolve_concept_id_from_meaning(single_concept_ontology_id, document_id):
+async def test_resolve_concept_id_from_meaning(single_concept_ontology, document_id):
     """Test invalid concept id with a meaning that resolves to a valid concept id."""
     await _load_document_with_ontology_value(
-        single_concept_ontology_id,
+        single_concept_ontology.id,
         document_id,
         _UNKNOWN_CONCEPT_ID,
-        _PREFERRED_TERM.lower(),
+        single_concept_ontology.preferred_term.lower(),
     )
 
     async with get_cursor() as cur:
         document = await get_document(cur, document_id)
         logs = await read_document_logs(cur, document_id)
-    assert document[_FIELD_ID] == _CONCEPT_ID
+    assert document[_FIELD_ID] == single_concept_ontology.concept_id
     assert [(log.severity, log.message) for log in logs] == [
         (
             "WARNING",
             (
-                f"The provided concept id 'C404' is invalid for field '{_FIELD_ID}' "
-                f"of ontology '{single_concept_ontology_id}'."
+                f"The provided concept id '{_UNKNOWN_CONCEPT_ID}' is invalid for "
+                f"field '{_FIELD_ID}' of ontology '{single_concept_ontology.id}'."
             ),
         ),
         (
             "WARNING",
             (
-                f"Concept id '{_CONCEPT_ID}' was resolved from the provided textual "
-                f"concept value '{_PREFERRED_TERM.lower()}' for field '{_FIELD_ID}'."
+                f"Concept id '{single_concept_ontology.concept_id}' was resolved "
+                "from the provided textual concept value "
+                f"'{single_concept_ontology.preferred_term.lower()}' "
+                f"for field '{_FIELD_ID}'."
             ),
         ),
     ]
     # Test cached preferred term.
     assert {
         (term.concept_id, term.preferred_term)
-        for term in await read_terms(single_concept_ontology_id)
-    } == {(_CONCEPT_ID, _PREFERRED_TERM)}
+        for term in await read_terms(single_concept_ontology.id)
+    } == {(single_concept_ontology.concept_id, single_concept_ontology.preferred_term)}
 
 
 @pytest.mark.asyncio
 async def test_resolve_multiple_concepts_id_from_meaning(
-    shared_term_and_parent_ontology_id, document_id
+    shared_term_and_parent_ontology, document_id
 ):
     """Test invalid concept id with a meaning that resolves to multiple valid concept id."""
     await _load_document_with_ontology_value(
-        shared_term_and_parent_ontology_id,
+        shared_term_and_parent_ontology.id,
         document_id,
         _UNKNOWN_CONCEPT_ID,
-        _SHARED_PREFERRED_TERM,
+        shared_term_and_parent_ontology.shared_preferred_term,
     )
 
     async with get_cursor() as cur:
@@ -458,16 +524,19 @@ async def test_resolve_multiple_concepts_id_from_meaning(
         (
             "WARNING",
             (
-                f"The provided concept id 'C404' is invalid for field '{_FIELD_ID}' "
-                f"of ontology '{shared_term_and_parent_ontology_id}'."
+                f"The provided concept id '{_UNKNOWN_CONCEPT_ID}' is invalid for "
+                f"field '{_FIELD_ID}' "
+                f"of ontology '{shared_term_and_parent_ontology.id}'."
             ),
         ),
         (
             "ERROR",
             (
-                f"Textual concept value '{_SHARED_PREFERRED_TERM}' resolves to several "
-                f"concept ids for field '{_FIELD_ID}': "
-                f"{_CHILD_CONCEPT_ID}, {_ORPHAN_CONCEPT_ID}."
+                "Textual concept value "
+                f"'{shared_term_and_parent_ontology.shared_preferred_term}' "
+                f"resolves to several concept ids for field '{_FIELD_ID}': "
+                f"{shared_term_and_parent_ontology.child_concept_id}, "
+                f"{shared_term_and_parent_ontology.orphan_concept_id}."
             ),
         ),
         (
@@ -479,80 +548,64 @@ async def test_resolve_multiple_concepts_id_from_meaning(
 
 @pytest.mark.asyncio
 async def test_resolve_retired_concept_id_from_meaning(
-    replacement_ontology_id, document_id
+    replacement_ontology, document_id
 ):
     """Test invalid concept id with a meaning that resolves to retired concept id."""
 
     await _load_document_with_ontology_value(
-        replacement_ontology_id,
+        replacement_ontology.id,
         document_id,
         _UNKNOWN_CONCEPT_ID,
-        _REPLACED_PREFERRED_TERM,
+        replacement_ontology.replaced_preferred_term,
     )
 
     async with get_cursor() as cur:
         document = await get_document(cur, document_id)
         logs = await read_document_logs(cur, document_id)
-    assert document[_FIELD_ID] == _REPLACEMENT_CONCEPT_ID
+    assert document[_FIELD_ID] == replacement_ontology.replacement_concept_id
     assert [(log.severity, log.message) for log in logs] == [
         (
             "WARNING",
             (
-                f"The provided concept id 'C404' is invalid for field '{_FIELD_ID}' "
-                f"of ontology '{replacement_ontology_id}'."
+                f"The provided concept id '{_UNKNOWN_CONCEPT_ID}' is invalid for "
+                f"field '{_FIELD_ID}' of ontology '{replacement_ontology.id}'."
             ),
         ),
         (
             "WARNING",
             (
-                f"Concept id '{_REPLACED_CONCEPT_ID}' was resolved from the provided "
-                f"textual concept value '{_REPLACED_PREFERRED_TERM}' "
+                f"Concept id '{replacement_ontology.replaced_concept_id}' was "
+                "resolved from the provided textual concept value "
+                f"'{replacement_ontology.replaced_preferred_term}' "
                 f"for field '{_FIELD_ID}'."
             ),
         ),
         (
             "WARNING",
             (
-                f"Provided concept id '{_REPLACED_CONCEPT_ID}' was replaced by "
-                f"'{_REPLACEMENT_CONCEPT_ID}' for field '{_FIELD_ID}'."
+                f"Provided concept id '{replacement_ontology.replaced_concept_id}' "
+                f"was replaced by '{replacement_ontology.replacement_concept_id}' "
+                f"for field '{_FIELD_ID}'."
             ),
         ),
     ]
 
 
-@pytest.mark.asyncio
-async def test_load_writes_extraction_logs(single_concept_ontology_id, document_id):
-    field = _ontology_field(single_concept_ontology_id)
-    document = ExtractedDocument(
-        id=document_id,
-        values=[OpenSearchFieldValue(field=field, value=(_CONCEPT_ID, None))],
-        logs=[
-            ExtractLog(severity="WARNING", message="Something looked odd."),
-            ExtractLog(
-                severity="ERROR",
-                field_id=_FIELD_ID,
-                message="Something was ignored.",
-            ),
-        ],
-    )
-
-    await LoadService(
-        create_term_caches({single_concept_ontology_id}), [field]
-    ).store_documents(iter([document]), _MODIFIED_AT, None)
-
-    async with get_cursor() as cur:
-        logs = await read_document_logs(cur, document_id)
-    assert [(log.severity, log.message, log.field_id) for log in logs] == [
-        ("WARNING", "Something looked odd.", None),
-        ("ERROR", "Something was ignored.", _FIELD_ID),
-    ]
+# A field with no ontology.
+_KEYWORD_FIELD = OpenSearchBeaconFilteringTerm(
+    id=_FIELD_ID,
+    type="keyword",
+    scopes=[],
+    label="Test field",
+    description="A keyword field.",
+)
 
 
-def _document_with_log(field, document_id: str, message: str) -> ExtractedDocument:
-    """Return a document with a document log row."""
+def _document_with_log(document_id: str, message: str) -> ExtractedDocument:
+    """Return a document with a keyword value and a document log row."""
     return ExtractedDocument(
         id=document_id,
-        values=[OpenSearchFieldValue(field=field, value=(_CONCEPT_ID, None))],
+        values=[OpenSearchFieldValue(field=_KEYWORD_FIELD, value="value")],
         logs=[ExtractLog(severity="WARNING", message=message)],
     )
 
@@ -563,43 +616,56 @@ async def _stored_log_messages(document_id: str) -> list[str]:
 
 
 @pytest.mark.asyncio
+async def test_load_writes_extraction_logs(document_id):
+    document = ExtractedDocument(
+        id=document_id,
+        values=[OpenSearchFieldValue(field=_KEYWORD_FIELD, value="value")],
+        logs=[
+            ExtractLog(severity="WARNING", message="Something looked odd."),
+            ExtractLog(
+                severity="ERROR",
+                field_id=_FIELD_ID,
+                message="Something was ignored.",
+            ),
+        ],
+    )
+
+    await LoadService({}, [_KEYWORD_FIELD]).store_documents(
+        iter([document]), _MODIFIED_AT, None
+    )
+
+    async with get_cursor() as cur:
+        logs = await read_document_logs(cur, document_id)
+    assert [(log.severity, log.message, log.field_id) for log in logs] == [
+        ("WARNING", "Something looked odd.", None),
+        ("ERROR", "Something was ignored.", _FIELD_ID),
+    ]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("reload", "expected"), [(False, "First load."), (True, "Second load.")]
 )
-async def test_load_same_version(
-    single_concept_ontology_id, document_id, reload, expected
-):
+async def test_load_same_version(document_id, reload, expected):
     """The same version is skipped, unless reloaded."""
-    field = _ontology_field(single_concept_ontology_id)
-    terms = create_term_caches({single_concept_ontology_id})
-
-    await LoadService(terms, [field]).store_documents(
-        iter([_document_with_log(field, document_id, "First load.")]),
-        _MODIFIED_AT,
-        None,
+    await LoadService({}, [_KEYWORD_FIELD]).store_documents(
+        iter([_document_with_log(document_id, "First load.")]), _MODIFIED_AT, None
     )
-    await LoadService(terms, [field], reload=reload).store_documents(
-        iter([_document_with_log(field, document_id, "Second load.")]),
-        _MODIFIED_AT,
-        None,
+    await LoadService({}, [_KEYWORD_FIELD], reload=reload).store_documents(
+        iter([_document_with_log(document_id, "Second load.")]), _MODIFIED_AT, None
     )
 
     assert await _stored_log_messages(document_id) == [expected]
 
 
 @pytest.mark.asyncio
-async def test_reload_skips_older_version(single_concept_ontology_id, document_id):
+async def test_reload_skips_older_version(document_id):
     """A reload never replaces a stored newer version."""
-    field = _ontology_field(single_concept_ontology_id)
-    terms = create_term_caches({single_concept_ontology_id})
-
-    await LoadService(terms, [field]).store_documents(
-        iter([_document_with_log(field, document_id, "Newer version.")]),
-        _MODIFIED_AT,
-        None,
+    await LoadService({}, [_KEYWORD_FIELD]).store_documents(
+        iter([_document_with_log(document_id, "Newer version.")]), _MODIFIED_AT, None
     )
-    await LoadService(terms, [field], reload=True).store_documents(
-        iter([_document_with_log(field, document_id, "Older version.")]),
+    await LoadService({}, [_KEYWORD_FIELD], reload=True).store_documents(
+        iter([_document_with_log(document_id, "Older version.")]),
         _MODIFIED_AT - timedelta(days=1),
         None,
     )
@@ -608,26 +674,22 @@ async def test_reload_skips_older_version(single_concept_ontology_id, document_i
 
 
 @pytest.mark.asyncio
-async def test_load_transaction(single_concept_ontology_id, document_id, monkeypatch):
+async def test_load_transaction(document_id, monkeypatch):
     """A document's log rows and the document are written in one transaction."""
-    field = _ontology_field(single_concept_ontology_id)
-    service = LoadService(create_term_caches({single_concept_ontology_id}), [field])
+    service = LoadService({}, [_KEYWORD_FIELD])
 
-    def _document(message: str) -> ExtractedDocument:
-        return ExtractedDocument(
-            id=document_id,
-            values=[OpenSearchFieldValue(field=field, value=(_CONCEPT_ID, None))],
-            logs=[ExtractLog(severity="WARNING", message=message)],
-        )
-
-    await service.store_documents(iter([_document("First load.")]), _MODIFIED_AT, None)
+    await service.store_documents(
+        iter([_document_with_log(document_id, "First load.")]), _MODIFIED_AT, None
+    )
 
     # A newer version fails after replacing the logs, before storing the document.
     _store_document = AsyncMock(side_effect=SystemException("store_failure"))
     monkeypatch.setattr(service, "store_document", _store_document)
     with pytest.raises(SystemException, match="store_failure"):
         await service.store_documents(
-            iter([_document("Second load.")]), _MODIFIED_AT + timedelta(days=1), None
+            iter([_document_with_log(document_id, "Second load.")]),
+            _MODIFIED_AT + timedelta(days=1),
+            None,
         )
 
     async with get_cursor() as cur:
@@ -639,7 +701,7 @@ async def test_load_transaction(single_concept_ontology_id, document_id, monkeyp
 
 @pytest.mark.asyncio
 async def test_ambiguous_meaning_resolved_by_restriction(
-    shared_term_and_parent_ontology_id, document_id
+    shared_term_and_parent_ontology, document_id
 ):
     """A meaning two cached concepts share resolves to the restricted one.
 
@@ -648,35 +710,40 @@ async def test_ambiguous_meaning_resolved_by_restriction(
     the field's restriction, which the cached terms do not, and settles it.
     """
     await insert_terms(
-        shared_term_and_parent_ontology_id,
+        shared_term_and_parent_ontology.id,
         [
             StoredTerm(
                 field_id=_FIELD_ID,
                 concept_id=concept_id,
-                preferred_term=_SHARED_PREFERRED_TERM,
+                preferred_term=shared_term_and_parent_ontology.shared_preferred_term,
             )
-            for concept_id in (_CHILD_CONCEPT_ID, _ORPHAN_CONCEPT_ID)
+            for concept_id in (
+                shared_term_and_parent_ontology.child_concept_id,
+                shared_term_and_parent_ontology.orphan_concept_id,
+            )
         ],
     )
 
     await _load_document_with_ontology_value(
-        shared_term_and_parent_ontology_id,
+        shared_term_and_parent_ontology.id,
         document_id,
         None,
-        _SHARED_PREFERRED_TERM,
-        restriction=_PARENT_RESTRICTION,
+        shared_term_and_parent_ontology.shared_preferred_term,
+        restriction=shared_term_and_parent_ontology.parent_restriction,
     )
 
     async with get_cursor() as cur:
         document = await get_document(cur, document_id)
         logs = await read_document_logs(cur, document_id)
-    assert document[_FIELD_ID] == _CHILD_CONCEPT_ID
+    assert document[_FIELD_ID] == shared_term_and_parent_ontology.child_concept_id
     assert [(log.severity, log.message) for log in logs] == [
         (
             "WARNING",
             (
-                f"Concept id '{_CHILD_CONCEPT_ID}' was resolved from the provided "
-                f"textual concept value '{_SHARED_PREFERRED_TERM}' for field '{_FIELD_ID}'."
+                f"Concept id '{shared_term_and_parent_ontology.child_concept_id}' "
+                "was resolved from the provided textual concept value "
+                f"'{shared_term_and_parent_ontology.shared_preferred_term}' "
+                f"for field '{_FIELD_ID}'."
             ),
         )
     ]
@@ -684,13 +751,13 @@ async def test_ambiguous_meaning_resolved_by_restriction(
 
 @pytest.mark.asyncio
 async def test_provided_concept_id_outside_restriction(
-    shared_term_and_parent_ontology_id, document_id
+    shared_term_and_parent_ontology, document_id
 ):
     await _load_document_with_ontology_value(
-        shared_term_and_parent_ontology_id,
+        shared_term_and_parent_ontology.id,
         document_id,
-        _ORPHAN_CONCEPT_ID,
-        restriction=_PARENT_RESTRICTION,
+        shared_term_and_parent_ontology.orphan_concept_id,
+        restriction=shared_term_and_parent_ontology.parent_restriction,
     )
 
     async with get_cursor() as cur:
@@ -703,48 +770,54 @@ async def test_provided_concept_id_outside_restriction(
         (
             "ERROR",
             (
-                f"Concept id '{_ORPHAN_CONCEPT_ID}' is not among the ontology "
-                f"'{shared_term_and_parent_ontology_id}' concepts allowed for field '{_FIELD_ID}'."
+                f"Concept id '{shared_term_and_parent_ontology.orphan_concept_id}' "
+                f"is not among the ontology '{shared_term_and_parent_ontology.id}' "
+                f"concepts allowed for field '{_FIELD_ID}'."
             ),
         )
     ]
-    assert await read_terms(shared_term_and_parent_ontology_id) == []
+    assert await read_terms(shared_term_and_parent_ontology.id) == []
 
 
 @pytest.mark.asyncio
 async def test_provided_concept_id_within_restriction(
-    shared_term_and_parent_ontology_id, document_id
+    shared_term_and_parent_ontology, document_id
 ):
     await _load_document_with_ontology_value(
-        shared_term_and_parent_ontology_id,
+        shared_term_and_parent_ontology.id,
         document_id,
-        _CHILD_CONCEPT_ID,
-        restriction=_PARENT_RESTRICTION,
+        shared_term_and_parent_ontology.child_concept_id,
+        restriction=shared_term_and_parent_ontology.parent_restriction,
     )
 
     async with get_cursor() as cur:
         stored = await get_document(cur, document_id)
         logs = await read_document_logs(cur, document_id)
-    assert stored[_FIELD_ID] == _CHILD_CONCEPT_ID
+    assert stored[_FIELD_ID] == shared_term_and_parent_ontology.child_concept_id
     assert logs == []
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "concept_id",
+    "in_ontology",
     [
-        # In the ontology, but outside the field restriction,
-        _ORPHAN_CONCEPT_ID,
+        # In the ontology, but outside the field restriction.
+        pytest.param(True, id="outside_restriction"),
         # Not in the ontology.
-        _UNKNOWN_CONCEPT_ID,
+        pytest.param(False, id="not_in_ontology"),
     ],
 )
 async def test_concept_id_already_indexed_is_accepted(
-    shared_term_and_parent_ontology_id, document_id, concept_id
+    shared_term_and_parent_ontology, document_id, in_ontology
 ):
     """A concept id already cached for the field is accepted without consulting the ontology."""
+    concept_id = (
+        shared_term_and_parent_ontology.orphan_concept_id
+        if in_ontology
+        else _UNKNOWN_CONCEPT_ID
+    )
     await insert_terms(
-        shared_term_and_parent_ontology_id,
+        shared_term_and_parent_ontology.id,
         [
             StoredTerm(
                 field_id=_FIELD_ID,
@@ -754,10 +827,10 @@ async def test_concept_id_already_indexed_is_accepted(
         ],
     )
     await _load_document_with_ontology_value(
-        shared_term_and_parent_ontology_id,
+        shared_term_and_parent_ontology.id,
         document_id,
         concept_id,
-        restriction=_PARENT_RESTRICTION,
+        restriction=shared_term_and_parent_ontology.parent_restriction,
     )
 
     async with get_cursor() as cur:
@@ -779,7 +852,7 @@ async def _load_document_with_free_text(
     free text, writes any logs to document_log, stores the document in Postgres,
     and caches the preferred terms of the concepts it resolved.
     """
-    field = _ontology_field(ontology_id, "ontologyOrValue")
+    field = _ontology_field(_FIELD_ID, ontology_id, "ontologyOrValue")
     free_text_field = OpenSearchField(id=_FREE_TEXT_FIELD_ID, type="keyword")
     document = ExtractedDocument(
         id=document_id,
@@ -791,29 +864,31 @@ async def _load_document_with_free_text(
 
 
 @pytest.mark.asyncio
-async def test_resolve_concept_id_from_free_text(
-    single_concept_ontology_id, document_id
-):
+async def test_resolve_concept_id_from_free_text(single_concept_ontology, document_id):
     """Free text that names one concept is indexed as that concept.
 
     A search for the text resolves it to the concept, so the document is
     indexed under the concept id, not as free text that no search would reach.
     """
     await _load_document_with_free_text(
-        single_concept_ontology_id, document_id, _PREFERRED_TERM.lower()
+        single_concept_ontology.id,
+        document_id,
+        single_concept_ontology.preferred_term.lower(),
     )
 
     async with get_cursor() as cur:
         document = await get_document(cur, document_id)
         logs = await read_document_logs(cur, document_id)
-    assert document[_FIELD_ID] == _CONCEPT_ID
+    assert document[_FIELD_ID] == single_concept_ontology.concept_id
     assert _FREE_TEXT_FIELD_ID not in document
     assert [(log.severity, log.message) for log in logs] == [
         (
             "WARNING",
             (
-                f"Concept id '{_CONCEPT_ID}' was resolved from the provided textual "
-                f"concept value '{_PREFERRED_TERM.lower()}' for field '{_FIELD_ID}'."
+                f"Concept id '{single_concept_ontology.concept_id}' was resolved "
+                "from the provided textual concept value "
+                f"'{single_concept_ontology.preferred_term.lower()}' "
+                f"for field '{_FIELD_ID}'."
             ),
         )
     ]
@@ -822,17 +897,23 @@ async def test_resolve_concept_id_from_free_text(
     # concept.
     assert {
         (term.field_id, term.concept_id, term.preferred_term)
-        for term in await read_terms(single_concept_ontology_id)
-    } == {(_FIELD_ID, _CONCEPT_ID, _PREFERRED_TERM)}
+        for term in await read_terms(single_concept_ontology.id)
+    } == {
+        (
+            _FIELD_ID,
+            single_concept_ontology.concept_id,
+            single_concept_ontology.preferred_term,
+        )
+    }
 
 
 @pytest.mark.asyncio
 async def test_resolve_no_concept_id_from_free_text(
-    single_concept_ontology_id, document_id
+    single_concept_ontology, document_id
 ):
     """Free text that names no concept is indexed as free text, with no log."""
     await _load_document_with_free_text(
-        single_concept_ontology_id, document_id, "home-made fixative"
+        single_concept_ontology.id, document_id, "home-made fixative"
     )
 
     async with get_cursor() as cur:
@@ -844,28 +925,35 @@ async def test_resolve_no_concept_id_from_free_text(
 
 @pytest.mark.asyncio
 async def test_resolve_multiple_concepts_id_from_free_text(
-    shared_term_and_parent_ontology_id, document_id
+    shared_term_and_parent_ontology, document_id
 ):
     """Free text that names several concepts is indexed as free text.
 
     No single concept can be chosen, which is logged as for a meaning.
     """
     await _load_document_with_free_text(
-        shared_term_and_parent_ontology_id, document_id, _SHARED_PREFERRED_TERM
+        shared_term_and_parent_ontology.id,
+        document_id,
+        shared_term_and_parent_ontology.shared_preferred_term,
     )
 
     async with get_cursor() as cur:
         document = await get_document(cur, document_id)
         logs = await read_document_logs(cur, document_id)
-    assert document[_FREE_TEXT_FIELD_ID] == _SHARED_PREFERRED_TERM
+    assert (
+        document[_FREE_TEXT_FIELD_ID]
+        == shared_term_and_parent_ontology.shared_preferred_term
+    )
     assert _FIELD_ID not in document
     assert [(log.severity, log.message) for log in logs] == [
         (
             "ERROR",
             (
-                f"Textual concept value '{_SHARED_PREFERRED_TERM}' resolves to several "
-                f"concept ids for field '{_FIELD_ID}': "
-                f"{_CHILD_CONCEPT_ID}, {_ORPHAN_CONCEPT_ID}."
+                "Textual concept value "
+                f"'{shared_term_and_parent_ontology.shared_preferred_term}' "
+                f"resolves to several concept ids for field '{_FIELD_ID}': "
+                f"{shared_term_and_parent_ontology.child_concept_id}, "
+                f"{shared_term_and_parent_ontology.orphan_concept_id}."
             ),
         )
     ]

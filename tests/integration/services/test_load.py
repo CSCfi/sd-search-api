@@ -19,6 +19,7 @@ from search_api.api.opensearch.models import (
     OpenSearchField,
     OpenSearchFieldType,
     OpenSearchFieldValue,
+    OpenSearchGroup,
 )
 from search_api.database.document import DOCUMENT_TABLE, get_document
 from search_api.database.document_log import (
@@ -231,11 +232,13 @@ def _ontology_field(
     restriction: OntologyRestriction | None = None,
     *,
     scopes: Sequence[str] = (),
+    nested_group: str | None = None,
 ) -> OpenSearchBeaconFilteringTerm:
     return OpenSearchBeaconFilteringTerm(
         id=field_id,
         type=field_type,
         scopes=list(scopes),
+        nested_group=nested_group,
         label="Test field",
         description="A field resolving against the test ontology.",
         ontology=BeaconFilteringOntology(id=ontology_id),
@@ -339,6 +342,54 @@ async def test_load_drops_value_outside_scope(single_concept_ontology, document_
             single_concept_ontology.preferred_term,
         )
     }
+
+
+@pytest.mark.asyncio
+async def test_load_drops_value_without_required_value(
+    single_concept_ontology, document_id
+):
+    """A value is dropped when the value it requires has no resolvable concept."""
+    nested_group = "nested_group"
+    required_field = _ontology_field(
+        "required_field", single_concept_ontology.id, nested_group=nested_group
+    )
+    requires_field = OpenSearchBeaconFilteringTerm(
+        id="requires_field",
+        type="keyword",
+        nested_group=nested_group,
+        scopes=[],
+        label="Requires field",
+        description="A field that requires required_field.",
+        requires=["required_field"],
+    )
+    document = ExtractedDocument(
+        id=document_id,
+        groups=[
+            OpenSearchGroup(
+                group=nested_group,
+                values=[
+                    OpenSearchFieldValue(
+                        field=required_field, value=(_UNKNOWN_CONCEPT_ID, None)
+                    ),
+                    OpenSearchFieldValue(field=requires_field, value="test"),
+                ],
+            )
+        ],
+    )
+
+    await LoadService(
+        create_term_caches({single_concept_ontology.id}),
+        [required_field, requires_field],
+    ).store_documents(iter([document]), _MODIFIED_AT, None)
+
+    async with get_cursor() as cur:
+        assert await get_document(cur, document_id) == {}
+        logs = await read_document_logs(cur, document_id)
+    assert (logs[-1].severity, logs[-1].message, logs[-1].field_id) == (
+        "WARNING",
+        "Value is ignored: none of the fields it requires has a value.",
+        "requires_field",
+    )
 
 
 @pytest.mark.asyncio

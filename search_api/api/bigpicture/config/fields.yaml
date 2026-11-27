@@ -29,6 +29,8 @@
 #     as integers and validation rejects them.
 #   - "type" is one of: text, keyword, controlledValue, ontology,
 #     ontologyOrValue, iso8601Range, integer.
+#   - "requires" lists fields from the field's own nested group. The field is
+#     indexed only together with one of them.
 
 filtering_terms:
   - id: dataset_title
@@ -254,6 +256,8 @@ filtering_terms:
       set and known to apply to at least one image from the set but may not
       apply to every image within the image set.
     controlledValues: [ distinct, summary ]
+    requires: [ diagnosis, finding, finding_severity, finding_chronicity,
+                finding_distribution, finding_result_category ]
 
 # Fields that are indexed in OpenSearch but are not filterable.
 # All are top-level (no nested group).

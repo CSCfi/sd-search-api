@@ -12,6 +12,7 @@ from search_api.api.opensearch.document import build_document
 from search_api.api.opensearch.models import (
     MAX_DOCUMENT_ID_BYTES,
     MAX_KEYWORD_BYTES,
+    ONTOLOGY_OTHER_VALUE_FIELD_SUFFIX,
     ExtractedDocument,
     OpenSearchFieldValue,
 )
@@ -104,7 +105,7 @@ def drop_out_of_scope_values(
     or a document without a scope, keeps every value.
 
     :param doc: The document, changed in place.
-    :param field_scopes: The scopes each field declares, by field id.
+    :param field_scopes: The scopes of each indexed field's term, by indexed field id.
     :return: A warning log entry for each dropped value.
     """
     if doc.scope is None:
@@ -137,6 +138,50 @@ def drop_out_of_scope_values(
     ]
 
 
+def _indexed_field_ids(term: BeaconFilteringTerm) -> set[str]:
+    """Return the ids of the fields a filtering term's values are indexed in.
+
+    An ontologyOrValue term's free text is indexed in a field of its own, <id>_other.
+    """
+    if term.type == "ontologyOrValue":
+        return {term.id, f"{term.id}{ONTOLOGY_OTHER_VALUE_FIELD_SUFFIX}"}
+    return {term.id}
+
+
+def drop_values_without_required(
+    doc: ExtractedDocument, required_fields: Mapping[str, AbstractSet[str]]
+) -> list[StoredDocumentLog]:
+    """
+    Drop a value whose field requires other fields, when its nested group item
+    has a value for none of them.
+
+    :param doc: The document, changed in place.
+    :param required_fields: The indexed fields each indexed field requires, by
+        indexed field id.
+    :return: A warning log entry for each dropped value.
+    """
+    dropped: list[OpenSearchFieldValue] = []
+    for group in doc.groups:
+        present = {value.field.id for value in group.values}
+        kept = []
+        for value in group.values:
+            required = required_fields.get(value.field.id)
+            if required is not None and not required & present:
+                dropped.append(value)
+            else:
+                kept.append(value)
+        group.values = kept
+    return [
+        StoredDocumentLog(
+            document_id=doc.id,
+            field_id=value.field.id,
+            severity="WARNING",
+            message="Value is ignored: none of the fields it requires has a value.",
+        )
+        for value in dropped
+    ]
+
+
 class LoadService:
     """Store extracted documents and cache their ontology preferred terms."""
 
@@ -161,7 +206,23 @@ class LoadService:
         self._term_caches = term_caches
         self._ontology_bindings = get_ontology_bindings(filtering_terms, term_caches)
         self._filtering_scopes = filtering_scopes
-        self._field_scopes = {term.id: set(term.scopes) for term in filtering_terms}
+        # Field scopes and required fields are keyed by indexed field id.
+        terms_by_id = {term.id: term for term in filtering_terms}
+        self._field_scopes = {
+            indexed_id: set(term.scopes)
+            for term in filtering_terms
+            for indexed_id in _indexed_field_ids(term)
+        }
+        self._required_fields = {
+            indexed_id: {
+                required_indexed_id
+                for required in term.requires
+                for required_indexed_id in _indexed_field_ids(terms_by_id[required])
+            }
+            for term in filtering_terms
+            if term.requires
+            for indexed_id in _indexed_field_ids(term)
+        }
         self._replace_concepts = replace_concepts
         self._reload = reload
         self._initialised = False
@@ -284,6 +345,11 @@ class LoadService:
                     await resolve_concepts(
                         cur, doc, self._ontology_bindings, self._replace_concepts
                     )
+                    # Drop a value whose field requires other fields, when its group
+                    # item has none of them. This runs after the scope drop and
+                    # concept resolution, since both drop values.
+                    for log in drop_values_without_required(doc, self._required_fields):
+                        await write_document_log(cur, log)
                     await cache_concept_terms(doc, self._ontology_bindings)
                     # The document must be stored last, because retry skips stored documents.
                     await self.store_document(cur, doc, modified_at, document_set_id)

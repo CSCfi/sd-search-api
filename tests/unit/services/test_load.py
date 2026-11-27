@@ -4,11 +4,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from search_api.api.beacon.models import BeaconFilteringOntology
 from search_api.api.bigpicture.domain import BP_DOMAIN
 from search_api.api.opensearch.models import (
     MAX_DOCUMENT_ID_BYTES,
     MAX_KEYWORD_BYTES,
     ExtractedDocument,
+    OpenSearchBeaconFilteringTerm,
     OpenSearchField,
     OpenSearchFieldValue,
     OpenSearchGroup,
@@ -17,8 +19,10 @@ from search_api.database.models import StoredDocumentLog
 from search_api.exceptions import SystemException, UserException
 from search_api.services.load import (
     LoadService,
+    _indexed_field_ids,
     drop_out_of_scope_values,
     drop_too_long_keywords,
+    drop_values_without_required,
 )
 from search_api.services.ontology.term_cache import create_term_caches
 
@@ -137,43 +141,144 @@ def test_drop_too_long_keywords():
 
 
 @pytest.mark.parametrize(
-    ("document_scope", "diagnosis_scopes", "kept"),
+    ("document_scope", "scopes", "kept"),
     [
-        ("non_clinical", {"clinical", "non_clinical"}, True),
-        ("non_clinical", {"clinical"}, False),
-        ("non_clinical", None, True),
-        (None, {"clinical"}, True),
+        ("other_scope", {"scope", "other_scope"}, True),
+        ("other_scope", {"scope"}, False),
+        # The field declares no scopes.
+        ("other_scope", None, True),
+        # The document has no scope.
+        (None, {"scope"}, True),
     ],
 )
-def test_drop_out_of_scope_values(document_scope, diagnosis_scopes, kept):
-    """A field declaring scopes is indexed only in those scopes."""
-    diagnosis = _keyword("diagnosis", "73211009", "observation")
-    doc = ExtractedDocument(
-        id="img-1",
-        scope=document_scope,
-        groups=[OpenSearchGroup(group="observation", values=[diagnosis])],
-    )
+def test_drop_out_of_scope_values(document_scope, scopes, kept):
+    """drop_out_of_scope_values drops a value whose field's scopes leave out the
+    document's scope, with a WARNING. A field without scopes, or a document
+    without a scope, keeps its value."""
+    doc = _document_with_group(["field"], document_scope)
     # A field declaring no scopes has no entry.
-    scopes_by_field = (
-        {} if diagnosis_scopes is None else {"diagnosis": diagnosis_scopes}
-    )
+    field_scopes = {} if scopes is None else {"field": scopes}
 
-    logs = drop_out_of_scope_values(doc, scopes_by_field)
+    logs = drop_out_of_scope_values(doc, field_scopes)
 
-    assert doc.groups[0].values == ([diagnosis] if kept else [])
+    assert _group_field_ids(doc) == (["field"] if kept else [])
     assert logs == (
         []
         if kept
         else [
             StoredDocumentLog(
-                document_id="img-1",
-                field_id="diagnosis",
+                document_id=doc.id,
+                field_id="field",
                 severity="WARNING",
                 message="Value is ignored: the field is not indexed for scope "
-                "'non_clinical'.",
+                "'other_scope'.",
             )
         ]
     )
+
+
+def _document_with_group(field_ids, scope=None) -> ExtractedDocument:
+    """A document with one nested group item, holding a value of each field."""
+    return ExtractedDocument(
+        id="document",
+        scope=scope,
+        groups=[
+            OpenSearchGroup(
+                group="nested_group",
+                values=[_keyword(f, "value", "nested_group") for f in field_ids],
+            )
+        ],
+    )
+
+
+def _group_field_ids(doc: ExtractedDocument) -> list[str]:
+    return [value.field.id for value in doc.groups[0].values]
+
+
+@pytest.mark.parametrize(
+    ("field_ids", "kept"),
+    [
+        (["requires_field"], False),
+        (["required_field", "requires_field"], True),
+        # Any one of the required fields is enough.
+        (["other_required_field", "requires_field"], True),
+        # A field that requires nothing is kept.
+        (["other_field"], True),
+    ],
+)
+def test_drop_values_without_required(field_ids, kept):
+    """drop_values_without_required drops a value of a field whose item has none
+    of the fields it requires, with a WARNING. Other values are kept."""
+    required_fields = {"requires_field": {"required_field", "other_required_field"}}
+    doc = _document_with_group(field_ids)
+
+    logs = drop_values_without_required(doc, required_fields)
+
+    assert _group_field_ids(doc) == (field_ids if kept else [])
+    assert logs == (
+        []
+        if kept
+        else [
+            StoredDocumentLog(
+                document_id=doc.id,
+                field_id="requires_field",
+                severity="WARNING",
+                message="Value is ignored: none of the fields it requires has a value.",
+            )
+        ]
+    )
+
+
+def _nested_term(field_id, field_type, scopes=(), requires=None):
+    return OpenSearchBeaconFilteringTerm(
+        id=field_id,
+        type=field_type,
+        nested_group="nested_group",
+        scopes=list(scopes),
+        label=field_id,
+        description=field_id,
+        ontology=BeaconFilteringOntology(id="SCTID")
+        if field_type == "ontologyOrValue"
+        else None,
+        requires=requires,
+    )
+
+
+def test_indexed_field_ids():
+    """_indexed_field_ids gives an ontologyOrValue term a second field <id>_other for its free text."""
+    assert _indexed_field_ids(_nested_term("field", "keyword")) == {"field"}
+    assert _indexed_field_ids(_nested_term("field", "ontologyOrValue")) == {
+        "field",
+        "field_other",
+    }
+
+
+def test_load_service_requires_ontology_or_value():
+    """An ontologyOrValue field's free text, <id>_other, gets the field's scopes
+    and requires, and counts as the field when another field requires it."""
+    service = _load_service(
+        filtering_terms=[
+            _nested_term("required_field", "ontologyOrValue", ["scope", "other_scope"]),
+            _nested_term(
+                "requires_field",
+                "ontologyOrValue",
+                ["scope"],
+                requires=["required_field"],
+            ),
+        ],
+        filtering_scopes=(),
+    )
+
+    assert service._field_scopes == {
+        "required_field": {"scope", "other_scope"},
+        "required_field_other": {"scope", "other_scope"},
+        "requires_field": {"scope"},
+        "requires_field_other": {"scope"},
+    }
+    assert service._required_fields == {
+        "requires_field": {"required_field", "required_field_other"},
+        "requires_field_other": {"required_field", "required_field_other"},
+    }
 
 
 @pytest.mark.asyncio

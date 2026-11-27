@@ -133,8 +133,10 @@ by `delete-set <document_set>`, one document by `delete <document>`.
 item, which rejects a value belonging to another group). A field's indexed path is exactly `<nested_group>.<id>`,
 and a dot in either part is rejected. **Scope** partitions documents rather than filtering them, so it is indexed
 at the root under `SCOPE_FIELD`; a load drops a value of a field not declaring the document's scope, with a
-`WARNING`, before resolving any concept. **Extraction reaches no database** — what a load could not make sense of rides
-out on `logs` and becomes `document_log` rows, replaced on every reload.
+`WARNING`, before resolving any concept. A field declaring `requires` (`observation_type`) is indexed only together
+with one of the fields it lists, so after resolution it is dropped from an item left with none of them. **Extraction
+reaches no database** — what a load could not make sense of rides out on `logs` and becomes `document_log` rows,
+replaced on every reload.
 
 ### Bigpicture extraction (`api/bigpicture/extract/`)
 

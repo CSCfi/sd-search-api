@@ -98,3 +98,40 @@ def validate_filtering_scopes(
             f"'{source}': filtering terms reference unknown "
             f"scope(s) {sorted(unknown)}; defined scopes are {sorted(scope_ids)}."
         )
+    _validate_requires_scopes(filtering_terms, scope_ids, source)
+
+
+def _validate_requires_scopes(
+    filtering_terms: Sequence[BeaconFilteringTerm],
+    scope_ids: set[str],
+    source: str | Path,
+) -> None:
+    """Check the scopes of each field declaring requires.
+
+    Each scope of the field must also be a scope of a field it requires. For
+    example, observation_type requires diagnosis or finding. It may have the
+    scope clinical, because diagnosis has it. It may have the scope non_clinical,
+    because finding has it. It may not have any other scope. In a document of
+    another scope, a load would drop diagnosis and finding, and then
+    observation_type as well, since nothing it requires would be left.
+
+    :raises ConfigurationException: if a field has a scope none of the fields it
+        requires has.
+    """
+    # Each required field exists (checked by load_fields_config).
+    terms = {term.id: term for term in filtering_terms}
+    for term in filtering_terms:
+        if not term.requires:
+            continue
+        # A field declaring no scopes has every scope.
+        term_scopes = set(term.scopes) or scope_ids
+        required_scopes = {
+            scope
+            for field_id in term.requires
+            for scope in (terms[field_id].scopes or scope_ids)
+        }
+        if missing_scopes := term_scopes - required_scopes:
+            raise ConfigurationException(
+                f"'{source}': field '{term.id}' is indexed in scope(s) "
+                f"{sorted(missing_scopes)}, where none of the fields it requires is."
+            )

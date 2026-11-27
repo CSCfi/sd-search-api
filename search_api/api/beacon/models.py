@@ -258,6 +258,12 @@ class BeaconFilteringTerm(BaseModel):
             "within. Without a restriction values resolve against the whole ontology."
         ),
     )
+    # Excluded from API response (exclude) and OpenAPI schema (SkipJsonSchema).
+    requires: SkipJsonSchema[list[str] | None] = Field(
+        default=None,
+        exclude=True,
+        description="The field is indexed only together with one of these fields.",
+    )
     controlledValues: list[str] | None = None
 
     @property

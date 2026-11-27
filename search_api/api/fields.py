@@ -46,9 +46,32 @@ def load_fields_config(path: str | Path) -> FieldsConfig:
         raise ConfigurationException(f"Invalid config file '{path}'")
 
     try:
-        return FieldsConfig.model_validate(data)
+        config = FieldsConfig.model_validate(data)
     except ValidationError as e:
         raise ConfigurationException(_format_validation_error(path, e)) from e
+    _validate_requires(path, config)
+    return config
+
+
+def _validate_requires(path: Path, config: FieldsConfig) -> None:
+    """Check that each field a term requires is a filtering term in its nested group.
+
+    :raises ConfigurationException: if a term requires an invalid field.
+    """
+    terms = {term.id: term for term in config.filtering_terms}
+    for term in config.filtering_terms:
+        for field_id in term.requires or ():
+            required = terms.get(field_id)
+            if required is None or required.nested_group != term.nested_group:
+                raise ConfigurationException(
+                    f"'{path}': field '{term.id}' requires '{field_id}', which is "
+                    f"not a filtering term in nested_group '{term.nested_group}'."
+                )
+            if required.requires:
+                raise ConfigurationException(
+                    f"'{path}': field '{term.id}' requires '{field_id}', which "
+                    f"requires fields itself."
+                )
 
 
 def _format_validation_error(path: Path, error: ValidationError) -> str:

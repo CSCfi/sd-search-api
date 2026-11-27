@@ -213,6 +213,7 @@ class LoadService:
             for term in filtering_terms
             for indexed_id in _indexed_field_ids(term)
         }
+        # Each required field exists: load_fields_config checks it.
         self._required_fields = {
             indexed_id: {
                 required_indexed_id

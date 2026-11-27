@@ -229,6 +229,35 @@ def test_drop_values_without_required(field_ids, kept):
     )
 
 
+def test_drop_values_without_required_in_two_items():
+    """The document has two items. The first has required_field. The second has
+    other_field and requires_field. requires_field is dropped, because its own
+    item has no required_field. other_field and the first item are kept."""
+    doc = ExtractedDocument(
+        id="document",
+        groups=[
+            OpenSearchGroup(
+                group="nested_group",
+                values=[_keyword("required_field", "value", "nested_group")],
+            ),
+            OpenSearchGroup(
+                group="nested_group",
+                values=[
+                    _keyword("other_field", "value", "nested_group"),
+                    _keyword("requires_field", "value", "nested_group"),
+                ],
+            ),
+        ],
+    )
+
+    drop_values_without_required(doc, {"requires_field": {"required_field"}})
+
+    assert [[value.field.id for value in item.values] for item in doc.groups] == [
+        ["required_field"],
+        ["other_field"],
+    ]
+
+
 def _nested_term(field_id, field_type, scopes=(), requires=None):
     return OpenSearchBeaconFilteringTerm(
         id=field_id,
